@@ -5,7 +5,7 @@ import { runHF, HARTREE_EV } from './hf.js';
 import { hfGradient } from './gradient.js';
 import { optimizeGeometry } from './optimize.js';
 import { harmonicFrequencies, thermochemistry, ISOTOPE_MASS } from './vibrations.js';
-import { populationAnalysis, dipoleMoment, mp2Energy, orbitalSummary, orbitalComposition, electrostaticPotential, moCharacter } from './properties.js';
+import { populationAnalysis, dipoleMoment, mp2Energy, orbitalSummary, orbitalComposition, electrostaticPotential, moCharacter, cisExcitations } from './properties.js';
 import { connectivityFromGeometry } from './structure.js';
 import { inertia } from './symmetry.js';
 import { analyzeSymmetry } from './symmetry.js';
@@ -159,6 +159,11 @@ self.onmessage = (ev) => {
         progress((k + 1) / distances.length);
       });
       result = { points: out };
+    } else if (type === 'cis') {
+      if (!current) throw new Error('Nessun calcolo disponibile');
+      const r = cisExcitations(current, { nstates: ev.data.nstates ?? 12 });
+      if (r.error) throw new Error(r.error);
+      result = r;
     } else if (type === 'gradient') {
       if (!current) throw new Error('Nessun calcolo disponibile');
       result = { gradient: hfGradient(current) };

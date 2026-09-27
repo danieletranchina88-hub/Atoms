@@ -14,7 +14,7 @@ import { request, cancelAll } from '../chem/moleculeClient.js';
 import { marchingCubes } from '../render/marching.js';
 import { buildMolecule, dipoleArrow, espColor, chargeColor } from '../render/moleculeView.js';
 import { formatPm } from '../render/viewer.js';
-import { drawLewis, drawMOLevels, drawIR } from './chemCharts.js';
+import { drawLewis, drawMOLevels, drawIR, drawUV, drawPES, wavelengthColor } from './chemCharts.js';
 import { drawLineChart } from './charts.js';
 import { ELEMENTS } from '../physics/elements.js';
 
@@ -36,6 +36,7 @@ const M = {
   graph: null, analysis: null, atoms: null, basis: 'STO-3G', basisAuto: true,
   summary: null, freq: null, lib: null, scan: null,
   view: { overlay: 'model', mo: null, labels: 'formal', dipole: true, iso: 0.05, vib: null, chart2: 'ir' },
+  cis: null,
   status: '', busy: false, token: 0,
   cat: 'hydride',
   moRegions: [],
@@ -45,6 +46,12 @@ const M = {
 
 export function initMoleculeMode(v) {
   viewer = v;
+  $('spec-sel').addEventListener('change', (e) => {
+    M.view.chart2 = e.target.value;
+    if (M.view.chart2 === 'uv' && !M.cis && M.summary) computeCIS();
+    if (M.view.chart2 === 'scan' && !M.scan && M.atoms?.length === 2) { scanBond(); return; }
+    drawCharts();
+  });
   // selezione degli atomi con un clic (senza trascinamento) nel modello 3D
   const canvas = viewer.renderer.domElement;
   let down = null;
@@ -163,6 +170,7 @@ function loadSmiles(smiles, { multiplicity, lib = null } = {}) {
     : null;
   M.summary = null;
   M.scan = null;
+  M.cis = null;
   M.view.mo = null;
   M.view.vib = null;
   if (M.view.overlay !== 'model' && M.view.overlay !== 'charges') M.view.overlay = 'model';
@@ -266,6 +274,21 @@ async function scanBond() {
     M.status = `Scansione non riuscita: ${e.message}`;
     renderSide();
   }
+}
+
+async function computeCIS() {
+  const token = M.token;
+  M.cis = { pending: true };
+  drawCharts();
+  try {
+    const r = await request('cis', { nstates: 12 });
+    if (token !== M.token) return;
+    M.cis = r;
+  } catch (e) {
+    if (token !== M.token) return;
+    M.cis = { error: e.message };
+  }
+  drawCharts();
 }
 
 function setBusy(text) {
@@ -566,7 +589,8 @@ async function render3D() {
   let note = '';
   $('viewport-title').innerHTML = `${title}<small>${sub}</small>`;
 
-  if (S && (M.view.overlay === 'mo' || M.view.overlay === 'density' || M.view.overlay === 'esp')) {
+  // durante un calcolo lungo (ottimizzazione, hessiana) le superfici si ricalcolano solo alla fine
+  if (S && !M.busy && (M.view.overlay === 'mo' || M.view.overlay === 'density' || M.view.overlay === 'esp')) {
     const N = M.view.overlay === 'esp' ? 56 : 60;
     const half = M.view.overlay === 'esp' ? ext + 1.5 : ext;
     try {
@@ -695,9 +719,15 @@ function drawCharts() {
     $('radial-note').textContent = '';
   }
 
-  // spettro IR o curva di dissociazione
+  // spettri: IR, UV-visibile, fotoelettronico, curva di dissociazione
+  $('spec-sel').value = M.view.chart2;
+  $('spec-sel').querySelector('option[value="scan"]').disabled = M.atoms.length !== 2;
   if (M.view.chart2 === 'scan' && M.scan) {
     drawScan();
+  } else if (M.view.chart2 === 'uv') {
+    drawUVChart();
+  } else if (M.view.chart2 === 'pes' && S) {
+    drawPESChart();
   } else if (M.freq) {
     const exp = M.entry?.smiles === M.smiles ? M.entry.exp?.freq ?? [] : [];
     drawIR($('chart-levels'), { modes: M.freq.modes, scale: FREQ_SCALE[M.basis] ?? 0.9, exp, selected: M.view.vib });
@@ -710,6 +740,45 @@ function drawCharts() {
     $('levels-title').textContent = 'Spettro infrarosso';
     $('levels-note').textContent = 'Calcola le vibrazioni per ottenere lo spettro IR.';
   }
+}
+
+function drawUVChart() {
+  const c = $('chart-levels');
+  $('levels-title').textContent = 'Spettro UV-visibile (CIS)';
+  if (!M.cis || M.cis.pending) {
+    c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    $('levels-note').textContent = M.summary ? 'Calcolo degli stati eccitati in corso…' : '';
+    if (!M.cis && M.summary) computeCIS();
+    return;
+  }
+  if (M.cis.error) {
+    c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    $('levels-note').textContent = `Non disponibile: ${M.cis.error}.`;
+    return;
+  }
+  drawUV(c, { states: M.cis.states });
+  const strongest = [...M.cis.states].sort((a, b) => b.f - a.f)[0];
+  const first = M.cis.states[0];
+  const visible = M.cis.states.filter(s => s.nm >= 380 && s.nm <= 750 && s.f > 0.01);
+  const lbl = (k) => `${k + 1}`;
+  $('levels-note').innerHTML = `Primo stato eccitato: ${nf(first.eV, 2)} eV (${nf(first.nm, 0)} nm), transizione OM ${lbl(first.from)} → ${lbl(first.to)}, f = ${nf(first.f, 3)}. Più intenso: ${nf(strongest.nm, 0)} nm, f = ${nf(strongest.f, 3)}. ${visible.length ? `Assorbe nel visibile <i class="swatch" style="background:${wavelengthColor(visible[0].nm)}"></i>: la molecola appare colorata.` : 'Nessun assorbimento nel visibile: la molecola è incolore.'} CIS sovrastima le energie di eccitazione di circa 1 eV.`;
+}
+
+function drawPESChart() {
+  const S = M.summary;
+  const levels = [];
+  const add = (eps, nocc, weight) => {
+    for (let k = 0; k < nocc; k++) {
+      const ie = -eps[k] * HARTREE_EV;
+      const g = levels.find(l => Math.abs(l.ie - ie) < 0.02);
+      if (g) g.count += weight; else levels.push({ ie, count: weight, label: `${k + 1}` });
+    }
+  };
+  if (S.unrestricted) { add(S.epsA, S.nalpha, 0.5); add(S.epsB, S.nbeta, 0.5); } else add(S.epsA, S.nalpha, 1);
+  levels.sort((a, b) => a.ie - b.ie);
+  drawPES($('chart-levels'), { levels });
+  $('levels-title').textContent = 'Spettro fotoelettronico (Koopmans)';
+  $('levels-note').textContent = `Teorema di Koopmans: l'energia per strappare un elettrone da un orbitale è circa −ε. Ogni banda corrisponde a un orbitale molecolare occupato (numeri come nella tabella); l'altezza cresce con la degenerazione. Prima ionizzazione: ${nf(S.koopmansIE, 2)} eV.`;
 }
 
 function drawScan() {

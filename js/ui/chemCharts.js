@@ -691,3 +691,126 @@ function fmtNum(v) {
 function sup(n) {
   return String(n).split('').map(c => ({ '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' }[c] ?? c)).join('');
 }
+
+/** Colore RGB approssimato di una lunghezza d'onda visibile (380–750 nm). */
+export function wavelengthColor(nm) {
+  let r = 0, g = 0, b = 0;
+  if (nm >= 380 && nm < 440) { r = -(nm - 440) / 60; b = 1; }
+  else if (nm < 490) { g = (nm - 440) / 50; b = 1; }
+  else if (nm < 510) { g = 1; b = -(nm - 510) / 20; }
+  else if (nm < 580) { r = (nm - 510) / 70; g = 1; }
+  else if (nm < 645) { r = 1; g = -(nm - 645) / 65; }
+  else if (nm <= 750) { r = 1; }
+  return `rgb(${Math.round(255 * r)}, ${Math.round(255 * g)}, ${Math.round(255 * b)})`;
+}
+
+/** Spettro di assorbimento UV-visibile: bande gaussiane (σ = 0,25 eV) in funzione di λ. */
+export function drawUV(canvas, { states }) {
+  const { ctx, w, h } = setup(canvas);
+  const ink = cssVar('--text');
+  const muted = cssVar('--muted');
+  const accent = cssVar('--accent');
+  const grid = cssVar('--chart-grid');
+  const pad = { l: 40, r: 12, t: 16, b: 32 };
+  const x0 = 80, x1 = 800;
+  const X = (nm) => pad.l + (nm - x0) / (x1 - x0) * (w - pad.l - pad.r);
+  const fmax = Math.max(0.01, ...states.map(s => s.f));
+  const Y = (v) => pad.t + (1 - v / (fmax * 1.15)) * (h - pad.t - pad.b);
+  // banda del visibile
+  for (let nm = 380; nm <= 750; nm += 2) {
+    ctx.fillStyle = wavelengthColor(nm);
+    ctx.globalAlpha = 0.18;
+    ctx.fillRect(X(nm), pad.t, X(nm + 2) - X(nm) + 0.5, h - pad.t - pad.b);
+  }
+  ctx.globalAlpha = 1;
+  ctx.font = `11px ${MONO}`;
+  ctx.fillStyle = muted;
+  ctx.strokeStyle = grid;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let nm = 100; nm <= 800; nm += 100) {
+    const x = X(nm);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+    ctx.fillText(String(nm), x, h - pad.b + 4);
+  }
+  ctx.font = `11px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('λ (nm)', w - pad.r, h - 2);
+  ctx.textAlign = 'left';
+  ctx.fillText('UV', X(120), pad.t + 14);
+  ctx.fillText('visibile', X(390), pad.t + 14);
+  // bande (larghezza costante in energia)
+  const sigma = 0.25;
+  ctx.beginPath();
+  for (let px = pad.l; px <= w - pad.r; px++) {
+    const nm = x0 + (px - pad.l) / (w - pad.l - pad.r) * (x1 - x0);
+    const E = 1239.84 / nm;
+    let a = 0;
+    for (const s of states) a += s.f * Math.exp(-((E - s.eV) ** 2) / (2 * sigma * sigma));
+    const y = Y(a);
+    if (px === pad.l) ctx.moveTo(px, y); else ctx.lineTo(px, y);
+  }
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+  for (const s of states) {
+    if (s.nm < x0 || s.nm > x1) continue;
+    const x = X(s.nm);
+    ctx.strokeStyle = s.f > 0.001 ? ink : muted;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(x, Y(0)); ctx.lineTo(x, Y(Math.max(s.f, fmax * 0.02))); ctx.stroke();
+  }
+}
+
+/** Spettro fotoelettronico secondo Koopmans: una riga per ogni orbitale occupato, a IE = −ε. */
+export function drawPES(canvas, { levels, maxIE = 45 }) {
+  const { ctx, w, h } = setup(canvas);
+  const ink = cssVar('--text');
+  const muted = cssVar('--muted');
+  const accent = cssVar('--accent');
+  const grid = cssVar('--chart-grid');
+  const pad = { l: 40, r: 12, t: 14, b: 32 };
+  const vis = levels.filter(l => l.ie <= maxIE);
+  const lo = Math.max(0, Math.floor(Math.min(...vis.map(l => l.ie)) - 3));
+  const X = (e) => pad.l + (e - lo) / (maxIE - lo) * (w - pad.l - pad.r);
+  const nmax = Math.max(...vis.map(l => l.count));
+  const Y = (v) => pad.t + (1 - v / (nmax * 1.25)) * (h - pad.t - pad.b);
+  ctx.font = `11px ${MONO}`;
+  ctx.fillStyle = muted;
+  ctx.strokeStyle = grid;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let e = Math.ceil(lo / 5) * 5; e <= maxIE; e += 5) {
+    const x = X(e);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+    ctx.fillText(String(e), x, h - pad.b + 4);
+  }
+  ctx.font = `11px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('energia di ionizzazione (eV)', w - pad.r, h - 2);
+  // bande gaussiane (larghezza 0,3 eV), area proporzionale al numero di orbitali degeneri
+  ctx.beginPath();
+  for (let px = pad.l; px <= w - pad.r; px++) {
+    const e = lo + (px - pad.l) / (w - pad.l - pad.r) * (maxIE - lo);
+    let a = 0;
+    for (const l of vis) a += l.count * Math.exp(-((e - l.ie) ** 2) / (2 * 0.3 * 0.3));
+    const y = Y(a);
+    if (px === pad.l) ctx.moveTo(px, y); else ctx.lineTo(px, y);
+  }
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+  ctx.fillStyle = ink;
+  ctx.font = `10.5px ${MONO}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  let lastX = -1e9;
+  for (const l of vis) {
+    const x = X(l.ie);
+    if (Math.abs(x - lastX) < 26) continue;
+    lastX = x;
+    ctx.fillText(l.label, x, Y(l.count) - 3);
+  }
+}

@@ -179,6 +179,20 @@ function ensure(buf, size) {
   return buf.length >= size ? buf : new Float64Array(Math.max(size, 2 * buf.length));
 }
 
+// indice compatto delle funzioni di Hermite (t, u, v) con t + u + v ≤ L:
+// posizione = off[t·(L+1) + u] + v, con i v contigui
+const tetraCache = new Map();
+function tetra(L) {
+  let tb = tetraCache.get(L);
+  if (tb) return tb;
+  const off = new Int32Array((L + 1) * (L + 1));
+  let k = 0;
+  for (let t = 0; t <= L; t++) for (let u = 0; u <= L - t; u++) { off[t * (L + 1) + u] = k; k += L - t - u + 1; }
+  tb = { off, size: k, L };
+  tetraCache.set(L, tb);
+  return tb;
+}
+
 function quartetGradient(bra, ket, samePair, n, Pt, Pa, Pb, grad, PI52) {
   const { sa, sb } = bra;
   const { sa: sc, sb: sd } = ket;
@@ -206,32 +220,35 @@ function quartetGradient(bra, ket, samePair, n, Pt, Pa, Pb, grad, PI52) {
       }
     }
   }
-  if (gmax < 1e-14) return;
+  if (gmax < 1e-13) return;
   const Lab = sa.l + sb.l;
   const Lcd = sc.l + sd.l;
   const L = Lab + Lcd + 1;
   const D = L + 1;
   const HB = Lab + 1;
-  const S1 = HB + 1;
-  const nH = S1 * S1 * S1;
+  const T0 = tetra(HB);           // indice di Hermite lato bra, fino a Lab + 1
+  const nH = T0.size;
+  const nH1 = tetra(Lab).size;    // le funzioni con t+u+v ≤ Lab sono le prime? no: si usa lo stesso indice T0
+  void nH1;
   BUF_G0 = ensure(BUF_G0, nk * nH);
   BUF_GC = ensure(BUF_GC, 3 * nk * nH);
   const G0 = BUF_G0, GC = BUF_GC, H0 = BUF_H0, HC = BUF_HC;
   const lbB = bra.lb, TB = bra.T, lbK = ket.lb, TK = ket.T;
   const atA = sa.atom, atB = sb.atom, atC = sc.atom, atD = sd.atom;
-  const acc = new Float64Array(9); // dA, dB, dC per x, y, z
-  // indici (t,u,v) con t+u+v ≤ m nel cubo di lato S1
-  const hLists = [];
-  for (let m = 0; m <= HB; m++) {
+  const acc = new Float64Array(9);
+  // posizioni (nel layout T0) delle funzioni con t+u+v ≤ Lab, usate per il ket derivato
+  let low = LOW_CACHE.get(HB);
+  if (!low) {
     const list = [];
-    for (let t = 0; t <= m; t++) for (let u = 0; u <= m - t; u++) for (let v = 0; v <= m - t - u; v++) list.push((t * S1 + u) * S1 + v);
-    hLists.push(Int32Array.from(list));
+    for (let t = 0; t <= HB - 1; t++) for (let u = 0; u <= HB - 1 - t; u++) for (let v = 0; v <= HB - 1 - t - u; v++) list.push(T0.off[t * (HB + 1) + u] + v);
+    low = Int32Array.from(list);
+    LOW_CACHE.set(HB, low);
   }
 
   for (const pb of bra.prims) {
-    if (pb.K < 1e-18) continue;
+    if (pb.K < 1e-17) continue;
     for (const pk of ket.prims) {
-      if (pb.K * pk.K * gmax < 1e-16) continue;
+      if (pb.K * pk.K * gmax < 1e-15) continue;
       const p = pb.p;
       const q = pk.p;
       const alpha = p * q / (p + q);
@@ -245,14 +262,14 @@ function quartetGradient(bra, ket, samePair, n, Pt, Pa, Pb, grad, PI52) {
         const cc = sc.comps[ic];
         for (let id = 0; id < nd; id++, kc++) {
           const cd = sd.comps[id];
-          addKet(G0, kc * nH, pk, lbK, TK, cc[0], cc[1], cc[2], cd, R, D, S1, Lab + 1, 1);
+          addKet(G0, kc * nH, pk, lbK, TK, cc[0], cc[1], cc[2], cd, R, D, T0, HB, 1);
           for (let dir = 0; dir < 3; dir++) {
             const base = (dir * nk + kc) * nH;
             const u0 = cc[0] + (dir === 0 ? 1 : 0), u1 = cc[1] + (dir === 1 ? 1 : 0), u2 = cc[2] + (dir === 2 ? 1 : 0);
-            addKet(GC, base, pk, lbK, TK, u0, u1, u2, cd, R, D, S1, Lab, c2);
+            addKet(GC, base, pk, lbK, TK, u0, u1, u2, cd, R, D, T0, HB - 1, c2);
             if (cc[dir] > 0) {
               const d0 = cc[0] - (dir === 0 ? 1 : 0), d1 = cc[1] - (dir === 1 ? 1 : 0), d2 = cc[2] - (dir === 2 ? 1 : 0);
-              addKet(GC, base, pk, lbK, TK, d0, d1, d2, cd, R, D, S1, Lab, -cc[dir]);
+              addKet(GC, base, pk, lbK, TK, d0, d1, d2, cd, R, D, T0, HB - 1, -cc[dir]);
             }
           }
         }
@@ -266,27 +283,26 @@ function quartetGradient(bra, ket, samePair, n, Pt, Pa, Pb, grad, PI52) {
           H0.fill(0, 0, nH);
           HC.fill(0, 0, 3 * nH);
           let any = false;
-          const hl0 = hLists[HB], hl1 = hLists[Lab];
           for (let k = 0; k < nk; k++) {
             const g = Gam[gbase + k];
             if (g === 0) continue;
             any = true;
             const o0 = k * nH;
-            for (let q = 0; q < hl0.length; q++) { const h = hl0[q]; H0[h] += g * G0[o0 + h]; }
+            for (let h = 0; h < nH; h++) H0[h] += g * G0[o0 + h];
             for (let dir = 0; dir < 3; dir++) {
               const oc = (dir * nk + k) * nH;
               const oh = dir * nH;
-              for (let q = 0; q < hl1.length; q++) { const h = hl1[q]; HC[oh + h] += g * GC[oc + h]; }
+              for (let q2 = 0; q2 < low.length; q2++) { const h = low[q2]; HC[oh + h] += g * GC[oc + h]; }
             }
           }
           if (!any) continue;
           for (let dir = 0; dir < 3; dir++) {
             const ex = dir === 0 ? 1 : 0, ey = dir === 1 ? 1 : 0, ez = dir === 2 ? 1 : 0;
-            let dA = 2 * pb.a * braSum(pb, lbB, TB, ca[0] + ex, ca[1] + ey, ca[2] + ez, cb[0], cb[1], cb[2], H0, 0, S1);
-            if (ca[dir] > 0) dA -= ca[dir] * braSum(pb, lbB, TB, ca[0] - ex, ca[1] - ey, ca[2] - ez, cb[0], cb[1], cb[2], H0, 0, S1);
-            let dB = 2 * pb.b * braSum(pb, lbB, TB, ca[0], ca[1], ca[2], cb[0] + ex, cb[1] + ey, cb[2] + ez, H0, 0, S1);
-            if (cb[dir] > 0) dB -= cb[dir] * braSum(pb, lbB, TB, ca[0], ca[1], ca[2], cb[0] - ex, cb[1] - ey, cb[2] - ez, H0, 0, S1);
-            const dC = braSum(pb, lbB, TB, ca[0], ca[1], ca[2], cb[0], cb[1], cb[2], HC, dir * nH, S1);
+            let dA = 2 * pb.a * braSum(pb, lbB, TB, ca[0] + ex, ca[1] + ey, ca[2] + ez, cb[0], cb[1], cb[2], H0, 0, T0, HB);
+            if (ca[dir] > 0) dA -= ca[dir] * braSum(pb, lbB, TB, ca[0] - ex, ca[1] - ey, ca[2] - ez, cb[0], cb[1], cb[2], H0, 0, T0, HB);
+            let dB = 2 * pb.b * braSum(pb, lbB, TB, ca[0], ca[1], ca[2], cb[0] + ex, cb[1] + ey, cb[2] + ez, H0, 0, T0, HB);
+            if (cb[dir] > 0) dB -= cb[dir] * braSum(pb, lbB, TB, ca[0], ca[1], ca[2], cb[0] - ex, cb[1] - ey, cb[2] - ez, H0, 0, T0, HB);
+            const dC = braSum(pb, lbB, TB, ca[0], ca[1], ca[2], cb[0], cb[1], cb[2], HC, dir * nH, T0, HB);
             acc[dir] += dA;
             acc[3 + dir] += dB;
             acc[6 + dir] += dC;
@@ -304,11 +320,14 @@ function quartetGradient(bra, ket, samePair, n, Pt, Pa, Pb, grad, PI52) {
   }
 }
 
-/** Σ_tuv E^{ab}_t E_u E_v H[off + h(t,u,v)] */
-function braSum(pb, lb, T, a0, a1, a2, b0, b1, b2, H, off, S1) {
+const LOW_CACHE = new Map();
+
+/** Σ_tuv E^{ab}_t E_u E_v H[off + idx(t,u,v)] */
+function braSum(pb, lb, T, a0, a1, a2, b0, b1, b2, H, off, T0, HB) {
   let s = 0;
   const Ex = pb.Ex, Ey = pb.Ey, Ez = pb.Ez;
   const bx = (a0 * (lb + 1) + b0) * T, by = (a1 * (lb + 1) + b1) * T, bz = (a2 * (lb + 1) + b2) * T;
+  const toff = T0.off;
   for (let t = 0; t <= a0 + b0; t++) {
     const ex = Ex[bx + t];
     if (ex === 0) continue;
@@ -316,17 +335,19 @@ function braSum(pb, lb, T, a0, a1, a2, b0, b1, b2, H, off, S1) {
       const ey = Ey[by + u];
       if (ey === 0) continue;
       const exy = ex * ey;
-      const row = off + (t * S1 + u) * S1;
+      const row = off + toff[t * (HB + 1) + u];
       for (let v = 0; v <= a2 + b2; v++) s += exy * Ez[bz + v] * H[row + v];
     }
   }
   return s;
 }
 
-/** G[base + h(t,u,v)] += w Σ_τνφ (−1)^{τ+ν+φ} E^{cd} R_{t+τ,u+ν,v+φ}  per t+u+v ≤ tmax */
-function addKet(G, base, pk, lb, T, c0, c1, c2, cd, R, D, S1, tmax, w) {
+/** G[base + idx(t,u,v)] += w Σ_τνφ (−1)^{τ+ν+φ} E^{cd} R_{t+τ,u+ν,v+φ}  per t+u+v ≤ tmax */
+function addKet(G, base, pk, lb, T, c0, c1, c2, cd, R, D, T0, tmax, w) {
   const Ex = pk.Ex, Ey = pk.Ey, Ez = pk.Ez;
   const bx = (c0 * (lb + 1) + cd[0]) * T, by = (c1 * (lb + 1) + cd[1]) * T, bz = (c2 * (lb + 1) + cd[2]) * T;
+  const HB = T0.L;
+  const toff = T0.off;
   for (let tau = 0; tau <= c0 + cd[0]; tau++) {
     const ex = Ex[bx + tau];
     if (ex === 0) continue;
@@ -340,8 +361,9 @@ function addKet(G, base, pk, lb, T, c0, c1, c2, cd, R, D, S1, tmax, w) {
         for (let t = 0; t <= tmax; t++) {
           for (let u = 0; u <= tmax - t; u++) {
             const rowR = ((t + tau) * D + (u + nu)) * D + phi;
-            const rowG = base + (t * S1 + u) * S1;
-            for (let v = 0; v <= tmax - t - u; v++) G[rowG + v] += e * R[rowR + v];
+            const rowG = base + toff[t * (HB + 1) + u];
+            const vmax = tmax - t - u;
+            for (let v = 0; v <= vmax; v++) G[rowG + v] += e * R[rowR + v];
           }
         }
       }

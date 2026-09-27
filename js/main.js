@@ -299,20 +299,20 @@ function renderElementCard() {
     <p class="config-note">${exc ? '<b>Eccezione alla regola di Madelung</b> (configurazione sperimentale).' : 'Configurazione dello stato fondamentale.'}</p>
     <dl class="facts">
       <dt>Massa atomica</dt><dd>${el.mass} u</dd>
-      <dt>Elettronegatività (Pauling)</dt><dd>${PAULING[el.Z] !== null && PAULING[el.Z] !== undefined ? nf(PAULING[el.Z]) : '—'}</dd>
-      ${ALLEN[el.Z] ? `<dt>Elettronegatività (Allen)</dt><dd>${nf(ALLEN[el.Z], 3)}</dd>` : ''}
+      <dt>χ di Pauling</dt><dd>${PAULING[el.Z] !== null && PAULING[el.Z] !== undefined ? nf(PAULING[el.Z]) : '—'}</dd>
+      ${ALLEN[el.Z] ? `<dt>χ di Allen</dt><dd>${nf(ALLEN[el.Z], 3)}</dd>` : ''}
       ${ELECTRON_AFFINITY[el.Z] !== undefined ? `<dt>Affinità elettronica</dt><dd>${ELECTRON_AFFINITY[el.Z] > 0 ? `${nf(ELECTRON_AFFINITY[el.Z], 3)} eV` : 'anione instabile'}</dd>` : ''}
-      <dt>Stati di ossidazione comuni</dt><dd>${(OXIDATION_STATES[el.Z] ?? []).map(v => (v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '0')).join(', ') || '—'}</dd>
+      <dt>Stati di ossidazione</dt><dd>${(OXIDATION_STATES[el.Z] ?? []).map(v => (v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '0')).join(', ') || '—'}</dd>
       <dt>Termine di Hund</dt><dd class="term">${termHTML}</dd>
       <dt>Elettroni spaiati</dt><dd>${t.unpaired}</dd>
       <div class="sep"></div>
-      <dt>Ionizzazione, calcolo</dt><dd>${nf(ieCalc)} eV</dd>
-      <dt>Ionizzazione, misura</dt><dd>${ieExp ? `${nf(ieExp)} eV` : 'non misurata'}</dd>
+      <dt>Ionizzazione calc.</dt><dd>${nf(ieCalc)} eV</dd>
+      <dt>Ionizzazione sper.</dt><dd>${ieExp ? `${nf(ieExp)} eV` : 'non misurata'}</dd>
       ${ieExp ? `<dt>Scarto</dt><dd>${ieDelta} eV</dd>` : ''}
       <dt>Elettrone rimosso</dt><dd>${subshellLabel(from.n, from.l)}</dd>
       <div class="sep"></div>
-      <dt>Orbitale più esterno</dt><dd>${valence.label}, ${eV(valence.e)}</dd>
-      <dt>Raggio (90% carica)</dt><dd>${pm(atom.r90)}</dd>
+      <dt>Orbitale esterno</dt><dd>${valence.label}, ${eV(valence.e)}</dd>
+      <dt>Raggio (90% e⁻)</dt><dd>${pm(atom.r90)}</dd>
       <dt>Energia totale</dt><dd>${nfp(atom.energy.total, 7)} Ha</dd>
       <dt>Iterazioni SCF</dt><dd>${atom.iterations} · ${atom.elapsed} ms</dd>
     </dl>`;

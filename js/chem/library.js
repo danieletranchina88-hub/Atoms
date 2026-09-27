@@ -113,6 +113,7 @@ export const MOLECULES = [
   { id: 'NO', name: 'Monossido di azoto', smiles: '[N]=O', cat: 'radical', exp: { r: { 'N-O': 1.151 }, dipole: 0.16, freq: [1876] } },
   { id: 'NO2', name: 'Diossido di azoto', smiles: '[O][N]=O', cat: 'radical', exp: { r: { 'N-O': 1.194 }, angle: { 'O-N-O': 134.1 }, dipole: 0.32 } },
   { id: 'CH3', formula: 'CH₃', name: 'Radicale metile', smiles: '[CH3]', cat: 'radical', exp: { r: { 'C-H': 1.079 }, angle: { 'H-C-H': 120 } } },
+  { id: 'Hatom', name: 'Atomo di idrogeno', smiles: '[H]', multiplicity: 2, cat: 'radical', formula: 'H•', exp: {} },
   { id: 'OH', formula: 'OH', name: 'Radicale ossidrile', smiles: '[OH]', cat: 'radical', exp: { r: { 'H-O': 0.970 }, dipole: 1.66 } },
 ];
 

@@ -25,7 +25,7 @@
       <span class="brand-mark" aria-hidden="true">ψ</span>
       <div>
         <h1>Atlante Orbitale</h1>
-        <p class="brand-sub">Orbitali atomici calcolati con la meccanica quantistica, per tutti i 118 elementi</p>
+        <p class="brand-sub">Atomi, molecole e reazioni calcolati con la meccanica quantistica</p>
       </div>
     </div>
     <nav class="modes" role="tablist" aria-label="Modalità">
@@ -99,7 +99,14 @@
       <p class="chart-note" id="radial-note"></p>
     </figure>
     <figure class="chart">
-      <figcaption><span id="levels-title">Livelli energetici calcolati</span></figcaption>
+      <figcaption><span id="levels-title">Livelli energetici calcolati</span>
+        <select id="spec-sel" class="mol-only" aria-label="Spettro">
+          <option value="ir">IR</option>
+          <option value="uv">UV-visibile (CIS)</option>
+          <option value="pes">Fotoelettronico</option>
+          <option value="scan">Dissociazione</option>
+        </select>
+      </figcaption>
       <canvas id="chart-levels" aria-label="Diagramma dei livelli energetici"></canvas>
       <p class="chart-note" id="levels-note"></p>
     </figure>
@@ -178,8 +185,20 @@
         <p>Il numero di simmetria σ viene dal gruppo puntuale, riconosciuto automaticamente dagli elementi di simmetria della molecola.</p>
       </article>
       <article>
+        <h3>9 · Cinetica: teoria dello stato di transizione</h3>
+        <p>Lo stato di transizione è un punto di sella della superficie di energia potenziale: un massimo lungo la coordinata di reazione e un minimo in tutte le altre direzioni. Ha esattamente una frequenza immaginaria. Si trova con il metodo partitioned-RFO di Baker; la costante di velocità viene dall'equazione di Eyring:</p>
+        <p class="eq">k = κ (k<sub>B</sub>T/h) e<sup>−ΔG‡/RT</sup>,&nbsp;&nbsp; κ = 1 + (hν‡/k<sub>B</sub>T)²/24</p>
+        <p>κ è la correzione di Wigner per l'effetto tunnel, importante quando si sposta un atomo di idrogeno.</p>
+      </article>
+      <article>
+        <h3>10 · Laboratorio: le leggi della chimica fisica</h3>
+        <p>Gas reali con l'equazione di van der Waals e la costruzione di Maxwell. pH esatto dal bilancio di carica per acidi mono- e poliprotici. Pile galvaniche con l'equazione di Nernst. Leggi cinetiche integrate e reazioni consecutive.</p>
+        <p class="eq">(P + a/V²)(V − b) = RT,&nbsp;&nbsp; E = E° − (RT/nF) ln Q</p>
+        <p>Ogni curva è calcolata punto per punto dalle equazioni, senza formule approssimate dei casi limite.</p>
+      </article>
+      <article>
         <h3>Limiti del modello</h3>
-        <p>Il calcolo non è relativistico e usa occupazioni mediate sferica­mente senza polarizzazione di spin. Per gli elementi pesanti (dal 6° periodo) gli effetti relativistici contraggono gli orbitali s e p<sub>1/2</sub>: per esempio l'energia di ionizzazione calcolata per l'oro è 7,6 eV, quella misurata 9,2 eV. Le forme e l'ordine dei livelli restano corretti. Per gli elementi oltre il 103 le configurazioni sono previsioni teoriche.</p>
+        <p>Gli atomi sono calcolati senza relatività e senza polarizzazione di spin: per l'oro l'energia di ionizzazione calcolata è 7,6 eV contro 9,2 eV misurati. Hartree–Fock trascura la correlazione elettronica; MP2 ne recupera gran parte, ma con basi piccole restano errori di decine di kJ/mol. Le molecole sono isolate, in fase gassosa, e le basi arrivano fino al kripton. Le vibrazioni sono armoniche.</p>
       </article>
       <article>
         <h3>Regole di Slater e di Hund</h3>

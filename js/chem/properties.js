@@ -1,6 +1,6 @@
 // Proprietà molecolari dalla funzione d'onda Hartree–Fock.
 
-import { matmul, symFunction } from './linalg.js';
+import { matmul, symFunction, eigh } from './linalg.js';
 import { AU_TO_DEBYE, HARTREE_EV } from './hf.js';
 import { shellPair, hermiteR } from './integrals.js';
 
@@ -329,4 +329,67 @@ export function moCharacter(res, k, spin, bonds, geom) {
     else type = wAlong > 0.8 * (wAlong + wPerp + wS) ? 'π' : 'σ';
   }
   return { overlapPopulation: op, bonding: op > 0.04 ? 'legante' : op < -0.04 ? 'antilegante' : 'non legante', type };
+}
+
+/**
+ * Stati eccitati di singoletto con CIS (interazione di configurazioni con eccitazioni singole),
+ * equivalente all'approssimazione di Tamm–Dancoff del TDHF:
+ *   A_{ia,jb} = δ_ij δ_ab (ε_a − ε_i) + 2(ia|jb) − (ij|ab)
+ * Forza dell'oscillatore: f = (2/3) ΔE |⟨0|μ|S⟩|²,  ⟨0|μ|S⟩ = √2 Σ_ia X_ia ⟨i|μ|a⟩
+ */
+export function cisExcitations(res, { nstates = 10, maxDim = 900 } = {}) {
+  if (res.unrestricted) return { error: 'CIS disponibile solo per molecole a shell chiusa' };
+  const { n, eri, Ca, epsA, nalpha, one } = res;
+  let ncore = 0;
+  for (const a of res.atoms) ncore += a.Z > 18 ? 9 : a.Z > 10 ? 5 : a.Z > 2 ? 1 : 0;
+  ncore = Math.min(ncore, nalpha - 1);
+  const occ = [];
+  for (let i = ncore; i < nalpha; i++) occ.push(i);
+  const vir = [];
+  for (let a = nalpha; a < n; a++) vir.push(a);
+  const no = occ.length, nv = vir.length, dim = no * nv;
+  if (dim > maxDim) return { error: `troppe configurazioni (${dim}): usa una base più piccola` };
+  const full = fullERI(eri, n);
+  const iajb = transform(full, n, Ca, occ, vir, Ca, occ, vir);   // (ia|jb)
+  const ijab = transform(full, n, Ca, occ, occ, Ca, vir, vir);   // (ij|ab)
+  const A = new Float64Array(dim * dim);
+  for (let i = 0; i < no; i++) for (let a = 0; a < nv; a++) {
+    const r = i * nv + a;
+    for (let j = 0; j < no; j++) for (let b = 0; b < nv; b++) {
+      const c = j * nv + b;
+      let v = 2 * iajb[((i * nv + a) * no + j) * nv + b] - ijab[((i * no + j) * nv + a) * nv + b];
+      if (r === c) v += epsA[vir[a]] - epsA[occ[i]];
+      A[r * dim + c] = v;
+    }
+  }
+  const { values, vectors } = eigh(A, dim);
+  // momenti di dipolo di transizione ⟨i|μ|a⟩ nella base degli OM
+  const muMO = one.dipole.map(Dk => {
+    const out = new Float64Array(no * nv);
+    for (let i = 0; i < no; i++) for (let a = 0; a < nv; a++) {
+      let s = 0;
+      for (let p = 0; p < n; p++) {
+        const cp = Ca[p * n + occ[i]];
+        if (cp === 0) continue;
+        for (let q = 0; q < n; q++) s += cp * Dk[p * n + q] * Ca[q * n + vir[a]];
+      }
+      out[i * nv + a] = s;
+    }
+    return out;
+  });
+  const states = [];
+  for (let k = 0; k < Math.min(nstates, dim); k++) {
+    const E = values[k];
+    const tdm = [0, 1, 2].map(c => {
+      let s = 0;
+      for (let r = 0; r < dim; r++) s += vectors[r * dim + k] * muMO[c][r];
+      return Math.SQRT2 * s;
+    });
+    const f = 2 / 3 * E * (tdm[0] ** 2 + tdm[1] ** 2 + tdm[2] ** 2);
+    // configurazione dominante
+    let best = 0, br = 0;
+    for (let r = 0; r < dim; r++) { const w = vectors[r * dim + k] ** 2; if (w > best) { best = w; br = r; } }
+    states.push({ E, eV: E * HARTREE_EV, nm: 1239.841984 / (E * HARTREE_EV), f, from: occ[Math.floor(br / nv)], to: vir[br % nv], weight: best });
+  }
+  return { states, dim };
 }

@@ -264,7 +264,7 @@ button, select, input { font: inherit; color: inherit; }
 .config-note { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
 .config-note b { color: var(--accent); font-weight: 600; }
 
-.facts { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; font-size: 13px; }
+.facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; margin: 0; font-size: 13px; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .facts .sep { grid-column: 1 / -1; border-top: 1px solid var(--line); margin: 4px 0; }
@@ -653,3 +653,8 @@ body[data-mode="lab"] .viewport-title { text-shadow: none; }
 .lab-tabs { margin-bottom: 6px; }
 .lab-inputs select { width: 100%; }
 .lab-inputs .ctl { margin-top: 4px; }
+
+.mol-only { display: none; }
+body[data-mode="molecule"] .mol-only { display: inline-block; }
+#spec-sel { padding: 3px 6px; font-size: 12px; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin: 0 2px; }
