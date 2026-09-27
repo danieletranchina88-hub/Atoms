@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Atlante Orbitale</title>
+<meta name="description" content="Simulazione quantistica degli atomi: orbitali s, p, d, f di tutti i 118 elementi calcolati con un metodo autoconsistente (DFT-LDA), legami σ e π e orbitali ibridi.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">ψ</span>
+      <div>
+        <h1>Atlante Orbitale</h1>
+        <p class="brand-sub">Orbitali atomici calcolati con la meccanica quantistica, per tutti i 118 elementi</p>
+      </div>
+    </div>
+    <nav class="modes" role="tablist" aria-label="Modalità">
+      <button type="button" role="tab" id="mode-atom" data-mode="atom" aria-selected="true">Atomo</button>
+      <button type="button" role="tab" id="mode-orbital" data-mode="orbital" aria-selected="false">Orbitale</button>
+      <button type="button" role="tab" id="mode-bond" data-mode="bond" aria-selected="false">Legami σ π</button>
+    </nav>
+    <button type="button" class="icon-btn" id="theme-toggle" aria-label="Cambia tema chiaro/scuro">◐</button>
+  </header>
+
+  <section class="table-band" aria-label="Tavola periodica">
+    <div class="pt-scroll">
+      <div class="pt" id="periodic-table"></div>
+    </div>
+    <div class="pt-legend" aria-hidden="true">
+      <span><i class="sw block-s"></i>blocco s</span>
+      <span><i class="sw block-p"></i>blocco p</span>
+      <span><i class="sw block-d"></i>blocco d</span>
+      <span><i class="sw block-f"></i>blocco f</span>
+    </div>
+  </section>
+
+  <section class="workspace">
+    <aside class="element-card" id="element-card" aria-live="polite"></aside>
+
+    <div class="stage">
+      <div class="viewport" id="viewport">
+        <div class="viewport-title" id="viewport-title"></div>
+        <div class="viewport-legend" id="viewport-legend"></div>
+        <div class="busy" id="busy" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="busy-text">Calcolo autoconsistente in corso…</span>
+        </div>
+        <div class="viewport-tools">
+          <button type="button" class="chip" id="btn-reset" title="Riporta la vista iniziale">Vista iniziale</button>
+          <button type="button" class="chip" id="btn-rotate" aria-pressed="true" title="Rotazione automatica">Rotazione</button>
+          <button type="button" class="chip" id="btn-clip" aria-pressed="false" title="Taglia a metà per vedere l'interno">Sezione</button>
+        </div>
+      </div>
+      <p class="viewport-note" id="viewport-note"></p>
+    </div>
+
+    <aside class="panel" id="panel">
+      <div class="controls" id="controls"></div>
+      <div class="panel-body" id="panel-body"></div>
+    </aside>
+  </section>
+
+  <section class="charts">
+    <figure class="chart">
+      <figcaption>
+        <span id="radial-title">Distribuzione radiale di probabilità</span>
+        <label class="mini-toggle"><input type="checkbox" id="radial-log"> scala log</label>
+      </figcaption>
+      <canvas id="chart-radial" aria-label="Grafico della distribuzione radiale"></canvas>
+      <p class="chart-note" id="radial-note"></p>
+    </figure>
+    <figure class="chart">
+      <figcaption><span id="levels-title">Livelli energetici calcolati</span></figcaption>
+      <canvas id="chart-levels" aria-label="Diagramma dei livelli energetici"></canvas>
+      <p class="chart-note" id="levels-note"></p>
+    </figure>
+    <figure class="chart">
+      <figcaption>
+        <span id="slice-title">Sezione piana</span>
+        <select id="slice-plane" aria-label="Piano di sezione">
+          <option value="auto">piano automatico</option>
+          <option value="xz">piano xz</option>
+          <option value="xy">piano xy</option>
+          <option value="yz">piano yz</option>
+        </select>
+      </figcaption>
+      <canvas id="chart-slice" aria-label="Sezione piana della funzione d'onda"></canvas>
+      <p class="chart-note" id="slice-note"></p>
+    </figure>
+  </section>
+
+  <section class="method" id="method">
+    <h2>Come viene calcolato</h2>
+    <div class="method-grid">
+      <article>
+        <h3>1 · Equazione di Schrödinger in campo centrale</h3>
+        <p>Ogni elettrone si muove nel campo del nucleo e nel campo medio degli altri elettroni. Il potenziale è a simmetria sferica, quindi la funzione d'onda si separa in una parte radiale e una angolare:</p>
+        <p class="eq">ψ<sub>nlm</sub>(r, θ, φ) = R<sub>nl</sub>(r) · Y<sub>lm</sub>(θ, φ)</p>
+        <p class="eq">−½ u″(r) + [ l(l+1)/2r² + V(r) ] u(r) = ε u(r),&nbsp;&nbsp; u = r·R</p>
+        <p>L'equazione radiale è risolta numericamente con il metodo di Numerov su una griglia logaritmica di circa 1500 punti. L'autovalore ε si trova per shooting: si impone il numero corretto di nodi radiali, n − l − 1.</p>
+      </article>
+      <article>
+        <h3>2 · Campo autoconsistente (DFT-LDA)</h3>
+        <p>Il potenziale dipende dalla densità elettronica, che dipende a sua volta dagli orbitali. Si parte dal modello di Thomas–Fermi e si itera fino all'autoconsistenza (Kohn–Sham, come nel metodo di Herman–Skillman):</p>
+        <p class="eq">V(r) = −Z/r + V<sub>H</sub>[ρ](r) + v<sub>xc</sub>[ρ](r)</p>
+        <p class="eq">ρ(r) = Σ<sub>nl</sub> q<sub>nl</sub> |u<sub>nl</sub>(r)|² / 4πr²</p>
+        <p>V<sub>H</sub> è il potenziale elettrostatico della nuvola elettronica. v<sub>xc</sub> descrive scambio (Dirac) e correlazione (Vosko–Wilk–Nusair). Per H, He, Ne e Ar le energie coincidono con le tabelle di riferimento NIST fino a 10⁻⁶ hartree.</p>
+      </article>
+      <article>
+        <h3>3 · Parte angolare e forme</h3>
+        <p>Le forme degli orbitali vengono dalle armoniche sferiche reali: p<sub>x</sub>, p<sub>y</sub>, p<sub>z</sub>; d<sub>xy</sub>, d<sub>z²</sub> e così via; i sette orbitali f. Si usano due rappresentazioni:</p>
+        <ul>
+          <li><b>Nuvola</b>: punti estratti a caso con probabilità esattamente proporzionale a |ψ|² (metodo Monte Carlo).</li>
+          <li><b>Superficie</b>: superficie a |ψ| costante che racchiude il 90% (o la frazione scelta) della probabilità, estratta con l'algoritmo marching cubes.</li>
+        </ul>
+        <p>Il colore indica il segno (fase) di ψ, che conta quando gli orbitali si combinano nei legami.</p>
+      </article>
+      <article>
+        <h3>4 · Legami: LCAO e ibridazione</h3>
+        <p>Gli orbitali molecolari sono combinazioni lineari degli orbitali atomici calcolati (LCAO), con i due nuclei alla distanza di legame sperimentale:</p>
+        <p class="eq">σ = φ<sub>A</sub> + φ<sub>B</sub>,&nbsp;&nbsp; σ* = φ<sub>A</sub> − φ<sub>B</sub>,&nbsp;&nbsp; π = p<sub>x,A</sub> + p<sub>x,B</sub></p>
+        <p>Gli ibridi sp, sp², sp³, sp³d, sp³d² sono combinazioni di s, p e d dello stesso atomo. Poiché s, p e d sono autostati dello stesso hamiltoniano, l'energia di un ibrido è esattamente la media pesata Σ c²ε.</p>
+      </article>
+      <article>
+        <h3>Limiti del modello</h3>
+        <p>Il calcolo non è relativistico e usa occupazioni mediate sferica­mente senza polarizzazione di spin. Per gli elementi pesanti (dal 6° periodo) gli effetti relativistici contraggono gli orbitali s e p<sub>1/2</sub>: per esempio l'energia di ionizzazione calcolata per l'oro è 7,6 eV, quella misurata 9,2 eV. Le forme e l'ordine dei livelli restano corretti. Per gli elementi oltre il 103 le configurazioni sono previsioni teoriche.</p>
+      </article>
+      <article>
+        <h3>Regole di Slater e di Hund</h3>
+        <p>Per confronto con i metodi del corso di chimica generale, la tabella degli orbitali riporta anche la carica nucleare efficace delle regole di Slater:</p>
+        <p class="eq">Z<sub>eff</sub> = Z − σ</p>
+        <p>Il termine spettroscopico <sup>2S+1</sup>L<sub>J</sub> mostrato nella scheda è quello previsto dalle regole di Hund. Con più gusci aperti (alcuni lantanidi e attinidi) può differire da quello misurato.</p>
+      </article>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Unità: 1 a₀ = 52,918 pm · 1 hartree = 27,211 eV. Dati sperimentali: NIST Atomic Spectra Database, IUPAC.</p>
+  </footer>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
