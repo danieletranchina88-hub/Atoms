@@ -31,7 +31,7 @@ function niceStep(x) {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
 }
 
-function textSprite(text, color, sizePx = 28) {
+export function textSprite(text, color, sizePx = 28) {
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
   const font = `500 ${sizePx}px "IBM Plex Mono", ui-monospace, monospace`;
@@ -89,7 +89,11 @@ export class Viewer {
 
     this.resize();
     new ResizeObserver(() => this.resize()).observe(container);
+    this.frameCallbacks = new Set();
+    this.clock = new THREE.Clock();
     this.renderer.setAnimationLoop(() => {
+      const t = this.clock.getElapsedTime();
+      for (const cb of this.frameCallbacks) cb(t);
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
     });
@@ -120,10 +124,37 @@ export class Viewer {
   clear() {
     for (const child of [...this.content.children]) {
       this.content.remove(child);
-      child.geometry?.dispose();
-      child.material?.dispose();
+      child.traverse?.(o => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
     }
     for (const child of [...this.nuclei.children]) this.nuclei.remove(child);
+    this.frameCallbacks.clear();
+  }
+
+  /** Aggiunge un oggetto three.js qualsiasi al contenuto della scena. */
+  add(object) {
+    this.content.add(object);
+    return object;
+  }
+
+  /** Mostra o nasconde gli assi cartesiani. */
+  setAxesVisible(on) {
+    this.axes.visible = on;
+  }
+
+  /** Superficie con colori per vertice (per esempio il potenziale elettrostatico). */
+  addColoredSurface(positions, normals, colors, { opacity = 0.9 } = {}) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.45, metalness: 0.0,
+      transparent: opacity < 1, opacity, side: THREE.DoubleSide, depthWrite: opacity >= 1,
+      clippingPlanes: this.clipping ? [this.clipPlane] : [],
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    this.content.add(mesh);
+    return mesh;
   }
 
   setAutoRotate(on) {

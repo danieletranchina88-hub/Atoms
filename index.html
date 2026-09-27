@@ -32,6 +32,8 @@
       <button type="button" role="tab" id="mode-atom" data-mode="atom" aria-selected="true">Atomo</button>
       <button type="button" role="tab" id="mode-orbital" data-mode="orbital" aria-selected="false">Orbitale</button>
       <button type="button" role="tab" id="mode-bond" data-mode="bond" aria-selected="false">Legami σ π</button>
+      <button type="button" role="tab" id="mode-molecule" data-mode="molecule" aria-selected="false">Molecole</button>
+      <button type="button" role="tab" id="mode-reaction" data-mode="reaction" aria-selected="false">Reazioni</button>
     </nav>
     <button type="button" class="icon-btn" id="theme-toggle" aria-label="Cambia tema chiaro/scuro">◐</button>
   </header>
@@ -78,7 +80,7 @@
     <figure class="chart">
       <figcaption>
         <span id="radial-title">Distribuzione radiale di probabilità</span>
-        <label class="mini-toggle"><input type="checkbox" id="radial-log"> scala log</label>
+        <label class="mini-toggle atom-only"><input type="checkbox" id="radial-log"> scala log</label>
       </figcaption>
       <canvas id="chart-radial" aria-label="Grafico della distribuzione radiale"></canvas>
       <p class="chart-note" id="radial-note"></p>
@@ -91,7 +93,7 @@
     <figure class="chart">
       <figcaption>
         <span id="slice-title">Sezione piana</span>
-        <select id="slice-plane" aria-label="Piano di sezione">
+        <select id="slice-plane" class="atom-only" aria-label="Piano di sezione">
           <option value="auto">piano automatico</option>
           <option value="xz">piano xz</option>
           <option value="xy">piano xy</option>
@@ -102,6 +104,8 @@
       <p class="chart-note" id="slice-note"></p>
     </figure>
   </section>
+
+  <section class="analysis" id="analysis" hidden></section>
 
   <section class="method" id="method">
     <h2>Come viene calcolato</h2>
@@ -134,6 +138,31 @@
         <p>Gli orbitali molecolari sono combinazioni lineari degli orbitali atomici calcolati (LCAO), con i due nuclei alla distanza di legame sperimentale:</p>
         <p class="eq">σ = φ<sub>A</sub> + φ<sub>B</sub>,&nbsp;&nbsp; σ* = φ<sub>A</sub> − φ<sub>B</sub>,&nbsp;&nbsp; π = p<sub>x,A</sub> + p<sub>x,B</sub></p>
         <p>Gli ibridi sp, sp², sp³, sp³d, sp³d² sono combinazioni di s, p e d dello stesso atomo. Poiché s, p e d sono autostati dello stesso hamiltoniano, l'energia di un ibrido è esattamente la media pesata Σ c²ε.</p>
+      </article>
+      <article>
+        <h3>5 · Molecole: Hartree–Fock ab initio</h3>
+        <p>Per le molecole si risolvono le equazioni di Roothaan–Hall su basi di gaussiane contratte (STO-3G, 3-21G, 6-31G, 6-31G*, 6-31G**) del Basis Set Exchange:</p>
+        <p class="eq">F C = S C ε,&nbsp;&nbsp; F<sub>μν</sub> = H<sub>μν</sub> + Σ P<sub>λσ</sub>[(μν|λσ) − ½(μλ|νσ)]</p>
+        <p>Gli integrali sono calcolati con lo schema di McMurchie–Davidson e la funzione di Boys; la convergenza è accelerata con DIIS. Le molecole con elettroni spaiati usano UHF. Risultati identici a PySCF entro 10⁻¹² hartree.</p>
+      </article>
+      <article>
+        <h3>6 · Geometria, vibrazioni, correlazione</h3>
+        <p>Le forze sui nuclei vengono dal gradiente analitico dell'energia; la geometria si ottimizza con un metodo quasi-Newton (Hessiana di Lindh, BFGS, RFO). Le frequenze vengono dalle derivate seconde, con i modi normali e le intensità IR:</p>
+        <p class="eq">ν̃<sub>k</sub> = √λ<sub>k</sub> / 2πc,&nbsp;&nbsp; I<sub>k</sub> ∝ |∂μ/∂Q<sub>k</sub>|²</p>
+        <p>La correlazione elettronica si aggiunge con la teoria perturbativa di Møller–Plesset al secondo ordine (MP2).</p>
+      </article>
+      <article>
+        <h3>7 · Chimica classica dalla struttura</h3>
+        <p>Dal grafo della molecola (letto da SMILES) si cercano tutte le strutture di Lewis che minimizzano cariche formali e ottetti incompleti, cioè le strutture di risonanza. Da lì: cariche formali, numeri di ossidazione (elettroni di legame all'atomo più elettronegativo, scala di Pauling), notazione VSEPR AX<sub>n</sub>E<sub>m</sub> e ibridazione.</p>
+        <p class="eq">CF = V − N<sub>non leg.</sub> − ½ N<sub>leg.</sub>,&nbsp;&nbsp; % ionico = 1 − e<sup>−(Δχ)²/4</sup></p>
+        <p>La geometria di partenza nasce dalla repulsione dei domini elettronici (Gillespie). Il confronto con l'ordine di legame di Mayer, calcolato dalla funzione d'onda, mostra dove il modello di Lewis funziona e dove no.</p>
+      </article>
+      <article>
+        <h3>8 · Termodinamica statistica e reazioni</h3>
+        <p>Dalle frequenze e dai momenti d'inerzia si costruiscono le funzioni di partizione (gas ideale, rotore rigido, oscillatore armonico):</p>
+        <p class="eq">S = R[ln q + T ∂ln q/∂T],&nbsp;&nbsp; H = E<sub>el</sub> + ZPE + E<sub>term</sub> + RT</p>
+        <p class="eq">ΔG° = ΔH° − TΔS°,&nbsp;&nbsp; K = e<sup>−ΔG°/RT</sup></p>
+        <p>Il numero di simmetria σ viene dal gruppo puntuale, riconosciuto automaticamente dagli elementi di simmetria della molecola.</p>
       </article>
       <article>
         <h3>Limiti del modello</h3>

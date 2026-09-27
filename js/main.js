@@ -14,6 +14,8 @@ import {
 import { Viewer, formatPm } from './render/viewer.js';
 import { buildPeriodicTable, blockOf } from './ui/periodicTable.js';
 import { drawLineChart, drawLevels, drawMODiagram, drawSlice, superscript } from './ui/charts.js';
+import { initMoleculeMode, activateMolecule, deactivateMolecule, moleculeThemeChanged, moleculeResize } from './ui/moleculeMode.js';
+import { initReactionMode, activateReaction, deactivateReaction, reactionRedraw } from './ui/reactionMode.js';
 
 const HARTREE_EV = 27.211386245988;
 const BOHR_PM = 52.917721090;
@@ -133,16 +135,25 @@ try {
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
 function onThemeChange() {
   viewer.applyTheme();
+  if (state.mode === 'molecule') { viewer.setAxesVisible(false); moleculeThemeChanged(); return; }
+  if (state.mode === 'reaction') { viewer.setAxesVisible(false); reactionRedraw(); return; }
   if (state.atom) { render3D(); drawCharts(); }
 }
 
 let resizeTimer = null;
 new ResizeObserver(() => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => state.atom && drawCharts(), 120);
+  resizeTimer = setTimeout(() => {
+    if (state.mode === 'molecule') moleculeResize();
+    else if (state.mode === 'reaction') reactionRedraw();
+    else if (state.atom) drawCharts();
+  }, 120);
 }).observe(document.querySelector('.charts'));
 
 window.addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  if (h === 'molecole' && state.mode !== 'molecule') { setMode('molecule'); return; }
+  if (h === 'reazioni' && state.mode !== 'reaction') { setMode('reaction'); return; }
   const Z = zFromHash();
   if (Z && Z !== state.Z) selectElement(Z);
 });
@@ -163,7 +174,7 @@ async function selectElement(Z) {
   const token = ++state.token;
   table.select(Z);
   const el = element(Z);
-  if (location.hash.slice(1) !== el.symbol) history.replaceState(null, '', `#${el.symbol}`);
+  if (!isChemMode() && location.hash.slice(1) !== el.symbol) history.replaceState(null, '', `#${el.symbol}`);
   $('busy').hidden = false;
   $('busy-text').textContent = `Calcolo autoconsistente di ${el.name} (${Z} elettroni)…`;
   try {
@@ -175,7 +186,7 @@ async function selectElement(Z) {
     const homo = atom.orbitals.reduce((a, b) => (b.e > a.e ? b : a));
     state.orbital = { n: homo.n, l: homo.l, m: homo.l <= 2 ? 0 : -homo.l };
     state.bond.distancePm = null;
-    renderAll();
+    if (!isChemMode()) renderAll();
   } catch (err) {
     $('busy-text').textContent = `Errore nel calcolo: ${err.message}`;
     return;
@@ -183,9 +194,22 @@ async function selectElement(Z) {
   $('busy').hidden = true;
 }
 
+const CHEM_MODES = new Set(['molecule', 'reaction']);
+const isChemMode = () => CHEM_MODES.has(state.mode);
+
 function setMode(mode) {
+  const prev = state.mode;
   state.mode = mode;
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
+  if (prev === 'molecule' && mode !== 'molecule') deactivateMolecule();
+  if (prev === 'reaction' && mode !== 'reaction') deactivateReaction();
+  $('analysis').hidden = !CHEM_MODES.has(mode);
+  try { history.replaceState(null, '', CHEM_MODES.has(mode) ? `#${mode === 'molecule' ? 'molecole' : 'reazioni'}` : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
+  if (mode === 'molecule') { activateMolecule(); return; }
+  if (mode === 'reaction') { activateReaction(); return; }
+  document.body.dataset.mode = 'atom';
+  viewer.setAxesVisible(true);
+  $('busy').hidden = true;
   if (state.atom) renderAll();
 }
 
@@ -970,4 +994,13 @@ function drawSliceChart() {
 // ---------------------------------------------------------------------------
 
 viewer.setAutoRotate(true);
-selectElement(zFromHash() ?? 6);
+initMoleculeMode(viewer);
+initReactionMode(viewer);
+document.body.dataset.mode = 'atom';
+{
+  const h = location.hash.slice(1);
+  const startMode = h === 'molecole' ? 'molecule' : h === 'reazioni' ? 'reaction' : null;
+  if (startMode) state.mode = startMode;
+  selectElement(zFromHash() ?? 6);
+  if (startMode) { state.mode = 'atom'; setMode(startMode); }
+}
