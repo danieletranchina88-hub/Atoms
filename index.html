@@ -42,11 +42,22 @@
     <div class="pt-scroll">
       <div class="pt" id="periodic-table"></div>
     </div>
-    <div class="pt-legend" aria-hidden="true">
-      <span><i class="sw block-s"></i>blocco s</span>
-      <span><i class="sw block-p"></i>blocco p</span>
-      <span><i class="sw block-d"></i>blocco d</span>
-      <span><i class="sw block-f"></i>blocco f</span>
+    <div class="pt-legend">
+      <label class="pt-color-label" for="pt-color">Colora per</label>
+      <select id="pt-color">
+        <option value="block">blocco (orbitale in riempimento)</option>
+        <option value="chi">elettronegatività di Pauling</option>
+        <option value="ie">energia di ionizzazione misurata</option>
+        <option value="iecalc">energia di ionizzazione calcolata</option>
+        <option value="ea">affinità elettronica</option>
+        <option value="radius">raggio atomico calcolato</option>
+      </select>
+      <span class="pt-key" id="pt-key">
+        <span><i class="sw block-s"></i>blocco s</span>
+        <span><i class="sw block-p"></i>blocco p</span>
+        <span><i class="sw block-d"></i>blocco d</span>
+        <span><i class="sw block-f"></i>blocco f</span>
+      </span>
     </div>
   </section>
 

@@ -12,7 +12,9 @@ import {
   HYBRIDS, hybridTerms, hybridEnergy,
 } from './physics/bonds.js';
 import { Viewer, formatPm } from './render/viewer.js';
-import { buildPeriodicTable, blockOf } from './ui/periodicTable.js';
+import { buildPeriodicTable, blockOf, ramp } from './ui/periodicTable.js';
+import { ATOM_SUMMARY } from './physics/atomSummary.js';
+import { PAULING, ALLEN, ELECTRON_AFFINITY, OXIDATION_STATES } from './chem/elementData.js';
 import { drawLineChart, drawLevels, drawMODiagram, drawSlice, superscript } from './ui/charts.js';
 import { initMoleculeMode, activateMolecule, deactivateMolecule, moleculeThemeChanged, moleculeResize } from './ui/moleculeMode.js';
 import { initReactionMode, activateReaction, deactivateReaction, reactionRedraw } from './ui/reactionMode.js';
@@ -114,6 +116,29 @@ $('btn-clip').addEventListener('click', (e) => {
   e.currentTarget.setAttribute('aria-pressed', String(on));
   viewer.setClipping(on);
 });
+const PT_PROPS = {
+  chi: { label: 'χ Pauling', unit: '', get: (Z) => PAULING[Z] ?? null },
+  ie: { label: 'energia di ionizzazione', unit: 'eV', get: (Z) => element(Z).ionizationEV },
+  iecalc: { label: 'energia di ionizzazione calcolata (ΔSCF)', unit: 'eV', get: (Z) => ATOM_SUMMARY[Z]?.ie ?? null },
+  ea: { label: 'affinità elettronica', unit: 'eV', get: (Z) => ELECTRON_AFFINITY[Z] ?? null },
+  radius: { label: 'raggio dell\'orbitale più esterno', unit: 'pm', get: (Z) => ATOM_SUMMARY[Z]?.rmax ?? null },
+};
+$('pt-color').addEventListener('change', (e) => {
+  const key = e.target.value;
+  const prop = PT_PROPS[key];
+  const box = $('pt-key');
+  if (!prop) {
+    table.heatmap(null);
+    box.innerHTML = ['s', 'p', 'd', 'f'].map(b => `<span><i class="sw block-${b}"></i>blocco ${b}</span>`).join('');
+    return;
+  }
+  const values = new Map(ELEMENTS.map(el => [el.Z, prop.get(el.Z)]));
+  const range = table.heatmap(values);
+  const stops = [0, 0.25, 0.5, 0.75, 1].map(t => `rgb(${ramp(t).join(',')}) ${t * 100}%`).join(', ');
+  const fmtv = (v) => v.toLocaleString('it-IT', { maximumFractionDigits: 2 });
+  box.innerHTML = `<span>${fmtv(range.min)} ${prop.unit}</span><i class="heat-bar" style="background: linear-gradient(90deg, ${stops})"></i><span>${fmtv(range.max)} ${prop.unit}</span><span class="pt-color-label">${key === 'radius' ? 'raggio di massima probabilità, calcolato' : ''}${key === 'iecalc' ? 'calcolo DFT-LDA non relativistico' : ''} · caselle grigie: dato non disponibile</span>`;
+});
+
 $('radial-log').addEventListener('change', (e) => { state.radialLog = e.target.checked; drawCharts(); });
 $('slice-plane').addEventListener('change', (e) => { state.slicePlane = e.target.value; drawCharts(); });
 
@@ -266,6 +291,10 @@ function renderElementCard() {
     <p class="config-note">${exc ? '<b>Eccezione alla regola di Madelung</b> (configurazione sperimentale).' : 'Configurazione dello stato fondamentale.'}</p>
     <dl class="facts">
       <dt>Massa atomica</dt><dd>${el.mass} u</dd>
+      <dt>Elettronegatività (Pauling)</dt><dd>${PAULING[el.Z] !== null && PAULING[el.Z] !== undefined ? nf(PAULING[el.Z]) : '—'}</dd>
+      ${ALLEN[el.Z] ? `<dt>Elettronegatività (Allen)</dt><dd>${nf(ALLEN[el.Z], 3)}</dd>` : ''}
+      ${ELECTRON_AFFINITY[el.Z] !== undefined ? `<dt>Affinità elettronica</dt><dd>${ELECTRON_AFFINITY[el.Z] > 0 ? `${nf(ELECTRON_AFFINITY[el.Z], 3)} eV` : 'anione instabile'}</dd>` : ''}
+      <dt>Stati di ossidazione comuni</dt><dd>${(OXIDATION_STATES[el.Z] ?? []).map(v => (v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '0')).join(', ') || '—'}</dd>
       <dt>Termine di Hund</dt><dd class="term">${termHTML}</dd>
       <dt>Elettroni spaiati</dt><dd>${t.unpaired}</dd>
       <div class="sep"></div>

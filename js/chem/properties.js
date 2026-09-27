@@ -2,6 +2,7 @@
 
 import { matmul, symFunction } from './linalg.js';
 import { AU_TO_DEBYE, HARTREE_EV } from './hf.js';
+import { shellPair, hermiteR } from './integrals.js';
 
 /** Popolazioni di Mulliken e Löwdin, cariche parziali, ordini di legame di Mayer, valenze. */
 export function populationAnalysis(res) {
@@ -212,4 +213,120 @@ export function orbitalComposition(res, k, spin = 'α') {
     byL[basis.functions[i].l] += w;
   }
   return { byAtom, byL };
+}
+
+/**
+ * Potenziale elettrostatico molecolare esatto nei punti dati:
+ *   V(r) = Σ_A Z_A/|r − R_A| − Σ_μν P_μν ∫ φ_μ φ_ν / |r − r'| dr'
+ */
+export function electrostaticPotential(r, points, onProgress = null) {
+  const { basis, atoms, n } = r;
+  const P = new Float64Array(n * n);
+  for (let i = 0; i < n * n; i++) P[i] = r.Pa[i] + r.Pb[i];
+  const pairs = [];
+  const { shells } = basis;
+  for (let A = 0; A < shells.length; A++) {
+    for (let B = 0; B <= A; B++) {
+      const pr = shellPair(shells[A], shells[B]);
+      const sa = shells[A], sb = shells[B];
+      // pesi di densità per le componenti della coppia (fattore 2 fuori diagonale)
+      const w = [];
+      let wmax = 0;
+      sa.comps.forEach((ca, ia) => sb.comps.forEach((cb, ib) => {
+        const mu = sa.offset + ia, nu = sb.offset + ib;
+        if (A === B && nu > mu) return;
+        const f = (A === B && mu === nu) ? 1 : 2;
+        const v = f * P[mu * n + nu] * sa.compNorm[ia] * sb.compNorm[ib];
+        w.push([ca, cb, v]);
+        wmax = Math.max(wmax, Math.abs(v));
+      }));
+      if (wmax < 1e-10) continue;
+      pairs.push({ pr, w, L: sa.l + sb.l });
+    }
+  }
+  const out = new Float32Array(points.length / 3);
+  for (let q = 0; q < out.length; q++) {
+    const cx = points[3 * q], cy = points[3 * q + 1], cz = points[3 * q + 2];
+    let v = 0;
+    for (const a of atoms) {
+      const d = Math.hypot(cx - a.xyz[0], cy - a.xyz[1], cz - a.xyz[2]);
+      v += a.Z / Math.max(d, 1e-6);
+    }
+    let el = 0;
+    for (const { pr, w, L } of pairs) {
+      const D = L + 1;
+      const lb = pr.lb, T = pr.T;
+      for (const p of pr.prims) {
+        if (p.K < 1e-14) continue;
+        const R = hermiteR(L, p.p, p.P[0] - cx, p.P[1] - cy, p.P[2] - cz);
+        let s = 0;
+        for (const [ca, cb, wv] of w) {
+          let t0 = 0;
+          for (let t = 0; t <= ca[0] + cb[0]; t++) {
+            const ex = p.Ex[(ca[0] * (lb + 1) + cb[0]) * T + t];
+            if (ex === 0) continue;
+            for (let u = 0; u <= ca[1] + cb[1]; u++) {
+              const ey = p.Ey[(ca[1] * (lb + 1) + cb[1]) * T + u];
+              if (ey === 0) continue;
+              for (let vv = 0; vv <= ca[2] + cb[2]; vv++) {
+                const ez = p.Ez[(ca[2] * (lb + 1) + cb[2]) * T + vv];
+                if (ez === 0) continue;
+                t0 += ex * ey * ez * R[(t * D + u) * D + vv];
+              }
+            }
+          }
+          s += wv * t0;
+        }
+        el += p.c * 2 * Math.PI / p.p * s;
+      }
+    }
+    out[q] = v - el;
+    if (onProgress && (q & 255) === 0) onProgress(q / out.length);
+  }
+  return out;
+}
+
+
+/**
+ * Carattere di un orbitale molecolare:
+ *  • legante / antilegante / non legante dalla popolazione di sovrapposizione di Mulliken sui legami,
+ *    OP = Σ_{A–B legati} Σ_{μ∈A,ν∈B} 2 c_μ c_ν S_μν  (> 0 legante, < 0 antilegante);
+ *  • σ o π per molecole lineari (rispetto all'asse) e planari (rispetto alla normale al piano).
+ * geom: { kind: 'linear'|'planar'|null, axis: [x,y,z] }
+ */
+export function moCharacter(res, k, spin, bonds, geom) {
+  const { basis, S, n } = res;
+  const C = spin === 'β' ? res.Cb : res.Ca;
+  const atomOf = basis.functions.map(f => f.atom);
+  const bonded = new Set(bonds.map(b => (b.a < b.b ? `${b.a}-${b.b}` : `${b.b}-${b.a}`)));
+  let op = 0;
+  for (let m = 0; m < n; m++) {
+    const cm = C[m * n + k];
+    if (cm === 0) continue;
+    for (let v = 0; v < n; v++) {
+      const A = atomOf[m], B = atomOf[v];
+      if (A >= B) continue;
+      if (!bonded.has(`${A}-${B}`)) continue;
+      op += 2 * cm * C[v * n + k] * S[m * n + v];
+    }
+  }
+  let type = null;
+  if (geom?.kind) {
+    const u = geom.axis;
+    let wAlong = 0, wPerp = 0, wS = 0;
+    const { shells } = basis;
+    for (const sh of shells) {
+      const o = sh.offset;
+      if (sh.l === 0) { for (let c = 0; c < sh.comps.length; c++) wS += C[(o + c) * n + k] ** 2; continue; }
+      if (sh.l === 1) {
+        const v = [C[o * n + k], C[(o + 1) * n + k], C[(o + 2) * n + k]];
+        const along = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
+        wAlong += along * along;
+        wPerp += v[0] * v[0] + v[1] * v[1] + v[2] * v[2] - along * along;
+      }
+    }
+    if (geom.kind === 'linear') type = wPerp > wAlong + wS ? 'π' : 'σ';
+    else type = wAlong > 0.8 * (wAlong + wPerp + wS) ? 'π' : 'σ';
+  }
+  return { overlapPopulation: op, bonding: op > 0.04 ? 'legante' : op < -0.04 ? 'antilegante' : 'non legante', type };
 }

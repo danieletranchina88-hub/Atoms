@@ -125,10 +125,21 @@ export function analyzeSymmetry(atoms, masses) {
       if (d) cand.push(d);
     }
   }
+  // normali ai piani per tre atomi uguali (assi C3 attraverso le facce di ottaedri e tetraedri)
+  if (N <= 16) {
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) for (let k = j + 1; k < N; k++) {
+      if (Zs[i] !== Zs[j] || Zs[i] !== Zs[k]) continue;
+      const u = unit(cross(
+        [pts[j][0] - pts[i][0], pts[j][1] - pts[i][1], pts[j][2] - pts[i][2]],
+        [pts[k][0] - pts[i][0], pts[k][1] - pts[i][1], pts[k][2] - pts[i][2]]));
+      if (u) cand.push(u);
+    }
+  }
   // elimina duplicati (anche con verso opposto)
   const uniqueAxes = [];
   for (const u of cand) {
-    if (!uniqueAxes.some(v => Math.abs(Math.abs(dot(u, v)) - 1) < 1e-4)) uniqueAxes.push(u);
+    // tolleranza di circa 2,5°: direzioni quasi parallele (rumore numerico) sono lo stesso asse
+    if (!uniqueAxes.some(v => 1 - Math.abs(dot(u, v)) < 1e-3)) uniqueAxes.push(u);
   }
   // rotazioni proprie Cn (n = 2…8) e piani di simmetria
   const rotations = [];
@@ -148,7 +159,7 @@ export function analyzeSymmetry(atoms, masses) {
   // numero di simmetria = ordine del sottogruppo delle rotazioni proprie (identità inclusa)
   const distinct = [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]];
   for (const R of rotations) {
-    if (!distinct.some(D => D.every((row, i) => row.every((v, j) => Math.abs(v - R[i][j]) < 1e-4)))) distinct.push(R);
+    if (!distinct.some(D => D.every((row, i) => row.every((v, j) => Math.abs(v - R[i][j]) < 2e-2)))) distinct.push(R);
   }
   const sigma = distinct.length;
   // asse principale e gruppo puntuale (diagramma di flusso standard)

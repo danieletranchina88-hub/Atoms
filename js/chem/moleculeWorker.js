@@ -5,9 +5,11 @@ import { runHF, HARTREE_EV } from './hf.js';
 import { hfGradient } from './gradient.js';
 import { optimizeGeometry } from './optimize.js';
 import { harmonicFrequencies, thermochemistry, ISOTOPE_MASS } from './vibrations.js';
-import { populationAnalysis, dipoleMoment, mp2Energy, orbitalSummary, orbitalComposition } from './properties.js';
+import { populationAnalysis, dipoleMoment, mp2Energy, orbitalSummary, orbitalComposition, electrostaticPotential, moCharacter } from './properties.js';
+import { connectivityFromGeometry } from './structure.js';
+import { inertia } from './symmetry.js';
 import { analyzeSymmetry } from './symmetry.js';
-import { basisValues, shellPair, hermiteR } from './integrals.js';
+import { basisValues } from './integrals.js';
 
 let current = null; // ultimo risultato SCF (con base e integrali), per i calcoli su griglia
 let currentId = null;
@@ -25,8 +27,20 @@ function summarize(res, withMP2) {
   // composizione di ciascun orbitale molecolare (per la tabella degli OM)
   const compositions = [];
   const nShow = Math.min(res.n, Math.max(res.nalpha, res.nbeta) + 8);
+  // geometria: lineare (asse = momento d'inerzia minimo) o planare (normale = momento massimo)
+  const bonds = connectivityFromGeometry(res.atoms);
+  let geom = null;
+  if (res.atoms.length > 1) {
+    const { moments, axes } = inertia(res.atoms, res.atoms.map(a => ISOTOPE_MASS[a.Z] ?? 2 * a.Z));
+    const planar = Math.abs(moments[2] - moments[0] - moments[1]) < 1e-3 * Math.max(moments[2], 1);
+    if (moments[0] < 1e-3 * moments[2]) geom = { kind: 'linear', axis: axes[0] };
+    else if (planar) geom = { kind: 'planar', axis: axes[2] };
+  }
   for (let k = 0; k < nShow; k++) {
-    compositions.push({ alpha: orbitalComposition(res, k, 'α'), beta: res.unrestricted ? orbitalComposition(res, k, 'β') : null });
+    compositions.push({
+      alpha: { ...orbitalComposition(res, k, 'α'), ...moCharacter(res, k, 'α', bonds, geom) },
+      beta: res.unrestricted ? { ...orbitalComposition(res, k, 'β'), ...moCharacter(res, k, 'β', bonds, geom) } : null,
+    });
   }
   return {
     energy: res.energy, Enuc: res.Enuc, converged: res.converged, iterations: res.iterations,
@@ -87,78 +101,6 @@ function gridField({ kind, index, spin, res: N, half, center }) {
   return { values: vals, res: N, half, step, center };
 }
 
-/**
- * Potenziale elettrostatico molecolare esatto nei punti dati:
- *   V(r) = Σ_A Z_A/|r − R_A| − Σ_μν P_μν ∫ φ_μ φ_ν / |r − r'| dr'
- */
-function electrostaticPotential(points) {
-  const r = current;
-  const { basis, atoms, n } = r;
-  const P = new Float64Array(n * n);
-  for (let i = 0; i < n * n; i++) P[i] = r.Pa[i] + r.Pb[i];
-  const pairs = [];
-  const { shells } = basis;
-  for (let A = 0; A < shells.length; A++) {
-    for (let B = 0; B <= A; B++) {
-      const pr = shellPair(shells[A], shells[B]);
-      const sa = shells[A], sb = shells[B];
-      // pesi di densità per le componenti della coppia (fattore 2 fuori diagonale)
-      const w = [];
-      let wmax = 0;
-      sa.comps.forEach((ca, ia) => sb.comps.forEach((cb, ib) => {
-        const mu = sa.offset + ia, nu = sb.offset + ib;
-        if (A === B && nu > mu) return;
-        const f = (A === B && mu === nu) ? 1 : 2;
-        const v = f * P[mu * n + nu] * sa.compNorm[ia] * sb.compNorm[ib];
-        w.push([ca, cb, v]);
-        wmax = Math.max(wmax, Math.abs(v));
-      }));
-      if (wmax < 1e-10) continue;
-      pairs.push({ pr, w, L: sa.l + sb.l });
-    }
-  }
-  const out = new Float32Array(points.length / 3);
-  for (let q = 0; q < out.length; q++) {
-    const cx = points[3 * q], cy = points[3 * q + 1], cz = points[3 * q + 2];
-    let v = 0;
-    for (const a of atoms) {
-      const d = Math.hypot(cx - a.xyz[0], cy - a.xyz[1], cz - a.xyz[2]);
-      v += a.Z / Math.max(d, 1e-6);
-    }
-    let el = 0;
-    for (const { pr, w, L } of pairs) {
-      const D = L + 1;
-      const lb = pr.lb, T = pr.T;
-      for (const p of pr.prims) {
-        if (p.K < 1e-14) continue;
-        const R = hermiteR(L, p.p, p.P[0] - cx, p.P[1] - cy, p.P[2] - cz);
-        let s = 0;
-        for (const [ca, cb, wv] of w) {
-          let t0 = 0;
-          for (let t = 0; t <= ca[0] + cb[0]; t++) {
-            const ex = p.Ex[(ca[0] * (lb + 1) + cb[0]) * T + t];
-            if (ex === 0) continue;
-            for (let u = 0; u <= ca[1] + cb[1]; u++) {
-              const ey = p.Ey[(ca[1] * (lb + 1) + cb[1]) * T + u];
-              if (ey === 0) continue;
-              for (let vv = 0; vv <= ca[2] + cb[2]; vv++) {
-                const ez = p.Ez[(ca[2] * (lb + 1) + cb[2]) * T + vv];
-                if (ez === 0) continue;
-                t0 += ex * ey * ez * R[(t * D + u) * D + vv];
-              }
-            }
-          }
-          s += wv * t0;
-        }
-        el += p.c * 2 * Math.PI / p.p * s;
-      }
-    }
-    out[q] = v - el;
-    if ((q & 255) === 0) sendProgress(q / out.length);
-  }
-  return out;
-}
-
 self.onmessage = (ev) => {
   const { id, type } = ev.data;
   currentId = id;
@@ -192,7 +134,7 @@ self.onmessage = (ev) => {
       result = g;
     } else if (type === 'esp') {
       if (!current) throw new Error('Nessun calcolo disponibile');
-      result = { values: electrostaticPotential(ev.data.points) };
+      result = { values: electrostaticPotential(current, ev.data.points, sendProgress) };
     } else if (type === 'scan') {
       // curva di energia potenziale di una biatomica: RHF e UHF a confronto
       const { Z1, Z2, distances, opts } = ev.data;
@@ -204,7 +146,13 @@ self.onmessage = (ev) => {
         guessR = { Pa: rh.Pa, Pb: rh.Pb };
         let uh = null;
         try {
-          uh = runHF(atoms, { ...opts, unrestricted: true, breakSymmetry: !guessU, guess: guessU ?? undefined });
+          // a ogni distanza si parte da una soluzione a simmetria rotta (miscela HOMO–LUMO):
+          // oltre il punto di Coulson–Fischer UHF scende sotto RHF e dissocia correttamente
+          uh = runHF(atoms, { ...opts, unrestricted: true, breakSymmetry: opts.multiplicity === 1 || !opts.multiplicity });
+          if (guessU) {
+            const alt = runHF(atoms, { ...opts, unrestricted: true, guess: guessU });
+            if (alt.energy < uh.energy) uh = alt;
+          }
           guessU = { Pa: uh.Pa, Pb: uh.Pb };
         } catch { uh = null; }
         out.push({ d, rhf: rh.energy, uhf: uh ? uh.energy : null, S2: uh ? uh.S2 : null });

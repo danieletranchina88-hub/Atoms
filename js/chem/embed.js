@@ -175,11 +175,13 @@ function relax(mol, lonePairs, seed, iterations) {
   let E = 0;
   for (let it = 0; it < iterations; it++) {
     // la planarità dei legami multipli entra gradualmente nella seconda metà della minimizzazione
-    E = energyAndGrad() + addPlanarGrad(Math.max(0, 2 * it / iterations - 1));
+    const wPlanar = Math.min(1, Math.max(0, (it / iterations - 0.3) / 0.3));
+    E = energyAndGrad() + addPlanarGrad(wPlanar);
     let P = 0, vn = 0, fn = 0;
     for (let i = 0; i < 3 * np; i++) { P += -grad[i] * v[i]; vn += v[i] * v[i]; fn += grad[i] * grad[i]; }
     vn = Math.sqrt(vn); fn = Math.sqrt(fn) || 1e-12;
-    if (fn < 1e-6) break;
+    if (fn < 1e-6 && wPlanar >= 1) break;
+    if (fn < 1e-6) { v.fill(0); continue; }
     for (let i = 0; i < 3 * np; i++) v[i] = (1 - alpha) * v[i] + alpha * (-grad[i]) / fn * vn;
     if (P >= 0) {
       Npos++;

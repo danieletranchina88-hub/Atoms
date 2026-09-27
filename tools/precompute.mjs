@@ -9,13 +9,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { MOLECULES } from '../js/chem/library.js';
+import { MOLECULES, BARRIERS } from '../js/chem/library.js';
 import { parseSmiles } from '../js/chem/smiles.js';
 import { analyzeStructure } from '../js/chem/structure.js';
 import { embedMolecule } from '../js/chem/embed.js';
 import { buildBasis } from '../js/chem/integrals.js';
 import { runHF } from '../js/chem/hf.js';
-import { optimizeGeometry } from '../js/chem/optimize.js';
+import { optimizeGeometry, optimizeTransitionState } from '../js/chem/optimize.js';
 import { harmonicFrequencies, thermochemistry, ISOTOPE_MASS } from '../js/chem/vibrations.js';
 import { mp2Energy, dipoleMoment } from '../js/chem/properties.js';
 import { analyzeSymmetry } from '../js/chem/symmetry.js';
@@ -79,15 +79,49 @@ function compute(mol) {
   };
 }
 
+/** Stato di transizione: ricerca P-RFO dalla geometria di partenza, poi frequenze (una immaginaria). */
+function computeTS(b) {
+  const t0 = Date.now();
+  const log = (...a) => console.log(`[ts:${b.id}]`, ...a);
+  let atoms = b.tsGuess.map(([Z, x, y, z]) => ({ Z, xyz: [x / BOHR_ANG, y / BOHR_ANG, z / BOHR_ANG] }));
+  const basis = '6-31G*';
+  const opts = { basis, charge: 0, multiplicity: b.multiplicity };
+  const ts = optimizeTransitionState(atoms, { ...opts, onStep: s => log('passo', s.step, s.energy.toFixed(8), s.gmax.toExponential(2)) });
+  atoms = ts.atoms;
+  const res = runHF(atoms, opts);
+  const mp2 = mp2Energy(res);
+  const f = harmonicFrequencies(atoms, opts);
+  const freqs = f.modes.map(m => ({ freq: +m.freq.toFixed(2), ir: +(m.ir ?? 0).toFixed(3), mu: +m.reducedMass.toFixed(4), d: Array.from(m.displacement, v => +v.toFixed(4)) }));
+  const th = thermochemistry(atoms, f.modes, res.energy, { multiplicity: b.multiplicity });
+  const sym = analyzeSymmetry(atoms, atoms.map(a => ISOTOPE_MASS[a.Z]));
+  return {
+    id: `ts-${b.id}`, basis, charge: 0, multiplicity: b.multiplicity, ts: true,
+    geometry: atoms.map(a => [a.Z, ...a.xyz.map(v => +(v * BOHR_ANG).toFixed(6))]),
+    energy: res.energy, mp2: mp2.energy, converged: ts.converged, S2: res.S2,
+    imaginary: f.modes.filter(m => m.freq < 0).length,
+    freqs, thermo: pickThermo(th), pointGroup: sym.pointGroup, sigma: sym.sigma,
+    time: Date.now() - t0,
+  };
+}
+
 function pickThermo(th) {
   return { zpe: th.zpe, Hcorr: th.Hcorr, Gcorr: th.Gcorr, S: th.S, Cv: th.Cv, T: th.T };
 }
 
 function merge() {
   const data = {};
-  for (const m of MOLECULES) {
+  for (const m of [...MOLECULES, ...BARRIERS.map(b => ({ id: `ts-${b.id}` }))]) {
     const f = path.join(CACHE, `${m.id}.json`);
-    if (fs.existsSync(f)) data[m.id] = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (!fs.existsSync(f)) continue;
+    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+    // gruppo puntuale e σ ricalcolati con il codice attuale
+    if (d.geometry.length > 1) {
+      const atoms = d.geometry.map(([Z, x, y, z]) => ({ Z, xyz: [x / BOHR_ANG, y / BOHR_ANG, z / BOHR_ANG] }));
+      const sym = analyzeSymmetry(atoms, atoms.map(a => ISOTOPE_MASS[a.Z]));
+      d.pointGroup = sym.pointGroup;
+      d.sigma = sym.sigma;
+    }
+    data[m.id] = d;
   }
   const out = `// Generato da tools/precompute.mjs con il motore quantistico del progetto (HF + MP2).\n// Geometrie ottimizzate in Å, energie in hartree, frequenze armoniche in cm⁻¹ (non scalate).\nexport const LIBRARY_DATA = ${JSON.stringify(data)};\n`;
   fs.writeFileSync(path.join(ROOT, 'js', 'chem', 'libraryData.js'), out);
@@ -115,6 +149,17 @@ if (args[0] === '--merge') {
 } else {
   const ids = args.length ? args : MOLECULES.map(m => m.id);
   for (const id of ids) {
+    if (id.startsWith('ts-')) {
+      const b = BARRIERS.find(x => `ts-${x.id}` === id);
+      try {
+        const r = computeTS(b);
+        fs.writeFileSync(path.join(CACHE, `${id}.json`), JSON.stringify(r));
+        console.log(`[${id}] fatto in ${(r.time / 1000).toFixed(1)} s, E = ${r.energy.toFixed(8)}, ${r.imaginary} frequenze immaginarie`);
+      } catch (e) {
+        console.error(`[${id}] ERRORE`, e.stack);
+      }
+      continue;
+    }
     const mol = MOLECULES.find(m => m.id === id);
     if (!mol) { console.error('molecola sconosciuta', id); continue; }
     try {

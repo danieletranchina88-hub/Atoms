@@ -222,6 +222,17 @@ export function drawMOLevels(canvas, { levels, selected, ncoreShown, unrestricte
       ctx.fillText(`spin ${spin}`, x0 + colW / 2, 0);
     }
     const lineW = Math.min(34, colW / 5);
+    let lastLabelY = Infinity;
+    for (const g of groups) g.labelY = null;
+    // etichette: dall'alto verso il basso, saltando quelle troppo vicine (tranne HOMO e LUMO)
+    for (const g of [...groups].sort((a, b) => b[0].e - a[0].e)) {
+      const y = Y(g[0].e);
+      const important = g.some(l => l.label);
+      if (important || y - lastLabelY >= 12 || lastLabelY === Infinity) {
+        g.labelY = Math.max(y, lastLabelY === Infinity ? y : lastLabelY + 12);
+        lastLabelY = g.labelY;
+      }
+    }
     for (const g of groups) {
       const y = Y(g[0].e);
       const total = g.length * lineW + (g.length - 1) * 6;
@@ -246,13 +257,14 @@ export function drawMOLevels(canvas, { levels, selected, ncoreShown, unrestricte
         regions.push({ x0: x - 3, x1: x + lineW + 3, y0: y - 8, y1: y + 8, index: l.index, spin: l.spin });
         x += lineW + 6;
       }
-      const l = g[0];
-      ctx.fillStyle = muted;
-      ctx.font = `10.5px ${MONO}`;
+      if (g.labelY === null) continue;
+      const l = g.find(q => q.label) ?? g[0];
+      ctx.fillStyle = l.label ? ink : muted;
+      ctx.font = `${l.label ? 600 : 400} 10.5px ${MONO}`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       const lbl = l.label ? `${l.label} ` : '';
-      ctx.fillText(`${lbl}${fmt(l.e, 2)}`, x0 + colW * 0.42 + total / 2 + 8, y);
+      ctx.fillText(`${lbl}${fmt(l.e, 2)}`, x0 + colW * 0.42 + total / 2 + 8, g.labelY);
     }
   });
   return regions;
@@ -445,4 +457,81 @@ export function drawBars(canvas, { items, unit }) {
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   ctx.fillText(unit, w - 4, h - 2);
+}
+
+/** Profilo di reazione: reagenti → stato di transizione → prodotti, con curve per più metodi. */
+export function drawProfile(canvas, { left, right, curves, reference }) {
+  const { ctx, w, h } = setup(canvas);
+  const ink = cssVar('--text');
+  const muted = cssVar('--muted');
+  const grid = cssVar('--chart-grid');
+  const pad = { l: 56, r: 16, t: 20, b: 34 };
+  const vals = [0, ...curves.flatMap(c => [c.ts, c.product]), reference ?? 0];
+  let vmin = Math.min(...vals), vmax = Math.max(...vals);
+  const span = Math.max(vmax - vmin, 10);
+  vmin -= 0.12 * span; vmax += 0.15 * span;
+  const X = (s) => pad.l + s * (w - pad.l - pad.r);
+  const Y = (v) => pad.t + (1 - (v - vmin) / (vmax - vmin)) * (h - pad.t - pad.b);
+  ctx.font = `11px ${MONO}`;
+  ctx.fillStyle = muted;
+  ctx.strokeStyle = grid;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const step = [5, 10, 20, 50, 100, 200].find(s => span / s <= 6) ?? 500;
+  for (let v = Math.ceil(vmin / step) * step; v <= vmax; v += step) {
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(w - pad.r, Y(v)); ctx.stroke();
+    ctx.fillText(fmt(v, 0), pad.l - 6, Y(v));
+  }
+  ctx.save();
+  ctx.translate(12, (pad.t + h - pad.b) / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = `11px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.fillText('H (kJ/mol)', 0, 0);
+  ctx.restore();
+  if (reference !== undefined && reference !== null) {
+    ctx.strokeStyle = ink;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(X(0.35), Y(reference)); ctx.lineTo(X(0.65), Y(reference)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = ink;
+    ctx.font = `11px ${MONO}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`rif. ${fmt(reference, 0)}`, X(0.66), Y(reference) - 2);
+  }
+  // curve lisce: tratti piani per reagenti e prodotti, raccordo coseno attraverso il massimo
+  curves.forEach((c, k) => {
+    ctx.strokeStyle = c.color;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    for (let i = 0; i <= 200; i++) {
+      const s = i / 200;
+      let v;
+      if (s < 0.15) v = 0;
+      else if (s < 0.5) v = c.ts * (1 - Math.cos(Math.PI * (s - 0.15) / 0.35)) / 2;
+      else if (s < 0.85) v = c.product + (c.ts - c.product) * (1 + Math.cos(Math.PI * (s - 0.5) / 0.35)) / 2;
+      else v = c.product;
+      if (i === 0) ctx.moveTo(X(s), Y(v)); else ctx.lineTo(X(s), Y(v));
+    }
+    ctx.stroke();
+    ctx.fillStyle = c.color;
+    ctx.font = `11px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`${c.label} ${fmt(c.ts, 1)}`, X(0.5), Y(c.ts) - 4 - k * 13);
+  });
+  ctx.fillStyle = ink;
+  ctx.font = `12px ${FONT}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(left, X(0.0), Y(0) + 6);
+  ctx.textAlign = 'right';
+  ctx.fillText(right, X(1), Y(curves[curves.length - 1].product) + 6);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = muted;
+  ctx.fillText('‡', X(0.5), pad.t - 16);
+  ctx.textBaseline = 'bottom';
+  ctx.font = `11px ${FONT}`;
+  ctx.fillText('coordinata di reazione →', X(0.5), h - 2);
 }

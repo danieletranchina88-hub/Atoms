@@ -3,14 +3,14 @@
 //   ΔH(T) = ΔE + Δ[ZPE + E_termica + RT]           (termodinamica statistica)
 //   ΔG(T) = ΔH − TΔS,   K = exp(−ΔG°/RT)
 
-import { MOLECULES, REACTIONS, moleculeById } from '../chem/library.js';
+import { MOLECULES, REACTIONS, BARRIERS, moleculeById } from '../chem/library.js';
 import { LIBRARY_DATA } from '../chem/libraryData.js';
 import { parseSmiles, hillFormula } from '../chem/smiles.js';
-import { analyzeStructure } from '../chem/structure.js';
+import { analyzeStructure, connectivityFromGeometry } from '../chem/structure.js';
 import { thermochemistry } from '../chem/vibrations.js';
 import { buildMolecule } from '../render/moleculeView.js';
 import { textSprite } from '../render/viewer.js';
-import { drawEnthalpy, drawBars } from './chemCharts.js';
+import { drawEnthalpy, drawBars, drawProfile } from './chemCharts.js';
 import { drawLineChart } from './charts.js';
 import { FREQ_SCALE } from './moleculeMode.js';
 
@@ -27,6 +27,8 @@ const R = {
   reaction: REACTIONS[0],
   custom: { left: [[1, 'H2'], [1, 'Cl2']], right: [[2, 'HCl']] },
   isCustom: false,
+  kind: 'thermo',          // 'thermo' | 'barrier'
+  barrier: BARRIERS[0],
   method: 'mp2',
   scaled: true,
   T: 298.15,
@@ -52,6 +54,7 @@ export function reactionRedraw() {
 
 const formulaCache = new Map();
 function formula(id) {
+  if (id.startsWith('ts-')) return '‡';
   if (!formulaCache.has(id)) {
     const m = moleculeById(id);
     const g = parseSmiles(m.smiles);
@@ -149,9 +152,13 @@ function renderSide() {
       <button type="button" class="linkish rx-del" data-side="${key}" data-i="${i}" aria-label="Rimuovi">✕</button>
     </div>`).join('');
   const bal = balance(R.custom);
+  const blist = BARRIERS.map(b => `<button type="button" class="rx-item ${R.kind === 'barrier' && R.barrier.id === b.id ? 'active' : ''}" data-barrier="${b.id}">
+      <span class="rx-name">${b.name}</span><span class="rx-eq">${sideText(b.left)} → [‡] → ${sideText(b.right)}</span></button>`).join('');
   $('element-card').innerHTML = `
-    <h3 class="side-h">Reazioni in fase gassosa</h3>
+    <h3 class="side-h">Termochimica: reazioni in fase gassosa</h3>
     <div class="rx-list">${list}</div>
+    <h3 class="side-h">Cinetica: stati di transizione</h3>
+    <div class="rx-list short">${blist}</div>
     <h3 class="side-h">Costruisci una reazione</h3>
     <div class="rx-editor">
       <p class="lbl">Reagenti</p>${sideEditor(R.custom.left, 'left')}
@@ -161,9 +168,15 @@ function renderSide() {
       <p class="hint">${bal.ok ? 'Reazione bilanciata.' : `Non bilanciata: ${bal.bad.map(([Z, v]) => `${ELEMENT_SYMBOL(Z)} ${v > 0 ? '+' : ''}${v}`).join(', ')}${bal.charge ? `, carica ${bal.charge}` : ''}.`}</p>
       <button type="button" class="btn" id="rx-use" ${bal.ok ? '' : 'disabled'}>Calcola questa reazione</button>
     </div>`;
-  $('element-card').querySelectorAll('.rx-item').forEach(b => b.addEventListener('click', () => {
+  $('element-card').querySelectorAll('.rx-item[data-id]').forEach(b => b.addEventListener('click', () => {
     R.reaction = REACTIONS.find(r => r.id === b.dataset.id);
     R.isCustom = false;
+    R.kind = 'thermo';
+    renderAll();
+  }));
+  $('element-card').querySelectorAll('.rx-item[data-barrier]').forEach(b => b.addEventListener('click', () => {
+    R.barrier = BARRIERS.find(x => x.id === b.dataset.barrier);
+    R.kind = 'barrier';
     renderAll();
   }));
   const card = $('element-card');
@@ -182,7 +195,7 @@ function renderSide() {
   }));
   $('rx-add-left').addEventListener('click', () => { R.custom.left.push([1, 'H2']); renderSide(); });
   $('rx-add-right').addEventListener('click', () => { R.custom.right.push([1, 'H2O']); renderSide(); });
-  $('rx-use').addEventListener('click', () => { R.isCustom = true; renderAll(); });
+  $('rx-use').addEventListener('click', () => { R.isCustom = true; R.kind = 'thermo'; renderAll(); });
 }
 
 const ELEMENT_SYMBOL = (Z) => ['', 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca'][Z] ?? `Z${Z}`;
@@ -207,6 +220,7 @@ function renderControls() {
 }
 
 function renderResults() {
+  if (R.kind === 'barrier') { renderBarrierResults(); return; }
   const rx = current();
   const t = thermo(rx, R.T);
   const body = $('panel-body');
@@ -256,6 +270,7 @@ function formatK(K) {
 }
 
 function render3D() {
+  if (R.kind === 'barrier') { renderBarrier3D(); return; }
   const rx = current();
   viewer.clear();
   viewer.setAxesVisible(false);
@@ -308,6 +323,7 @@ function render3D() {
 }
 
 function drawCharts() {
+  if (R.kind === 'barrier') { drawBarrierCharts(); return; }
   const rx = current();
   const t = thermo(rx, R.T);
   if (t.missing.length) return;
@@ -367,12 +383,13 @@ function drawCharts() {
 }
 
 function renderAnalysis() {
-  const rx = current();
+  const rx = R.kind === 'barrier' ? { left: R.barrier.left, right: [...R.barrier.right, [1, `ts-${R.barrier.id}`]] } : current();
   const ids = [...new Set([...rx.left, ...rx.right].map(([, id]) => id))];
   const rows = ids.map(id => {
     const s = species(id, R.T);
-    if (!s) return `<tr><td>${formula(id)}</td><td colspan="9">non calcolata</td></tr>`;
-    return `<tr><td><b>${formula(id)}</b></td><td>${s.basis}</td><td class="num">${nf(s.Ehf, 6)}</td><td class="num">${nf(s.Emp2, 6)}</td>
+    const name = id.startsWith('ts-') ? 'stato di transizione ‡' : formula(id);
+    if (!s) return `<tr><td>${name}</td><td colspan="9">non calcolata</td></tr>`;
+    return `<tr><td><b>${name}</b></td><td>${s.basis}</td><td class="num">${nf(s.Ehf, 6)}</td><td class="num">${nf(s.Emp2, 6)}</td>
       <td class="num">${nf(s.zpe, 2)}</td><td class="num">${nf(s.Hcorr, 2)}</td><td class="num">${nf(s.S, 2)}</td><td class="num">${nf(s.Gcorr, 2)}</td>
       <td>${s.pointGroup}</td><td class="num">${s.sigma}</td></tr>`;
   }).join('');
@@ -383,4 +400,175 @@ function renderAnalysis() {
       <tbody>${rows}</tbody>
     </table></div>
     <p class="desc-muted">Per ogni specie: geometria ottimizzata, frequenze armoniche dall'hessiana analitica-numerica, funzioni di partizione traslazionale q<sub>t</sub> = (2πmkT/h²)<sup>3/2</sup>kT/p, rotazionale q<sub>r</sub> = √π/σ · √(T³/Θ<sub>A</sub>Θ<sub>B</sub>Θ<sub>C</sub>), vibrazionale q<sub>v</sub> = Π 1/(1 − e<sup>−hν/kT</sup>). L'energia MP2 aggiunge la correlazione elettronica alla geometria HF.</p>`;
+}
+
+// ---------------------------------------------------------------------------
+// Cinetica: teoria dello stato di transizione (Eyring, Evans e Polanyi, 1935)
+//   k(T) = κ(T) · (k_B T / h) · (RT/p°)^(1−m) · exp(−ΔG‡°/RT)      (m = molecolarità)
+//   κ(T) = 1 + (1/24)(hν‡/k_B T)²        correzione per l'effetto tunnel di Wigner
+// ---------------------------------------------------------------------------
+
+const KB = 1.380649e-23, HP = 6.62607015e-34, CL = 2.99792458e10;
+
+function barrierData(T) {
+  const b = R.barrier;
+  const tsId = `ts-${b.id}`;
+  const ts = species(tsId, T);
+  const d = LIBRARY_DATA[tsId];
+  if (!ts || !d) return null;
+  const sum = (side) => side.reduce((acc, [c, id]) => {
+    const s = species(id, T);
+    if (!s) { acc.missing = true; return acc; }
+    acc.E += c * s.E; acc.H += c * (s.E + s.Hcorr); acc.G += c * (s.E + s.Gcorr); acc.S += c * s.S; acc.zpe += c * s.zpe;
+    acc.Ehf += c * s.Ehf * HARTREE_KJ; acc.Emp2 += c * s.Emp2 * HARTREE_KJ;
+    return acc;
+  }, { E: 0, H: 0, G: 0, S: 0, zpe: 0, Ehf: 0, Emp2: 0, missing: false });
+  const L = sum(b.left), P = sum(b.right);
+  if (L.missing || P.missing) return null;
+  const molecularity = b.left.reduce((s, [c]) => s + c, 0);
+  const nuImag = Math.abs(Math.min(...d.freqs.map(f => f.freq))) * (R.scaled ? (FREQ_SCALE[d.basis] ?? 0.9) : 1);
+  const u = HP * CL * nuImag / (KB * T);
+  const kappa = 1 + u * u / 24;
+  const dG = ts.E + ts.Gcorr - L.G;
+  let k = kappa * KB * T / HP * Math.exp(-dG * 1000 / (8.314462618 * T));
+  if (molecularity === 2) k *= KB * T / 1e5 * 1e6; // → cm³ molecola⁻¹ s⁻¹ (stato standard 1 bar)
+  return {
+    dE: ts.E - L.E, dEhf: ts.Ehf * HARTREE_KJ - L.Ehf, dEmp2: ts.Emp2 * HARTREE_KJ - L.Emp2,
+    dZPE: ts.zpe - L.zpe, dH: ts.E + ts.Hcorr - L.H, dS: ts.S - L.S, dG,
+    dHr: P.H - L.H, dEr: P.E - L.E,
+    k, kappa, nuImag, molecularity,
+  };
+}
+
+function renderBarrierResults() {
+  const b = R.barrier;
+  const t = barrierData(R.T);
+  const body = $('panel-body');
+  if (!t) { body.innerHTML = '<p class="desc">Dati dello stato di transizione non ancora calcolati.</p>'; return; }
+  const unit = t.molecularity === 2 ? 'cm³ molecola⁻¹ s⁻¹' : 's⁻¹';
+  const half = t.molecularity === 1 ? Math.LN2 / t.k : null;
+  const t298 = barrierData(298.15);
+  body.innerHTML = `
+    <div>
+      <h3>${b.name}</h3>
+      <p class="rx-big">${sideText(b.left)} → [‡] → ${sideText(b.right)}</p>
+      <dl class="info-list">
+        <dt>Frequenza immaginaria ν‡</dt><dd>${nf(t.nuImag, 0)}i cm⁻¹</dd>
+        <dt>ΔE‡ elettronica (${R.method === 'mp2' ? 'MP2' : 'HF'})</dt><dd>${nf(t.dE)} kJ/mol</dd>
+        <dt>ΔZPE‡</dt><dd>${nf(t.dZPE)} kJ/mol</dd>
+        <dt>ΔH‡ (${nf(R.T, 0)} K)</dt><dd><b>${nf(t.dH)}</b> kJ/mol</dd>
+        <dt>ΔS‡</dt><dd>${nf(t.dS)} J/(mol·K)</dd>
+        <dt>ΔG‡</dt><dd><b>${nf(t.dG)}</b> kJ/mol</dd>
+        <dt>Correzione tunnel κ (Wigner)</dt><dd>${nf(t.kappa, 3)}</dd>
+        <dt>Costante di velocità k</dt><dd>${formatK(t.k)} ${unit}</dd>
+        ${half !== null ? `<dt>Tempo di dimezzamento</dt><dd>${formatTime(half)}</dd>` : ''}
+        <dt>ΔH di reazione</dt><dd>${nf(t.dHr)} kJ/mol</dd>
+      </dl>
+    </div>
+    <div>
+      <h3>Confronto con il riferimento</h3>
+      <dl class="info-list">
+        <dt>Barriera calcolata (ΔE‡ + ΔZPE‡)</dt><dd>${nf(t298.dE + t298.dZPE)} kJ/mol</dd>
+        <dt>Barriera classica ΔE‡</dt><dd>${nf(t298.dE)} kJ/mol</dd>
+        <dt>Riferimento</dt><dd>${nf(b.expBarrier)} kJ/mol</dd>
+      </dl>
+      <p class="mol-note" style="margin-top:10px">${b.note}</p>
+    </div>`;
+}
+
+function formatTime(s) {
+  if (s < 1e-9) return `${nf(s * 1e12, 2)} ps`;
+  if (s < 1e-6) return `${nf(s * 1e9, 2)} ns`;
+  if (s < 1e-3) return `${nf(s * 1e6, 2)} µs`;
+  if (s < 1) return `${nf(s * 1e3, 2)} ms`;
+  if (s < 3600) return `${nf(s, 2)} s`;
+  if (s < 86400 * 365) return `${nf(s / 3600, 2)} h`;
+  return `${formatK(s / (86400 * 365.25))} anni`;
+}
+
+function renderBarrier3D() {
+  const b = R.barrier;
+  const d = LIBRARY_DATA[`ts-${b.id}`];
+  viewer.clear();
+  viewer.setAxesVisible(false);
+  if (!d) { $('viewport-title').innerHTML = `${b.name}<small>dati non disponibili</small>`; return; }
+  const atoms = d.geometry.map(([Z, x, y, z]) => ({ Z, xyz: [x / BOHR_ANG, y / BOHR_ANG, z / BOHR_ANG] }));
+  const c = [0, 1, 2].map(k => atoms.reduce((s, a) => s + a.xyz[k], 0) / atoms.length);
+  atoms.forEach(a => { a.xyz = a.xyz.map((v, k) => v - c[k]); });
+  // legami: pieni se corti, tratteggiati se allungati (legami che si formano o si rompono)
+  const bonds = connectivityFromGeometry(atoms).map(bd => {
+    const A = atoms[bd.a].xyz, B = atoms[bd.b].xyz;
+    const r = Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]) * BOHR_ANG * 100;
+    const ref = (atoms[bd.a].Z === 1 ? 32 : 72) + (atoms[bd.b].Z === 1 ? 32 : 72);
+    return { ...bd, order: r > 1.12 * ref ? 0.5 : 1 };
+  });
+  const mol = buildMolecule(atoms, bonds, {});
+  viewer.add(mol.group);
+  const imag = d.freqs.find(f => f.freq < 0);
+  if (imag) {
+    const x0 = atoms.map(a => a.xyz);
+    viewer.frameCallbacks.add((t) => {
+      const s = 0.45 * Math.sin(2 * Math.PI * t / 1.6);
+      mol.update(x0.map((p, i) => [p[0] + s * imag.d[3 * i], p[1] + s * imag.d[3 * i + 1], p[2] + s * imag.d[3 * i + 2]]));
+    });
+  }
+  let ext = 0;
+  for (const a of atoms) ext = Math.max(ext, Math.hypot(...a.xyz));
+  viewer.frame(ext + 3, false);
+  viewer.resetView();
+  $('viewport-title').innerHTML = `Stato di transizione ‡<small>${b.name} · ${d.pointGroup} · HF/${d.basis}</small>`;
+  $('viewport-legend').innerHTML = '';
+  $('viewport-note').textContent = `L'animazione segue il modo normale con frequenza immaginaria (${nf(Math.abs(imag?.freq ?? 0), 0)}i cm⁻¹): è la coordinata di reazione, la direzione in cui la struttura scivola verso reagenti o prodotti. Tratteggiati i legami che si stanno formando o rompendo.`;
+}
+
+function drawBarrierCharts() {
+  const b = R.barrier;
+  const t = barrierData(R.T);
+  if (!t) return;
+  const saved = R.method;
+  R.method = 'hf';
+  const hf = barrierData(298.15);
+  R.method = 'mp2';
+  const mp = barrierData(298.15);
+  R.method = saved;
+  drawProfile($('chart-radial'), {
+    left: sideText(b.left), right: sideText(b.right),
+    curves: [
+      { label: 'HF', ts: hf.dH, product: hf.dHr, color: cssVar('--phase-neg') },
+      { label: 'MP2', ts: mp.dH, product: mp.dHr, color: cssVar('--accent') },
+    ],
+    reference: b.expBarrier,
+  });
+  $('radial-title').textContent = 'Profilo energetico (ΔH, 298 K)';
+  $('radial-note').textContent = 'Il massimo lungo la coordinata di reazione è lo stato di transizione. La linea tratteggiata indica la barriera di riferimento.';
+
+  // grafico di Arrhenius: ln k contro 1000/T
+  const Ts = [];
+  for (let T = 200; T <= 2000; T += 20) Ts.push(T);
+  const xs = Ts.map(T => 1000 / T);
+  const lnk = Ts.map(T => Math.log(barrierData(T).k));
+  // energia di attivazione di Arrhenius dalla pendenza a T corrente: Ea = −R d(ln k)/d(1/T)
+  const h = 1;
+  const Ea = -8.314462618e-3 * (Math.log(barrierData(R.T + h).k) - Math.log(barrierData(R.T - h).k)) / (1 / (R.T + h) - 1 / (R.T - h));
+  drawLineChart($('chart-levels'), {
+    series: [{ xs, ys: lnk, color: cssVar('--accent'), label: 'ln k (Eyring + tunnel)', width: 2.2, keepZero: true }],
+    log: false, signed: true, xlabel: '1000/T (K⁻¹)', ylabel: `ln k (${t.molecularity === 2 ? 'cm³ s⁻¹' : 's⁻¹'})`,
+    markers: [{ x: 1000 / R.T, label: `${nf(R.T, 0)} K`, color: cssVar('--accent') }],
+  });
+  $('levels-title').textContent = 'Grafico di Arrhenius';
+  $('levels-note').textContent = `ln k = ln A − Ea/RT: la pendenza è −Ea/R. A ${nf(R.T, 0)} K, Ea = ${nf(Ea, 1)} kJ/mol (≈ ΔH‡ + ${t.molecularity === 2 ? '2' : ''}RT).`;
+
+  drawBars($('chart-slice'), {
+    unit: 'kJ/mol',
+    items: [
+      { label: 'ΔE‡ Hartree–Fock', value: t.dEhf },
+      { label: 'Δ correlazione MP2', value: t.dEmp2 - t.dEhf },
+      { label: 'ΔZPE‡', value: t.dZPE },
+      { label: 'Δ(H − E − ZPE)‡', value: t.dH - t.dE - t.dZPE },
+      { label: '−TΔS‡', value: -R.T * t.dS / 1000 },
+      { label: 'ΔG‡', value: t.dG, color: cssVar('--accent') },
+    ],
+  });
+  $('slice-title').textContent = `Contributi a ΔG‡ (${nf(R.T, 0)} K)`;
+  $('slice-note').textContent = 'La barriera di energia libera determina la velocità: ogni 5,7 kJ/mol in più a 298 K rallentano la reazione di un fattore 10.';
 }

@@ -17,7 +17,8 @@ export const CATEGORIES = [
 export const MOLECULES = [
   // --- biatomiche ---
   { id: 'H2', name: 'Idrogeno', smiles: '[H][H]', cat: 'diatomic', exp: { r: { 'H-H': 0.741 }, freq: [4161] } },
-  { id: 'N2', name: 'Azoto', smiles: 'N#N', cat: 'diatomic', exp: { r: { 'N-N': 1.098 }, freq: [2330] } },
+  { id: 'N2', name: 'Azoto', smiles: 'N#N', cat: 'diatomic', exp: { r: { 'N-N': 1.098 }, freq: [2330] },
+    note: 'Legame triplo: un σ e due π, ordine di legame 3. Curiosità: Hartree–Fock mette gli orbitali π sopra il 3σ, ma la spettroscopia fotoelettronica mostra che l\'orbitale più alto è il 3σ (15,6 eV contro 16,9 eV): serve la correlazione elettronica.' },
   { id: 'O2', name: 'Ossigeno (tripletto)', smiles: 'O=O', multiplicity: 3, cat: 'diatomic', exp: { r: { 'O-O': 1.208 }, freq: [1556] },
     note: 'La struttura di Lewis prevede tutti gli elettroni appaiati, ma O₂ è paramagnetico: lo stato fondamentale è un tripletto (³Σg⁻) con due elettroni spaiati negli orbitali π*. Lo spiega solo la teoria degli orbitali molecolari.' },
   { id: 'F2', name: 'Fluoro', smiles: 'FF', cat: 'diatomic', exp: { r: { 'F-F': 1.412 }, freq: [892] } },
@@ -146,3 +147,35 @@ export function moleculeById(id) {
 export function displayFormula(id) {
   return moleculeById(id)?.formula ?? null;
 }
+
+/**
+ * Barriere di reazione (cinetica). Per ogni processo: reagenti, prodotti e una geometria di partenza
+ * per la ricerca dello stato di transizione (Å). Ea di riferimento in kJ/mol.
+ */
+const r120 = (r, z, phase = 0) => [0, 1, 2].map(k => [r * Math.cos(phase + 2 * Math.PI * k / 3), r * Math.sin(phase + 2 * Math.PI * k / 3), z]);
+export const BARRIERS = [
+  {
+    id: 'nh3-inv', name: 'Inversione dell\'ammoniaca', left: [[1, 'NH3']], right: [[1, 'NH3']],
+    tsGuess: [[7, 0, 0, 0], ...r120(1.0, 0).map(p => [1, ...p])], multiplicity: 1,
+    expBarrier: 24.2,
+    note: 'L\'ammoniaca si "rovescia come un ombrello" passando per una struttura planare (D₃h). La barriera è così bassa che l\'azoto attraversa per effetto tunnel circa 2,4·10¹⁰ volte al secondo: è la transizione del primo maser (1954).',
+  },
+  {
+    id: 'ethane-rot', name: 'Rotazione interna dell\'etano', left: [[1, 'C2H6']], right: [[1, 'C2H6']],
+    tsGuess: [[6, 0, 0, 0.77], [6, 0, 0, -0.77], ...r120(1.02, 1.16).map(p => [1, ...p]), ...r120(1.02, -1.16).map(p => [1, ...p])], multiplicity: 1,
+    expBarrier: 12.1,
+    note: 'Lo stato di transizione è la conformazione eclissata (D₃h), il minimo quella sfalsata (D₃d). La barriera nasce dalla repulsione tra i legami C–H e dall\'iperconiugazione.',
+  },
+  {
+    id: 'hcn-hnc', name: 'Isomerizzazione HCN → HNC', left: [[1, 'HCN']], right: [[1, 'HNC']],
+    tsGuess: [[6, 0, 0, -0.58], [7, 0, 0, 0.58], [1, 1.15, 0, 0.1]], multiplicity: 1,
+    expBarrier: 201,
+    note: 'L\'idrogeno migra dal carbonio all\'azoto passando per una struttura a ponte. HNC è abbondante nelle nubi interstellari fredde, dove la barriera impedisce la conversione in HCN.',
+  },
+  {
+    id: 'h-h2', name: 'Scambio H + H₂ → H₂ + H', left: [[1, 'Hatom'], [1, 'H2']], right: [[1, 'H2'], [1, 'Hatom']],
+    tsGuess: [[1, 0, 0, -0.93], [1, 0, 0, 0], [1, 0, 0, 0.93]], multiplicity: 2,
+    expBarrier: 40.9,
+    note: 'La reazione chimica più semplice: tre protoni e tre elettroni. Lo stato di transizione è lineare e simmetrico. La barriera di riferimento (41 kJ/mol) viene da calcoli esatti della superficie di energia potenziale.',
+  },
+];

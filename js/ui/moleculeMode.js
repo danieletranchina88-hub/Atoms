@@ -2,7 +2,8 @@
 
 import { MOLECULES, CATEGORIES, moleculeById } from '../chem/library.js';
 import { LIBRARY_DATA } from '../chem/libraryData.js';
-import { parseSmiles, hillFormula, SmilesError } from '../chem/smiles.js';
+import * as THREE from 'three';
+import { parseSmiles, hillFormula, SmilesError, writeSmiles, fillHydrogens } from '../chem/smiles.js';
 import { analyzeStructure } from '../chem/structure.js';
 import { embedMolecule } from '../chem/embed.js';
 import { buildBasis } from '../chem/integrals.js';
@@ -38,10 +39,34 @@ const M = {
   status: '', busy: false, token: 0,
   cat: 'hydride',
   moRegions: [],
+  sel: [],
+  mol3d: null,
 };
 
 export function initMoleculeMode(v) {
   viewer = v;
+  // selezione degli atomi con un clic (senza trascinamento) nel modello 3D
+  const canvas = viewer.renderer.domElement;
+  let down = null;
+  canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!active || !down || !M.mol3d) return;
+    const moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]);
+    down = null;
+    if (moved > 5) return;
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, viewer.camera);
+    const hits = ray.intersectObjects(M.mol3d.atomMeshes, false);
+    if (!hits.length) { M.sel = []; } else {
+      const idx = M.mol3d.atomMeshes.indexOf(hits[0].object);
+      if (M.sel.includes(idx)) M.sel = M.sel.filter(i => i !== idx);
+      else M.sel = e.shiftKey || M.sel.length === 1 ? [...M.sel.slice(-1), idx] : [idx];
+    }
+    renderEditor();
+    highlightSelection();
+  });
   $('chart-radial').addEventListener('click', (ev) => {
     if (!isActive()) return;
     const rect = ev.currentTarget.getBoundingClientRect();
@@ -119,6 +144,8 @@ function loadSmiles(smiles, { multiplicity, lib = null } = {}) {
   }
   M.smiles = smiles;
   M.graph = graph;
+  M.sel = [];
+  M.resetView = true;
   M.charge = graph.atoms.reduce((s, a) => s + a.charge, 0);
   const nel = graph.atoms.reduce((s, a) => s + a.Z, 0) - M.charge;
   M.multiplicity = multiplicity ?? (nel % 2 === 0 ? 1 : 2);
@@ -294,6 +321,7 @@ function renderSide() {
       </form>
       <p class="hint">Esempi: <code>CCO</code> etanolo, <code>C=CC=C</code> butadiene, <code>c1ccccc1O</code> fenolo, <code>[NH4+]</code>, <code>O=C=O</code>.</p>
     </div>
+    <div class="editor" id="mol-editor"></div>
     <div class="mol-head">
       <p class="mol-formula">${formulaOf()}</p>
       <p class="el-name">${escapeHtml(M.entry?.smiles === M.smiles ? M.name : 'Molecola personalizzata')}</p>
@@ -342,6 +370,7 @@ function renderSide() {
     renderAll();
     runSCF();
   });
+  renderEditor();
   $('btn-opt')?.addEventListener('click', optimize);
   $('btn-freq')?.addEventListener('click', computeFrequencies);
   $('btn-scan')?.addEventListener('click', scanBond);
@@ -406,7 +435,9 @@ function moLabel(k, spin) {
   const L = comp.byL;
   const tot = L.reduce((s, x) => s + x, 0) || 1;
   const typ = ['s', 'p', 'd'].map((t, i) => (L[i] / tot > 0.2 ? `${t} ${Math.round(100 * L[i] / tot)}%` : null)).filter(Boolean).join(', ');
-  return `${main.join(' ')}${typ ? ` · ${typ}` : ''}`;
+  const kind = comp.type ? `<b>${comp.type}</b> ` : '';
+  const bond = comp.bonding ? `<span class="bchar ${comp.bonding === 'legante' ? 'b-pos' : comp.bonding === 'antilegante' ? 'b-neg' : ''}">${comp.bonding}</span> · ` : '';
+  return `${kind}${bond}${main.join(' ')}${typ ? ` · ${typ}` : ''}`;
 }
 
 function renderPanelBody() {
@@ -442,7 +473,7 @@ function renderPanelBody() {
         <thead><tr><th class="num">#</th><th></th><th class="num">ε (eV)</th><th class="num">e⁻</th><th>carattere</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
       </table></div>
-      <p class="desc-muted" style="margin-top:6px">Clicca un orbitale per vederlo in 3D. Carattere: atomi e funzioni (s, p, d) con il peso maggiore secondo Mulliken.</p>
+      <p class="desc-muted" style="margin-top:6px">Clicca un orbitale per vederlo in 3D. σ/π: simmetria rispetto all'asse (molecole lineari) o al piano (molecole planari). Legante/antilegante: popolazione di sovrapposizione di Mulliken sui legami. Poi atomi e funzioni (s, p, d) con il peso maggiore.</p>
     </div>
     <div>
       <h3>Vibrazioni</h3>
@@ -491,7 +522,8 @@ async function render3D() {
   const token = ++gridToken;
   viewer.clear();
   const ext = extentOf(M.atoms);
-  viewer.frame(ext, true);
+  viewer.frame(ext, !M.resetView);
+  if (M.resetView) { viewer.resetView(); M.resetView = false; }
   viewer.setAxesVisible(false);
   const lw = M.analysis;
   const labels = M.atoms.map((a, i) => {
@@ -511,6 +543,8 @@ async function render3D() {
   const atomColors = M.view.overlay === 'charges' && S ? S.mulliken.map(q => chargeColor(q)) : null;
   const mol = buildMolecule(M.atoms, bonds, { labels, atomColors });
   viewer.add(mol.group);
+  M.mol3d = mol;
+  highlightSelection();
   if (M.view.dipole && S) {
     const arrow = dipoleArrow(S.dipole.vector, S.dipole.debye, ext);
     if (arrow) viewer.add(arrow);
@@ -833,4 +867,87 @@ function renderAnalysis() {
     Tin.addEventListener('input', () => { Tin.nextElementSibling.textContent = `${Tin.value} K`; });
     Tin.addEventListener('change', () => { M.view.T = +Tin.value; renderAnalysis(); });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Editor: modifica della molecola nel modello 3D
+// ---------------------------------------------------------------------------
+
+function highlightSelection() {
+  if (!M.mol3d) return;
+  M.mol3d.atomMeshes.forEach((m, i) => {
+    const on = M.sel.includes(i);
+    m.material.emissive = new THREE.Color(on ? cssVar('--accent') : '#000000');
+    m.material.emissiveIntensity = on ? 0.55 : 0;
+  });
+}
+
+const EDIT_ELEMENTS = [1, 5, 6, 7, 8, 9, 14, 15, 16, 17, 35];
+
+function renderEditor() {
+  const box = $('mol-editor');
+  if (!box) return;
+  const sel = M.sel;
+  const btn = (act, label, extra = '') => `<button type="button" class="mini-btn" data-act="${act}" ${extra}>${label}</button>`;
+  let html = '<p class="lbl">Modifica la molecola</p>';
+  if (!sel.length) {
+    html += '<p class="hint">Clicca un atomo nel modello 3D per selezionarlo. Con due atomi selezionati puoi creare o cambiare il legame tra loro.</p>';
+  } else if (sel.length === 1) {
+    const a = M.graph.atoms[sel[0]];
+    html += `<p class="hint">Selezionato: <b>${sym(a.Z)}${sel[0] + 1}</b>${a.charge ? ` (carica ${sgn(a.charge, 0)})` : ''}</p>
+      <div class="edit-row"><span>Sostituisci con</span>${EDIT_ELEMENTS.map(Z => btn(`replace:${Z}`, sym(Z), Z === a.Z ? 'disabled' : '')).join('')}</div>
+      <div class="edit-row"><span>Aggiungi legato</span>${[6, 7, 8, 9, 17].map(Z => btn(`add:${Z}`, sym(Z))).join('')}${btn('add:6:2', 'C=')}${btn('add:8:2', '=O')}${btn('add:7:3', '≡N')}</div>
+      <div class="edit-row"><span>Carica</span>${btn('charge:-1', '−1')}${btn('charge:1', '+1')}${btn('delete', 'Elimina atomo')}</div>`;
+  } else {
+    const [i, j] = sel;
+    const b = M.graph.bonds.find(x => (x.a === i && x.b === j) || (x.a === j && x.b === i));
+    const cur = b ? b.order : 0;
+    html += `<p class="hint">Legame tra <b>${sym(M.graph.atoms[i].Z)}${i + 1}</b> e <b>${sym(M.graph.atoms[j].Z)}${j + 1}</b>: ${['nessuno', 'singolo', 'doppio', 'triplo'][cur]}</p>
+      <div class="edit-row"><span>Legame</span>${[0, 1, 2, 3].map(o => btn(`bond:${o}`, ['nessuno', 'singolo', 'doppio', 'triplo'][o], o === cur ? 'disabled' : '')).join('')}</div>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => applyEdit(b.dataset.act)));
+}
+
+function applyEdit(act) {
+  const atoms = M.graph.atoms.map(a => ({ Z: a.Z, charge: a.charge ?? 0, aromatic: false }));
+  let bonds = M.graph.bonds.map(b => ({ a: b.a, b: b.b, order: b.order, aromatic: false }));
+  const [cmd, p1, p2] = act.split(':');
+  const i = M.sel[0];
+  if (cmd === 'replace') {
+    atoms[i].Z = +p1;
+    atoms[i].charge = 0;
+    // un H sostituito diventa un atomo pesante con un solo legame
+  } else if (cmd === 'add') {
+    atoms.push({ Z: +p1, charge: 0, aromatic: false });
+    bonds.push({ a: i, b: atoms.length - 1, order: +(p2 ?? 1), aromatic: false });
+    if (atoms[i].Z === 1) atoms[i].Z = 6; // non si lega nulla a un idrogeno: diventa carbonio
+  } else if (cmd === 'charge') {
+    atoms[i].charge += +p1;
+  } else if (cmd === 'delete') {
+    const drop = new Set([i]);
+    bonds.forEach(b => {
+      if (b.a === i && atoms[b.b].Z === 1) drop.add(b.b);
+      if (b.b === i && atoms[b.a].Z === 1) drop.add(b.a);
+    });
+    const map = [];
+    const kept = [];
+    atoms.forEach((a, k) => { if (!drop.has(k)) { map[k] = kept.length; kept.push(a); } });
+    bonds = bonds.filter(b => !drop.has(b.a) && !drop.has(b.b)).map(b => ({ ...b, a: map[b.a], b: map[b.b] }));
+    atoms.length = 0;
+    atoms.push(...kept);
+    if (!atoms.length) return;
+  } else if (cmd === 'bond') {
+    const [a, b] = M.sel;
+    const o = +p1;
+    const k = bonds.findIndex(x => (x.a === a && x.b === b) || (x.a === b && x.b === a));
+    if (k >= 0) { if (o === 0) bonds.splice(k, 1); else bonds[k].order = o; } else if (o > 0) bonds.push({ a, b, order: o, aromatic: false });
+  }
+  // gli idrogeni si ricalcolano con le valenze standard
+  const filled = fillHydrogens({ atoms, bonds });
+  const smiles = writeSmiles(filled);
+  if (!smiles) return;
+  M.entry = null;
+  M.name = 'Molecola personalizzata';
+  loadSmiles(smiles);
 }

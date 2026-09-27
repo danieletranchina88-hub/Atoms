@@ -212,3 +212,128 @@ export function hillFormula(atoms, charge = 0) {
   }
   return f;
 }
+
+// ---------------------------------------------------------------------------
+// Scrittura SMILES e valenze standard (per l'editor della molecola)
+// ---------------------------------------------------------------------------
+
+const STANDARD_VALENCE = { 1: 1, 5: 3, 6: 4, 7: 3, 8: 2, 9: 1, 14: 4, 15: 3, 16: 2, 17: 1, 35: 1, 53: 1, 3: 1, 4: 2, 11: 1, 12: 2, 13: 3 };
+
+/** Numero di legami "normale" per un atomo con la carica data (N⁺ ha 4 legami, O⁻ uno solo, …). */
+export function standardValence(Z, charge = 0) {
+  const v = STANDARD_VALENCE[Z];
+  if (v === undefined) return null;
+  if (Z === 7 || Z === 8 || Z === 15 || Z === 16) return v + charge;   // gruppi 15–16: la carica + aggiunge un legame
+  if (Z === 5 || Z === 13) return v - charge;                          // boro: B⁻ ha 4 legami
+  if (Z === 6) return v - Math.abs(charge);                            // carbocationi e carbanioni: 3 legami
+  return v - Math.abs(charge);
+}
+
+/** Aggiunge o toglie idrogeni perché ogni atomo pesante abbia la valenza standard. */
+export function fillHydrogens(graph) {
+  const atoms = graph.atoms.map(a => ({ ...a }));
+  let bonds = graph.bonds.map(b => ({ ...b }));
+  const heavy = atoms.map((a, i) => i).filter(i => atoms[i].Z !== 1);
+  // rimuove gli H esistenti legati ad atomi pesanti, poi li ricrea
+  const removeH = new Set();
+  bonds.forEach(b => {
+    const [x, y] = [b.a, b.b];
+    if (atoms[x].Z === 1 && atoms[y].Z !== 1) removeH.add(x);
+    if (atoms[y].Z === 1 && atoms[x].Z !== 1) removeH.add(y);
+  });
+  const keep = atoms.map((a, i) => !removeH.has(i));
+  const newIndex = [];
+  const out = [];
+  atoms.forEach((a, i) => { if (keep[i]) { newIndex[i] = out.length; out.push(a); } });
+  bonds = bonds.filter(b => keep[b.a] && keep[b.b]).map(b => ({ ...b, a: newIndex[b.a], b: newIndex[b.b] }));
+  const n = out.length;
+  for (let i = 0; i < n; i++) {
+    if (out[i].Z === 1) continue;
+    const target = standardValence(out[i].Z, out[i].charge ?? 0);
+    if (target === null) continue;
+    const used = bonds.reduce((s, b) => s + (b.a === i || b.b === i ? b.order : 0), 0);
+    for (let k = 0; k < target - used; k++) {
+      out.push({ Z: 1, charge: 0, aromatic: false });
+      bonds.push({ a: i, b: out.length - 1, order: 1, aromatic: false });
+    }
+  }
+  void heavy;
+  return { atoms: out, bonds };
+}
+
+/** Stringa SMILES (non canonica) da un grafo con idrogeni espliciti. */
+export function writeSmiles(graph) {
+  const { atoms, bonds } = graph;
+  const n = atoms.length;
+  const adj = Array.from({ length: n }, () => []);
+  bonds.forEach(b => { adj[b.a].push({ j: b.b, order: b.order }); adj[b.b].push({ j: b.a, order: b.order }); });
+  const isH = (i) => atoms[i].Z === 1 && adj[i].length === 1 && atoms[adj[i][0].j].Z !== 1 && !(atoms[i].charge);
+  const heavy = [...Array(n).keys()].filter(i => !isH(i));
+  if (!heavy.length) return '';
+  const hCount = (i) => adj[i].filter(e => isH(e.j)).length;
+  const bondSym = (o) => (o === 2 ? '=' : o === 3 ? '#' : '');
+  const ORGANIC_SET = new Set([5, 6, 7, 8, 9, 15, 16, 17, 35, 53]);
+  const atomText = (i) => {
+    const a = atoms[i];
+    const symb = ELEMENTS[a.Z - 1].symbol;
+    const h = hCount(i);
+    const charge = a.charge ?? 0;
+    const heavyOrder = adj[i].filter(e => !isH(e.j)).reduce((s, e) => s + e.order, 0);
+    const implicitOk = ORGANIC_SET.has(a.Z) && charge === 0 && (() => {
+      const vals = NORMAL_VALENCE[a.Z] ?? [];
+      const target = vals.find(v => v >= heavyOrder);
+      return target !== undefined && target - heavyOrder === h;
+    })();
+    if (implicitOk) return symb;
+    const hs = h ? (h > 1 ? `H${h}` : 'H') : '';
+    const cs = charge ? (charge > 0 ? (charge > 1 ? `+${charge}` : '+') : (charge < -1 ? `-${-charge}` : '-')) : '';
+    return `[${symb}${hs}${cs}]`;
+  };
+  const visited = new Array(n).fill(false);
+  const ringLabels = new Map(); // "i-j" → numero
+  let ringCounter = 1;
+  // prima passata: trova i legami di chiusura d'anello con una DFS
+  const closures = new Map(); // atomo → [{ partner, order, label }]
+  const parent = new Array(n).fill(-1);
+  const seen = new Array(n).fill(false);
+  const dfs1 = (i) => {
+    seen[i] = true;
+    for (const e of adj[i]) {
+      if (isH(e.j)) continue;
+      if (e.j === parent[i]) continue;
+      if (seen[e.j]) {
+        const key = i < e.j ? `${i}-${e.j}` : `${e.j}-${i}`;
+        if (!ringLabels.has(key)) {
+          const label = ringCounter++;
+          ringLabels.set(key, label);
+          (closures.get(i) ?? closures.set(i, []).get(i)).push({ partner: e.j, order: e.order, label });
+          (closures.get(e.j) ?? closures.set(e.j, []).get(e.j)).push({ partner: i, order: e.order, label });
+        }
+        continue;
+      }
+      parent[e.j] = i;
+      dfs1(e.j);
+    }
+  };
+  const parts = [];
+  for (const start of heavy) {
+    if (seen[start]) continue;
+    dfs1(start);
+    const write = (i) => {
+      visited[i] = true;
+      let s = atomText(i);
+      for (const c of closures.get(i) ?? []) {
+        const lab = c.label < 10 ? String(c.label) : `%${c.label}`;
+        s += (visited[c.partner] ? bondSym(c.order) : '') + lab;
+      }
+      const children = adj[i].filter(e => !isH(e.j) && parent[e.j] === i && !visited[e.j]);
+      children.forEach((e, k) => {
+        const sub = bondSym(e.order) + write(e.j);
+        s += k < children.length - 1 ? `(${sub})` : sub;
+      });
+      return s;
+    };
+    parts.push(write(start));
+  }
+  return parts.join('.');
+}

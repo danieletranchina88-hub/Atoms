@@ -65,5 +65,34 @@ export function buildPeriodicTable(container, onSelect) {
     select(Z) {
       for (const [z, c] of cells) c.classList.toggle('selected', z === Z);
     },
+    /** Colora le caselle secondo una proprietà (mappa Z → valore); null = colori per blocco. */
+    heatmap(values) {
+      container.classList.toggle('heatmap', !!values);
+      if (!values) {
+        for (const c of cells.values()) { c.style.removeProperty('--heat'); c.style.removeProperty('--heat-ink'); c.title = c.title.split(' · ')[0]; }
+        return null;
+      }
+      const nums = [...values.values()].filter(v => v !== null && Number.isFinite(v));
+      const min = Math.min(...nums), max = Math.max(...nums);
+      for (const [z, c] of cells) {
+        const v = values.get(z);
+        c.title = c.title.split(' · ')[0] + (v !== null && v !== undefined ? ` · ${v.toLocaleString('it-IT', { maximumFractionDigits: 2 })}` : '');
+        if (v === null || v === undefined || !Number.isFinite(v)) { c.style.removeProperty('--heat'); c.style.removeProperty('--heat-ink'); continue; }
+        const t = (v - min) / (max - min || 1);
+        const [r, g, b] = ramp(t);
+        c.style.setProperty('--heat', `rgb(${r}, ${g}, ${b})`);
+        c.style.setProperty('--heat-ink', 0.299 * r + 0.587 * g + 0.114 * b > 140 ? '#10141b' : '#f4f6fa');
+      }
+      return { min, max };
+    },
   };
+}
+
+// Scala di colori sequenziale percettivamente uniforme (approssimazione di "viridis").
+const STOPS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+export function ramp(t) {
+  const x = Math.max(0, Math.min(1, t)) * (STOPS.length - 1);
+  const i = Math.min(Math.floor(x), STOPS.length - 2);
+  const f = x - i;
+  return STOPS[i].map((c, k) => Math.round(c + (STOPS[i + 1][k] - c) * f));
 }

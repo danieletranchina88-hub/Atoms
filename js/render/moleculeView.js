@@ -69,6 +69,7 @@ export function buildMolecule(atoms, bonds, opts = {}) {
     else if (order >= 2.25) { offsets = [0, 1, -1]; dashedFrom = 2; }        // 2,5
     else if (order >= 1.75) offsets = [0.5, -0.5];
     else if (order >= 1.2) { offsets = [0, 1]; dashedFrom = 1; }               // 1,5 aromatico
+    else if (order <= 0.6) { offsets = [0]; dashedFrom = 0; }                  // legame parziale (stato di transizione)
     else offsets = [0];
     const spacing = 0.17 * ANG * scale;
     offsets.forEach((o, k) => {

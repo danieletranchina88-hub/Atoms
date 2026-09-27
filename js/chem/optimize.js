@@ -8,6 +8,7 @@
 import { runHF } from './hf.js';
 import { hfGradient } from './gradient.js';
 import { eigh } from './linalg.js';
+import { harmonicFrequencies } from './vibrations.js';
 
 const rowOf = (Z) => (Z <= 2 ? 0 : Z <= 10 ? 1 : 2);
 const ALPHA = [[1.0, 0.3949, 0.3949], [0.3949, 0.28, 0.28], [0.3949, 0.28, 0.28]];
@@ -202,6 +203,128 @@ export function optimizeGeometry(atoms, opts = {}) {
       for (let i = 0; i < n3; i++) for (let j = 0; j < n3; j++) H[i * n3 + j] += y[i] * y[j] / ys - Hs[i] * Hs[j] / sHs;
     }
     x = xn; E = En; g = gn; res = resN;
+  }
+  return { atoms: make(x), energy: E, result: res, converged, history };
+}
+
+// ---------------------------------------------------------------------------
+// Ricerca dello stato di transizione (punto di sella del primo ordine)
+// Partitioned RFO di Baker (J. Comput. Chem. 7, 385, 1986): si massimizza l'energia lungo
+// l'autovettore dell'Hessiana con autovalore più basso e la si minimizza lungo tutti gli altri.
+// Aggiornamento dell'Hessiana di Bofill (combinazione di Murtagh–Sargent e Powell).
+// ---------------------------------------------------------------------------
+
+
+function projectorTR(atoms, x) {
+  const N = atoms.length;
+  const n3 = 3 * N;
+  const c = [0, 0, 0];
+  for (let i = 0; i < N; i++) for (let k = 0; k < 3; k++) c[k] += x[3 * i + k] / N;
+  const vecs = [];
+  for (let k = 0; k < 3; k++) {
+    const v = new Float64Array(n3);
+    for (let i = 0; i < N; i++) v[3 * i + k] = 1;
+    vecs.push(v);
+  }
+  for (let k = 0; k < 3; k++) {
+    const v = new Float64Array(n3);
+    for (let i = 0; i < N; i++) {
+      const r = [x[3 * i] - c[0], x[3 * i + 1] - c[1], x[3 * i + 2] - c[2]];
+      const e = [0, 0, 0]; e[k] = 1;
+      v[3 * i] = e[1] * r[2] - e[2] * r[1];
+      v[3 * i + 1] = e[2] * r[0] - e[0] * r[2];
+      v[3 * i + 2] = e[0] * r[1] - e[1] * r[0];
+    }
+    vecs.push(v);
+  }
+  const basis = [];
+  for (const v of vecs) {
+    const w = Float64Array.from(v);
+    for (const b of basis) { const d = w.reduce((s, q, i) => s + q * b[i], 0); for (let i = 0; i < n3; i++) w[i] -= d * b[i]; }
+    const l = Math.hypot(...w);
+    if (l > 1e-6) basis.push(w.map(q => q / l));
+  }
+  return basis;
+}
+
+export function optimizeTransitionState(atoms, opts = {}) {
+  const N = atoms.length;
+  const n3 = 3 * N;
+  let x = Float64Array.from(atoms.flatMap(a => a.xyz));
+  const make = (xx) => atoms.map((a, i) => ({ ...a, xyz: [xx[3 * i], xx[3 * i + 1], xx[3 * i + 2]] }));
+  // Hessiana esatta iniziale (differenze finite dei gradienti analitici)
+  const hf = harmonicFrequencies(make(x), opts);
+  let H = Float64Array.from(hf.hessian);
+  let res = hf.reference;
+  let E = res.energy;
+  let g = Float64Array.from(hfGradient(res).flat());
+  let trust = opts.trust ?? 0.15;
+  let prevMode = null;
+  const history = [];
+  let converged = false;
+  const maxSteps = opts.maxSteps ?? 60;
+  for (let step = 0; step <= maxSteps; step++) {
+    const gmax = Math.max(...g.map(Math.abs));
+    history.push({ step, energy: E, gmax });
+    opts.onStep?.({ step, energy: E, gmax, atoms: make(x) });
+    if (gmax < (opts.gmax ?? 3e-4)) { converged = true; break; }
+    if (step === maxSteps) break;
+    // Hessiana proiettata (senza traslazioni e rotazioni)
+    const tr = projectorTR(atoms, x);
+    const Hp = Float64Array.from(H);
+    for (const b of tr) for (let i = 0; i < n3; i++) for (let j = 0; j < n3; j++) Hp[i * n3 + j] += 1e3 * b[i] * b[j];
+    const { values, vectors } = eigh(Hp, n3);
+    const modes = [];
+    for (let k = 0; k < n3; k++) {
+      if (values[k] > 500) continue; // moti esterni spostati in alto
+      const v = new Float64Array(n3);
+      for (let i = 0; i < n3; i++) v[i] = vectors[i * n3 + k];
+      modes.push({ lam: values[k], v, F: v.reduce((s, q, i) => s + q * g[i], 0) });
+    }
+    // modo da seguire: il più basso, o quello più simile al precedente
+    let kt = 0;
+    if (prevMode) {
+      let best = -1;
+      modes.forEach((m, k) => { const o = Math.abs(m.v.reduce((s, q, i) => s + q * prevMode[i], 0)); if (o > best) { best = o; kt = k; } });
+    }
+    const T = modes[kt];
+    prevMode = T.v;
+    const lamP = 0.5 * T.lam + 0.5 * Math.sqrt(T.lam * T.lam + 4 * T.F * T.F);
+    const others = modes.filter((_, k) => k !== kt);
+    const lmin = Math.min(...others.map(m => m.lam));
+    let lo = Math.min(lmin, 0) - 1e3, hi = Math.min(lmin, 0) - 1e-10;
+    const f = (l) => l - others.reduce((s, m) => s + m.F * m.F / (l - m.lam), 0);
+    for (let it = 0; it < 200; it++) { const mid = 0.5 * (lo + hi); if (f(mid) > 0) hi = mid; else lo = mid; }
+    const lamN = 0.5 * (lo + hi);
+    const dx = new Float64Array(n3);
+    const addMode = (m, c) => { for (let i = 0; i < n3; i++) dx[i] += c * m.v[i]; };
+    addMode(T, -T.F / (T.lam - lamP));
+    for (const m of others) addMode(m, -m.F / (m.lam - lamN));
+    let maxDisp = 0;
+    for (let a = 0; a < N; a++) maxDisp = Math.max(maxDisp, Math.hypot(dx[3 * a], dx[3 * a + 1], dx[3 * a + 2]));
+    if (maxDisp > trust) for (let i = 0; i < n3; i++) dx[i] *= trust / maxDisp;
+    const xn = new Float64Array(n3);
+    for (let i = 0; i < n3; i++) xn[i] = x[i] + dx[i];
+    const resN = runHF(make(xn), { ...opts, guess: { Pa: res.Pa, Pb: res.Pb } });
+    const gn = Float64Array.from(hfGradient(resN).flat());
+    // aggiornamento di Bofill
+    const y = new Float64Array(n3);
+    for (let i = 0; i < n3; i++) y[i] = gn[i] - g[i];
+    const Hs = new Float64Array(n3);
+    for (let i = 0; i < n3; i++) { let s = 0; for (let j = 0; j < n3; j++) s += H[i * n3 + j] * dx[j]; Hs[i] = s; }
+    const r = y.map((v, i) => v - Hs[i]);
+    const rs = r.reduce((s, v, i) => s + v * dx[i], 0);
+    const ss = dx.reduce((s, v) => s + v * v, 0);
+    const rr = r.reduce((s, v) => s + v * v, 0);
+    const phi = rr * ss > 0 ? 1 - (rs * rs) / (rr * ss) : 0;
+    for (let i = 0; i < n3; i++) {
+      for (let j = 0; j < n3; j++) {
+        const ms = Math.abs(rs) > 1e-12 ? r[i] * r[j] / rs : 0;
+        const psb = (r[i] * dx[j] + dx[i] * r[j]) / ss - rs * dx[i] * dx[j] / (ss * ss);
+        H[i * n3 + j] += (1 - phi) * ms + phi * psb;
+      }
+    }
+    x = xn; res = resN; E = resN.energy; g = gn;
   }
   return { atoms: make(x), energy: E, result: res, converged, history };
 }
