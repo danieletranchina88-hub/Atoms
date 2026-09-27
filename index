@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulatore Atoms & Orbitals</title>
+    
+    <!-- Importazione di librerie esterne -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #1a2b3c;
+            color: #eef2f7;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            font-size: 2.8rem;
+            color: #4ecca9;
+            margin-bottom: 15px;
+            text-shadow: 0 0 10px rgba(78, 204, 169, 0.5);
+        }
+        
+        .subtitle {
+            font-size: 1.3rem;
+            color: #bde0fe;
+            margin-bottom: 20px;
+        }
+        
+        .main-content {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        
+        .controls-panel, .element-info-panel {
+            background-color: rgba(0, 46, 71, 0.8);
+            border-radius: 15px;
+            padding: 20px;
+            flex: 1;
+        }
+        
+        h2 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #4ecca9;
+        }
+        
+        .control-group {
+            margin-bottom: 30px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        
+        select, button, input[type="range"] {
+            width: 100%;
+            padding: 12px;
+            background-color: #2d4059;
+            border: none;
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        
+        button:hover, select:hover {
+            background-color: #3a5172;
+        }
+        
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background-color: #4ecca9;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        .element-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 20px;
+        }
+        
+        .element-card {
+            background-color: rgba(78, 204, 169, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .element-card:hover {
+            background-color: rgba(78, 204, 169, 0.2);
+            transform: translateY(-5px);
+        }
+        
+        .element-symbol {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #4ecca9;
+            margin-bottom: 8px;
+        }
+        
+        .canvas-container {
+            flex: 2;
+            background-color: rgba(0, 46, 71, 0.3);
+            border-radius: 15px;
+            height: 600px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #orbitalCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        .atom-controls {
+            margin-top: 40px;
+            padding-top: 25px;
+            border-top: 1px solid rgba(78, 204, 169, 0.3);
+        }
+        
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 0.9rem;
+            color: #bde0fe;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .subtitle {
+                font-size: 1.1rem;
+            }
+            
+            #orbitalCanvas {
+                height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Simulatore Atoms & Orbitals</h1>
+            <p class="subtitle">Esplora la struttura atomica e gli orbitali con simulazioni interattive</p>
+        </header>
+        
+        <div class="main-content">
+            <!-- Controlli -->
+            <div class="controls-panel">
+                <h2>Controlli Generali</h2>
+                
+                <div class="control-group">
+                    <label for="atomElement">Seleziona Elemento:</label>
+                    <select id="atomElement">
+                        <option value="H" selected>Hidrogeno (H)</option>
+                        <option value="He">Elio (He)</option>
+                        <option value="Li">Litio (Li)</script
+                        ... <!-- altri elementi -->
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="orbitalType">Seleziona Tipo di Orbitale:</label>
+                    <select id="orbitalType">
+                        <option value="s" selected>s</option>
+                        <option value="p">p</option>
+                        <option value="d">d</option>
+                        <option value="f">f</option>
+                    </select>
+                </div>
+                
+                <!-- Controlli per l'elemento selezionato -->
+                <h2>Controlli Specifici Elemento</h2>
+                <div class="atom-controls" id="elementControls">
+                    <!-- Questa area sarà compilata dinamicamente in base all'elemento -->
+                </div>
+                
+                <!-- Controlli orbitali -->
+                <div class="control-group">
+                    <label for="visualizationMode">Modalità di Visualizzazione:</label>
+                    <select id="visualizationMode">
+                        <option value="probabilityDensity" selected>Densità Probabilistica</option>
+                        <option value="orbitalShape">Forma dell'Orbitale</option>
+                        <option value="electronProbability">Probabilità Elettronica</option>
+                    </select>
+                </div>
+                
+                <button id="toggleElectronAnimation" onclick="toggleElectronAnimation()">Anima elettroni (Toggle)</button>
+            </div>
+            
+            <!-- Informazioni Elemento -->
+            <div class="element-info-panel">
+                <h2>Informazioni sull'Elemento</h2>
+                
+                <p id="currentElementInfo">H - Idrogeno, simbolo H. Numero atomico 1.</p>
+                
+                <button onclick="showOrbitali()" style="background-color: #4ecca9; color: black;">Mostra Orbitali</button>
+                <button onclick="toggleElectronAnimation()" style="background-color: #5865F2; margin-top: 10px;">Anima elettroni</button>
+                
+                <!-- Lista degli elementi -->
+                <h3>Elementi della Tavola Periodica</h3>
+                <div class="element-list">
+                    <!-- Elementi generati dinamicamente -->
+                    <div class="element-card" onclick="selectElement('H')"><span class="element-symbol">H</span><br>Litio</div>
+                    <div class="element-card" onclick="selectElement('He')">He<br>Elio</div>
+                    <!-- ... altri elementi aggiunti in JavaScript -->
+                </div>
+            </div>
+            
+            <!-- Canvas 3D -->
+            <div class="canvas-container">
+                <canvas id="orbitalCanvas"></canvas>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Simulatore di Fisica Pura - Atoms & Orbitals</p>
+            <p style="font-size: 0.8rem;">Questo simulatore è basato su modelli matematici e visualizzazioni scientifiche accurate.</p>
+        </footer>
+    </div>
+
+    <!-- JavaScript Three.js per la visualizzazione -->
+    <script>
+        // Variabili globali
+        let scene, camera, renderer, controls;
+        let atomMeshes = {};
+        let nucleusMesh;
+        
+        // Elemento selezionato e configurazione dell'orbitale
+        let selectedElement = 'H';
+        let selectedOrbitalType = 's';
+        let showElectronAnimation = true;
+        
+        // Dati base sugli elementi
+        const elementsData = [
+            {symbol: "H", name: "Idrogeno", atomicNumber: 1, electrons: [1]},
+            {symbol: "He", name: "Elio", atomicNumber: 2, electrons: [0.5, 0.5]}, // semplificato
+            {symbol: "Li", name: "Litio", atomicNumber: 3, electrons: [2, 0, 1]},
+            // Aggiungi altri elementi qui...
+        ];
+        
+        // Inizializzazione Three.js
+        function initThreeJS() {
+            const canvas = document.getElementById('orbitalCanvas');
+            
+            // Configurazione della scena
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            
+            // Dimensioni del canvas responsive
+            resizeCanvas();
+            
+            // Aggiungi luce e controlli
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0x4ecca9, 1);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+            
+            // Controlli per la rotazione della camera
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            // Camera di default (molto vicina al nucleo)
+            camera.position.set(8, 8, 8);
+            
+            // Crea il nucleo atomico
+            nucleusMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(1, 32, 32),
+                new THREE.MeshPhongMaterial({ 
+                    color: 0x4ecca9,
+                    emissive: 0x005f5d,
+                    shininess: 100
+                })
+            );
+            
+            scene.add(nucleusMesh);
+            
+            // Inizia l'animazione
+            animate();
+        }
+        
+        function resizeCanvas() {
+            const container = document.querySelector('.canvas-container');
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+        
+        // Funzione per creare gli orbitali atomici (implementazione semplificata)
+        function createOrbital(name, color, type) {
+            let geometry, material;
+            
+            switch(type) {
+                case 's':
+                    geometry = new THREE.SphereGeometry(3, 32, 32);
+                    break;
+                    
+                case 'p':
+                    // Forma dell'orbitale p semplificata
+                    const segments = Math.ceil(Math.sqrt(elementsData.length));
+                    const radius = 3.5;
+                    
+                    // Creare una forma parametrica per l'orbitale p
+                    geometry = new THREE.ParametricGeometry((u, v, w) => {
+                        let x = u * radius;
+                        let y = v * radius;
+                        
+                        // Funzione matematica semplificata dell'orbitale p (x-y)
+                        const theta = Math.acos(w);
+                        const phi = Math.sqrt(Math.pow(u, 2) + Math.pow(v, 2));
+                        
+                        return new THREE.Vector3(
+                            x,
+                            y * Math.cos(phi),
+                            z * Math.sin(theta)
+                        );
+                    }, segments);
+                    
+                    // Material per l'orbitale p
+                    material = new THREE.MeshPhongMaterial({
+                        color: color,
+                        transparent: true,
+                        opacity: 0.7,
+                        wireframe: false
+                    });
+                    
+                    break;
+                
+                case 'd':
+                    // Forma dell'orbitale d semplificata
+                    
+                    geometry = new THREE.ParametricGeometry((u, v, w) => {
+                        let r = Math.sqrt(u * u + v * v);
+                        
+                        if (r === 0) return; // Evitare divisioni per zero
+                        
+                        const theta = Math.acos(w);
+                        const phi = Math.atan2(v, u);
+                        const k = 3.5;
+                        
+                        const x = r * k * Math.sin(6 * phi) * Math.sin(theta);
+                        const y = r * k * Math.sin(6 * phi) * Math.cos(theta);
+                        const z = 0; // semplificazione per dimensione
+            
+            return new THREE.Vector3(x, y, z);
+                    }, segments);
+                    
+                    material = new THREE.MeshPhongMaterial({
+                        color: color,
+                        wireframe: false
+                    });
+                    
+                    break;
+                
+                default:
+                    geometry = new THREE.SphereGeometry(2.5, 32, 32);
+            }
+            
+            return {
+                mesh: new THREE.Mesh(geometry, material),
+                orbitalType: type
+            };
+        }
+        
+        // Aggiorna la visualizzazione in base agli orbitali selezionati
+        function updateAtomVisualization() {
+            // Rimuovere gli orbitali esistenti (se ci sono)
+            
+            const element = elementsData.find(el => el.symbol === selectedElement);
+            if (!element) return;
+            
+            // Creazione degli orbitali in base ai dati dell'elemento
+            let atomicNumber = element.atomicNumber;
+            
+            scene.remove(...scene.children.filter(child => child.type === 'Mesh'));
+            
+            // Aggiungere il nucleo (stesso per tutti gli atomi)
+            nucleusMesh.visible = true;
+            
+            // Creare orbitali in base al tipo selezionato
+            if (selectedOrbitalType === 's') {
+                const sOrbital = createOrbital('orb_s_' + atomicNumber, 0x4ecca9, selectedOrbitalType);
+                scene.add(sOrbital.mesh);
+                
+                // Aggiungere gli elettroni (semplificato)
+                if (showElectronAnimation) {
+                    for (let i = 0; i < element.electrons.length; i++) {
+                        const electronGeometry = new THREE.SphereGeometry(0.1, 32, 32);
+                        
+                        // Posizione dell'elettrone basata sugli orbitali
+                        let position;
+                        if (selectedOrbitalType === 's') {
+                            position = {x: sOrbital.mesh.geometry.parameters.radius * Math.random() - 
+                                         sOrbital.mesh.geometry.parameters.radius/2,
+                                        y: 0, z: 0};
+                        } else {
+                            // Logica più complessa per elettroni negli orbitali
+                            position = {x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*3, 
+                                         z: Math.sin(selectedOrbitalType === 'p' ? Math.PI/2 : 0)};
+                        }
+                        
+                        const electronMesh = new THREE.Mesh(electronGeometry, 
+                            new THREE.MeshPhongMaterial({color: 0xff00ff}));
+                            
+                        scene.add(electronMesh);
+                    }
+                }
+                
+            } else if (selectedOrbitalType === 'p') {
+                // Creazione di orbitali p in base al numero atomico
+                for (let i = 1; i <= element.electrons.length + 2; i++) {
+                    const color = 0x4ecca9;
+                    
+                    const pxOrbital = createOrbital('orb_px_' + i, color, 'p');
+                    scene.add(pxOrbital.mesh);
+                    
+                    // Aggiungere gli elettroni
+                    if (showElectronAnimation) {
+                        for (let j = 0; j < element.electrons.length; j++) {
+                            const electronGeometry = new THREE.SphereGeometry(0.1, 32, 32);
+                            
+                            // Logica semplificata per animazione elettronici
+                            const theta = Math.PI * (j + i) / (element.electrons.length + 1);
+                            const phi = Math.random() * Math.PI;
+                            
+                            position.x = pxOrbital.mesh.geometry.parameters.radiusX * 
+                                         Math.sin(theta) * Math.cos(phi);
+                                  
+                            position.y = pxOrbital.mesh.geometry.parameters.radiusY * 
+                                         (Math.sqrt(2)*(theta - Math.PI/2)*3.14/5 + Math.random() );
+                                   
+                            scene.add(electronMesh);
+                        }
+                    }
+                }
+            } else {
+                // Per d e f, creare mesh più complesse basate sul tipo di orbitale selezionato
+                
+                for (let i = 0; i < elementsData.length * 2; i++) {
+                    const color = new THREE.Color().setHSL((i / atomicNumber) % 1, 0.7, 0.5);
+                    
+                    // Creazione della forma dell'orbitale
+                    createOrbital(`orb_${selectedOrbitalType}_${i}`, color.getHex(), selectedOrbitalType);
+                }
+            }
+        }
+        
+        // Animazione degli elettroni (semplificata)
+        function animateElectrons() {
+            const electronMeshes = scene.children.filter(child => child.geometry.type === 'SphereGeometry');
+            
+            for (const mesh of electronMeshes) {
+                if (showElectronAnimation && Math.random() < 0.1) { // Semplificazione per l'animazione
+                    const speed = 0.5;
+                    mesh.rotation.x += speed / 1000;
+                    mesh.rotation.y += speed * 2/1000;
+                    
+                    // Spostamento casuale lungo gli assi basato sul tipo di orbitale
+                    if (selectedOrbitalType === 'p') {
+                        const orbitRadius = 4 + Math.random() * 3;
+                        const angle = mesh.rotation.x + Math.PI/2;
+                        
+                        mesh.position.x = orbitRadius * Math.cos(angle);
+                        mesh.position.y = orbitRadius * Math.sin(angle) * Math.sin(mesh.rotation.x);
+                    }
+                }
+            }
+        }
+        
+        // Toggle dell'animazione elettronici
+        function toggleElectronAnimation() {
+            showElectronAnimation = !showElectronAnimation;
+            
+            if (showElectronAnimation) {
+                document.getElementById('toggleElectronAnimation').style.backgroundColor = '#4ecca9';
+                animateElectrons();
+            } else {
+                // Fermare l'animazione
+                const electronMeshes = scene.children.filter(child => child.geometry.type === 'SphereGeometry');
+                
+                for (const mesh of electronMeshes) {
+                    mesh.userData.animationPaused = true;
+                }
+                
+                document.getElementById('toggleElectronAnimation').style.backgroundColor = '#5865F2';
+            }
+            
+        }
+        
+        // Funzione per cambiare elemento
+        function selectElement(elementSymbol) {
+            selectedElement = elementSymbol;
+            updateAtomVisualization();
+        }
+        
+        // Funzione principale dell'animazione Three.js
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            controls.update();
+            
+            // Animazione degli orbitali in base al tipo
+            if (selectedOrbitalType === 's') {
+                nucleusMesh.rotation.x += 0.01;
+                nucleusMesh.rotation.y += 0.02;
+                
+                animateElectrons();
+                
+            } else {
+                for (const mesh of scene.children) {
+                    if (!mesh.isNucleus && !mesh.userData.animationPaused) {
+                        // Animazione basata sulla forma dell'orbitale
+                        const speed = 0.5 + Math.random() * 0.3;
+                        mesh.rotation.x += speed / 1000;
+                        animateElectrons();
+                    }
+                }
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // Inizializzazione quando il documento è pronto
+        document.addEventListener('DOMContentLoaded', function() {
+            initThreeJS();
+            
+            // Impostare l'elemento iniziale
+            const atomElementSelect = document.getElementById('atomElement');
+            atomElementSelect.onchange = function() {
+                selectElement(this.value);
+            };
+            
+            // Generazione dinamica della lista degli elementi
+            updateAtomVisualization();
+        });
+    </script>
+</body>
+</html>
