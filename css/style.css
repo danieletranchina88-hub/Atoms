@@ -362,10 +362,8 @@ select {
 }
 
 .panel h3 {
-  font: 600 13px/1.2 var(--font-sans);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  font: 600 14px/1.25 var(--font-display);
+  color: var(--text);
   margin: 0 0 8px;
 }
 
@@ -639,3 +637,19 @@ body[data-mode="reaction"] .workspace { grid-template-columns: 330px minmax(0, 1
 .bchar { font-size: 11px; }
 .b-pos { color: var(--block-f); }
 .b-neg { color: var(--phase-pos); }
+
+/* ---------------- laboratorio ---------------- */
+#lab-plot { display: none; position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; }
+body[data-mode="lab"] #lab-plot { display: block; background: var(--panel); inset: 52px 0 0 0; height: calc(100% - 52px); }
+body[data-mode="lab"] .viewport { background: var(--panel); }
+body[data-mode="lab"] .viewport > canvas:not(#lab-plot) { visibility: hidden; }
+body[data-mode="lab"] .viewport-tools { display: none; }
+body[data-mode="lab"] .table-band { display: none; }
+body[data-mode="lab"] .atom-only { display: none; }
+body[data-mode="lab"] .workspace { grid-template-columns: 330px minmax(0, 1fr) 380px; }
+body[data-mode="lab"] .viewport-title { text-shadow: none; }
+@media (max-width: 1280px) { body[data-mode="lab"] .workspace { grid-template-columns: 320px minmax(0, 1fr); } }
+@media (max-width: 820px) { body[data-mode="lab"] .workspace { grid-template-columns: minmax(0, 1fr); } }
+.lab-tabs { margin-bottom: 6px; }
+.lab-inputs select { width: 100%; }
+.lab-inputs .ctl { margin-top: 4px; }

@@ -535,3 +535,159 @@ export function drawProfile(canvas, { left, right, curves, reference }) {
   ctx.font = `11px ${FONT}`;
   ctx.fillText('coordinata di reazione →', X(0.5), h - 2);
 }
+
+/**
+ * Grafico cartesiano generico con limiti espliciti.
+ * opts: { series:[{xs,ys,color,width,dash,label,fill}], xmin,xmax,ymin,ymax, xlabel, ylabel,
+ *         vlines:[{x,label,color,dash}], hlines:[{y,label,color,dash}], hbands:[{y0,y1,color,label}],
+ *         points:[{x,y,color,label}], legend:true, logY:false }
+ */
+export function drawXY(canvas, o) {
+  const { ctx, w, h } = setup(canvas);
+  const ink = cssVar('--text');
+  const muted = cssVar('--muted');
+  const grid = cssVar('--chart-grid');
+  const pad = { l: 52, r: 14, t: o.legend === false ? 12 : 28, b: 34 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const tr = o.logY ? (v) => Math.log10(Math.max(v, 1e-300)) : (v) => v;
+  const y0 = tr(o.ymin), y1 = tr(o.ymax);
+  const X = (x) => pad.l + (x - o.xmin) / (o.xmax - o.xmin) * pw;
+  const Y = (y) => pad.t + (1 - (tr(y) - y0) / (y1 - y0)) * ph;
+  const nice = (range, target) => {
+    const raw = range / target;
+    const p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const f = raw / p;
+    return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
+  };
+  ctx.font = `11px ${MONO}`;
+  ctx.fillStyle = muted;
+  ctx.strokeStyle = grid;
+  ctx.lineWidth = 1;
+  // bande orizzontali (es. viraggio di un indicatore)
+  for (const b of o.hbands ?? []) {
+    ctx.fillStyle = b.color;
+    const ya = Y(b.y1), yb = Y(b.y0);
+    ctx.fillRect(pad.l, ya, pw, yb - ya);
+    if (b.label) { ctx.fillStyle = muted; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(b.label, pad.l + 4, ya + 2); }
+  }
+  ctx.fillStyle = muted;
+  const sx = nice(o.xmax - o.xmin, Math.max(3, Math.floor(pw / 80)));
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let v = Math.ceil(o.xmin / sx) * sx; !o.noXTicks && v <= o.xmax + 1e-12; v += sx) {
+    const x = X(v);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+    ctx.fillText(fmtNum(v), x, pad.t + ph + 5);
+  }
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  if (o.logY) {
+    for (let e = Math.ceil(y0); e <= y1; e++) {
+      const y = Y(Math.pow(10, e));
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+      ctx.fillText(`10${sup(e)}`, pad.l - 6, y);
+    }
+  } else {
+    const sy = nice(o.ymax - o.ymin, Math.max(3, Math.floor(ph / 45)));
+    for (let v = Math.ceil(o.ymin / sy) * sy; v <= o.ymax + 1e-12; v += sy) {
+      const y = Y(v);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+      ctx.fillText(fmtNum(v), pad.l - 6, y);
+    }
+  }
+  ctx.strokeStyle = muted;
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + ph); ctx.lineTo(pad.l + pw, pad.t + ph); ctx.stroke();
+  ctx.fillStyle = muted;
+  ctx.font = `11px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(o.xlabel ?? '', pad.l + pw, h - 2);
+  ctx.save();
+  ctx.translate(12, pad.t + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(o.ylabel ?? '', 0, 0);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(pad.l, pad.t, pw, ph);
+  ctx.clip();
+  for (const s of o.series) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < s.xs.length; i++) {
+      const yv = s.ys[i];
+      if (!Number.isFinite(yv)) { started = false; continue; }
+      const px = X(s.xs[i]), py = Y(yv);
+      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+    }
+    if (s.fill) {
+      ctx.save();
+      ctx.lineTo(X(s.xs[s.xs.length - 1]), Y(o.logY ? o.ymin : Math.max(o.ymin, 0)));
+      ctx.lineTo(X(s.xs[0]), Y(o.logY ? o.ymin : Math.max(o.ymin, 0)));
+      ctx.closePath();
+      ctx.fillStyle = s.fill;
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.width ?? 1.8;
+    ctx.setLineDash(s.dash ?? []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for (const v of o.vlines ?? []) {
+    ctx.strokeStyle = v.color ?? muted;
+    ctx.setLineDash(v.dash ?? [4, 4]);
+    ctx.beginPath(); ctx.moveTo(X(v.x), pad.t); ctx.lineTo(X(v.x), pad.t + ph); ctx.stroke();
+    ctx.setLineDash([]);
+    if (v.label) { ctx.fillStyle = v.color ?? muted; ctx.font = `10.5px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(v.label, X(v.x) + 3, pad.t + 2 + (v.row ?? 0) * 13); }
+  }
+  for (const v of o.hlines ?? []) {
+    ctx.strokeStyle = v.color ?? muted;
+    ctx.setLineDash(v.dash ?? [4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(v.y)); ctx.lineTo(pad.l + pw, Y(v.y)); ctx.stroke();
+    ctx.setLineDash([]);
+    if (v.label) { ctx.fillStyle = v.color ?? muted; ctx.font = `10.5px ${MONO}`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(v.label, pad.l + pw - 3, Y(v.y) - 2); }
+  }
+  for (const p of o.points ?? []) {
+    ctx.fillStyle = p.color ?? ink;
+    ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), p.r ?? 4, 0, 2 * Math.PI); ctx.fill();
+    if (p.label) { ctx.font = `10.5px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(p.label, X(p.x) + 6, Y(p.y) - 3); }
+  }
+  ctx.restore();
+  if (o.legend !== false) {
+    ctx.font = `11px ${FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    let lx = pad.l;
+    for (const s of o.series) {
+      if (!s.label) continue;
+      const tw = ctx.measureText(s.label).width;
+      if (lx + tw + 22 > w) break;
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash(s.dash ?? []);
+      ctx.beginPath(); ctx.moveTo(lx, 12); ctx.lineTo(lx + 12, 12); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = ink;
+      ctx.fillText(s.label, lx + 16, 12);
+      lx += tw + 28;
+    }
+  }
+}
+
+function fmtNum(v) {
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1e5 || a < 1e-3)) {
+    const e = Math.floor(Math.log10(a));
+    return `${+(v / Math.pow(10, e)).toFixed(1)}·10${sup(e)}`;
+  }
+  return String(+v.toPrecision(4)).replace('.', ',');
+}
+
+function sup(n) {
+  return String(n).split('').map(c => ({ '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' }[c] ?? c)).join('');
+}

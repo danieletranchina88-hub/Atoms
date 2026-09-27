@@ -18,6 +18,7 @@ import { PAULING, ALLEN, ELECTRON_AFFINITY, OXIDATION_STATES } from './chem/elem
 import { drawLineChart, drawLevels, drawMODiagram, drawSlice, superscript } from './ui/charts.js';
 import { initMoleculeMode, activateMolecule, deactivateMolecule, moleculeThemeChanged, moleculeResize } from './ui/moleculeMode.js';
 import { initReactionMode, activateReaction, deactivateReaction, reactionRedraw } from './ui/reactionMode.js';
+import { activateLab, deactivateLab, labRedraw } from './ui/labMode.js';
 
 const HARTREE_EV = 27.211386245988;
 const BOHR_PM = 52.917721090;
@@ -162,6 +163,7 @@ function onThemeChange() {
   viewer.applyTheme();
   if (state.mode === 'molecule') { viewer.setAxesVisible(false); moleculeThemeChanged(); return; }
   if (state.mode === 'reaction') { viewer.setAxesVisible(false); reactionRedraw(); return; }
+  if (state.mode === 'lab') { labRedraw(); return; }
   if (state.atom) { render3D(); drawCharts(); }
 }
 
@@ -171,6 +173,7 @@ new ResizeObserver(() => {
   resizeTimer = setTimeout(() => {
     if (state.mode === 'molecule') moleculeResize();
     else if (state.mode === 'reaction') reactionRedraw();
+    else if (state.mode === 'lab') labRedraw();
     else if (state.atom) drawCharts();
   }, 120);
 }).observe(document.querySelector('.charts'));
@@ -179,6 +182,7 @@ window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if (h === 'molecole' && state.mode !== 'molecule') { setMode('molecule'); return; }
   if (h === 'reazioni' && state.mode !== 'reaction') { setMode('reaction'); return; }
+  if (h === 'laboratorio' && state.mode !== 'lab') { setMode('lab'); return; }
   const Z = zFromHash();
   if (Z && Z !== state.Z) selectElement(Z);
 });
@@ -219,7 +223,7 @@ async function selectElement(Z) {
   $('busy').hidden = true;
 }
 
-const CHEM_MODES = new Set(['molecule', 'reaction']);
+const CHEM_MODES = new Set(['molecule', 'reaction', 'lab']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
@@ -228,10 +232,14 @@ function setMode(mode) {
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'molecule' && mode !== 'molecule') deactivateMolecule();
   if (prev === 'reaction' && mode !== 'reaction') deactivateReaction();
+  if (prev === 'lab' && mode !== 'lab') deactivateLab();
   $('analysis').hidden = !CHEM_MODES.has(mode);
-  try { history.replaceState(null, '', CHEM_MODES.has(mode) ? `#${mode === 'molecule' ? 'molecole' : 'reazioni'}` : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
+  const hashes = { molecule: 'molecole', reaction: 'reazioni', lab: 'laboratorio' };
+  try { history.replaceState(null, '', CHEM_MODES.has(mode) ? `#${hashes[mode]}` : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
+  if (mode !== 'lab') viewer.renderer.domElement.style.visibility = '';
   if (mode === 'molecule') { activateMolecule(); return; }
   if (mode === 'reaction') { activateReaction(); return; }
+  if (mode === 'lab') { viewer.clear(); activateLab(); return; }
   document.body.dataset.mode = 'atom';
   viewer.setAxesVisible(true);
   $('busy').hidden = true;
@@ -1028,7 +1036,7 @@ initReactionMode(viewer);
 document.body.dataset.mode = 'atom';
 {
   const h = location.hash.slice(1);
-  const startMode = h === 'molecole' ? 'molecule' : h === 'reazioni' ? 'reaction' : null;
+  const startMode = { molecole: 'molecule', reazioni: 'reaction', laboratorio: 'lab' }[h] ?? null;
   if (startMode) state.mode = startMode;
   selectElement(zFromHash() ?? 6);
   if (startMode) { state.mode = 'atom'; setMode(startMode); }

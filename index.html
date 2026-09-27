@@ -34,6 +34,7 @@
       <button type="button" role="tab" id="mode-bond" data-mode="bond" aria-selected="false">Legami σ π</button>
       <button type="button" role="tab" id="mode-molecule" data-mode="molecule" aria-selected="false">Molecole</button>
       <button type="button" role="tab" id="mode-reaction" data-mode="reaction" aria-selected="false">Reazioni</button>
+      <button type="button" role="tab" id="mode-lab" data-mode="lab" aria-selected="false">Laboratorio</button>
     </nav>
     <button type="button" class="icon-btn" id="theme-toggle" aria-label="Cambia tema chiaro/scuro">◐</button>
   </header>
@@ -66,6 +67,7 @@
 
     <div class="stage">
       <div class="viewport" id="viewport">
+        <canvas id="lab-plot" aria-label="Grafico principale del laboratorio"></canvas>
         <div class="viewport-title" id="viewport-title"></div>
         <div class="viewport-legend" id="viewport-legend"></div>
         <div class="busy" id="busy" hidden>
