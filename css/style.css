@@ -677,3 +677,16 @@ body[data-mode="sandbox"] .workspace { grid-template-columns: 330px minmax(0, 1f
 .sb-log .t { color: var(--muted); display: inline-block; min-width: 64px; }
 .info-list dt.sub { padding-left: 10px; font-size: 12px; }
 #sb-light[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 40%, var(--panel)); }
+
+/* ---------------- becher ---------------- */
+body[data-mode="beaker"] #lab-plot { display: block; background: var(--panel); inset: 52px 0 0 0; height: calc(100% - 52px); }
+body[data-mode="beaker"] .viewport { background: var(--panel); }
+body[data-mode="beaker"] .viewport > canvas:not(#lab-plot) { visibility: hidden; }
+body[data-mode="beaker"] .viewport-tools { display: none; }
+body[data-mode="beaker"] .table-band { display: none; }
+body[data-mode="beaker"] .atom-only { display: none; }
+body[data-mode="beaker"] .workspace { grid-template-columns: 330px minmax(0, 1fr) 380px; }
+body[data-mode="beaker"] .viewport-title { text-shadow: none; }
+@media (max-width: 1280px) { body[data-mode="beaker"] .workspace { grid-template-columns: 320px minmax(0, 1fr); } }
+@media (max-width: 820px) { body[data-mode="beaker"] .workspace { grid-template-columns: minmax(0, 1fr); } }
+td.eqn { white-space: normal; font-family: var(--font-mono); font-size: 12px; }
