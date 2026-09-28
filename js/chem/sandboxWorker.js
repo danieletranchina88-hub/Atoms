@@ -8,6 +8,7 @@ import { embedMolecule } from './embed.js';
 import { analyzeStructure } from './structure.js';
 import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
 import { makeHFProvider, aimdFeasible } from './aimd.js';
+import { RDF, MSD, HeatCapacity } from './mdAnalysis.js';
 
 const BOHR_ANG = 0.52917721090;
 let sim = new Simulation({ box: 20, T: 300 });
@@ -21,6 +22,65 @@ let mbHist = null;
 let lastEventSent = 0;
 let censusSent = -1;
 const templates = new Map();
+// chimica fisica: g(r), spostamento quadratico medio, capacità termica
+const rdf = new RDF(10, 100);
+const msd = new MSD();
+const heatCap = new HeatCapacity();
+let rdfPairUser = null;
+let physSent = -1;
+
+function resetAnalysis() {
+  rdf.reset(rdfPairUser);
+  msd.reset(sim);
+  heatCap.reset();
+}
+
+/** Coppia predefinita per g(r): l'elemento più abbondante diverso dall'idrogeno, con sé stesso. */
+function defaultPair() {
+  const counts = new Map();
+  for (const z of sim.Z) counts.set(z, (counts.get(z) ?? 0) + 1);
+  const ranked = [...counts].sort((a, b) => (a[0] === 1) - (b[0] === 1) || b[1] - a[1]);
+  return ranked.length ? [ranked[0][0], ranked[0][0]] : null;
+}
+
+function analysisSample() {
+  const present = new Set(sim.Z);
+  if (!rdf.pair || !present.has(rdf.pair[0]) || !present.has(rdf.pair[1])) rdf.reset(rdfPairUser && present.has(rdfPairUser[0]) && present.has(rdfPairUser[1]) ? rdfPairUser : defaultPair());
+  rdf.accumulate(sim);
+  msd.sample(sim);
+  // C_V dalle fluttuazioni vale nell'insieme canonico: termostato acceso, volume e composizione fissi
+  if (sim.thermostat && !sim.barostat.on) heatCap.sample(sim, `${sim.N}|${sim.T}|${sim.box}|${forceField}`);
+  else heatCap.reset();
+}
+
+function physics() {
+  const counts = new Map();
+  for (const z of sim.Z) counts.set(z, (counts.get(z) ?? 0) + 1);
+  return {
+    rdf: rdf.result(),
+    msd: msd.result(sim.box),
+    cv: sim.thermostat && !sim.barostat.on ? heatCap.result(sim.T) : null,
+    elements: [...counts].sort((a, b) => b[1] - a[1]).map(([z]) => z),
+    nMol: sim.frags?.length ?? 0, N: sim.N, T: sim.T, box: sim.box,
+    barostat: sim.barostat,
+  };
+}
+
+function snapshot() {
+  return { Z: sim.Z.slice(), pos: Array.from(sim.pos), vel: Array.from(sim.vel), box: sim.box, T: sim.T, thermostat: sim.thermostat, dt: sim.dt, forceField, barostat: { ...sim.barostat } };
+}
+
+function restore(d) {
+  sim = new Simulation({ box: d.box, T: d.T, dt: d.dt ?? 0.4 });
+  sim.addAtoms(d.Z.map((z, i) => ({ Z: z, pos: d.pos.slice(3 * i, 3 * i + 3), vel: d.vel.slice(3 * i, 3 * i + 3) })));
+  sim.thermostat = d.thermostat;
+  if (d.barostat) sim.barostat = { ...d.barostat };
+  setForceField(d.forceField ?? 'reactive');
+  sim.forces();
+  sim.census();
+  lastEventSent = 0; mbHist = null;
+  resetAnalysis();
+}
 
 /** Geometria di una molecola dal suo SMILES: modello VSEPR, poi minimizzazione con il campo reattivo. */
 function template(smiles) {
@@ -94,6 +154,7 @@ function loadPreset(p) {
     light = { ...light, on: false };
     lastEventSent = 0;
     mbHist = null;
+    resetAnalysis();
     return { placed: p.atoms.length, wanted: p.atoms.length };
   }
   setForceField('reactive');
@@ -113,6 +174,7 @@ function loadPreset(p) {
   lastEventSent = 0;
   mbHist = null;
   sim.census();
+  resetAnalysis();
   return { placed, wanted };
 }
 
@@ -180,6 +242,8 @@ function frame() {
       frags: sim.frags?.map(f => f.atoms) ?? [],
     };
     lastEventSent = sim.events.length;
+    // le analisi si ricalcolano ogni 5 censimenti (la normalizzazione di g(r) costa qualche millisecondo)
+    if (physSent < 0 || sim.history.length - physSent >= 5 || sim.history.length < physSent) { msg.phys = physics(); physSent = sim.history.length; }
   }
   postMessage(msg, [pos.buffer, q.buffer, ke.buffer]);
 }
@@ -191,6 +255,7 @@ function loop() {
     while (n < stepsPerFrame && performance.now() - t0 < msTarget) {
       sim.step();
       n++;
+      if (sim.stepCount % sim.censusEvery === 0) analysisSample();
       if (light.on) {
         // fotoni: processo di Poisson con `rate` assorbimenti per picosecondo
         const p = light.rate * sim.dt / 1000;
@@ -219,7 +284,7 @@ onmessage = (ev) => {
         postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero.` : '' });
         break;
       }
-      case 'clear': sim.clear(); lastEventSent = 0; mbHist = null; break;
+      case 'clear': sim.clear(); lastEventSent = 0; mbHist = null; resetAnalysis(); break;
       case 'remove': sim.remove(m.indices); sim.provider?.reset(); sim.census(); lastEventSent = sim.events.length; break;
       case 'set':
         if (m.T !== undefined) sim.T = m.T;
@@ -232,7 +297,12 @@ onmessage = (ev) => {
         if (m.light) light = { ...light, ...m.light };
         if (m.mbSpecies !== undefined) { mbSpecies = m.mbSpecies; mbHist = null; }
         if (m.forceField !== undefined) setForceField(m.forceField, m.basis ?? hfBasis);
+        if (m.barostat) sim.barostat = { ...sim.barostat, ...m.barostat };
+        if (m.rdfPair !== undefined) { rdfPairUser = m.rdfPair; rdf.reset(m.rdfPair); physSent = -1; }
         break;
+      case 'resetAnalysis': resetAnalysis(); physSent = -1; break;
+      case 'snapshot': postMessage({ type: 'snapshot', name: m.name, data: snapshot() }); break;
+      case 'restore': restore(m.data); physSent = -1; break;
       case 'step': for (let k = 0; k < (m.n ?? 1); k++) sim.step(); break;
       case 'grab': sim.grab = m.i === null ? null : { i: m.i, target: m.target }; break;
       case 'spark': sim.spark(m.center, m.radius ?? 4, m.T ?? 8000); break;

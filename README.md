@@ -48,6 +48,8 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - Cariche parziali per equalizzazione dell'elettronegatività (split-charge equilibration, parametri QEq/UFF); angoli dal teorema di Coulson (cos θ = −1/λ) con la correzione VSEPR per le coppie solitarie; van der Waals UFF; legame a idrogeno con il termine di DREIDING.
 - Fotoni di energia E = hc/λ assorbiti dai legami; riconoscimento automatico di specie e reazioni con isteresi sull'ordine di legame.
 - Dinamica *ab initio*: UHF a ogni passo con gradiente analitico, stato di spin più stabile (O₂ tripletto), soluzione a spin rotto per la rottura dei legami.
+- Chimica fisica sulla traiettoria: funzione di distribuzione radiale g(r) normalizzata sulla distribuzione esatta delle distanze nel cubo (senza condizioni periodiche), spostamento quadratico medio con esponente α e coefficiente di diffusione dalla relazione di Einstein (solo nel regime diffusivo), capacità termica C<sub>V</sub> dalle fluttuazioni dell'energia nell'insieme canonico (con errore a blocchi e controllo di stazionarietà), barostato di Berendsen per lavorare a pressione costante.
+- Esperimenti personali salvati nel browser (posizioni e velocità) ed esportazione delle coordinate in formato XYZ.
 
 ### Becher: equilibri in soluzione acquosa
 - Database termodinamico **MINTEQ v4** (U.S. EPA, distribuito con [PHREEQC dell'USGS](https://www.usgs.gov/software/phreeqc-version-3)): 668 specie in soluzione e 74 solidi, ognuno con la sua fonte (NIST Critical Stability Constants, Bard 1985…). Il file è convertito da `tools/buildAqueousDB.mjs`. Aggiunte con fonte: ammino-complessi di Cu, Zn, Ni (database LLNL), FeSCN²⁺ (Inorg. Chim. Acta 2018), indicatori (Harris, *Quantitative Chemical Analysis*), entalpie di soluzione (CRC).
@@ -78,6 +80,7 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | Strutture di Lewis, risonanza, numeri di ossidazione, VSEPR, gruppi puntuali | casi da manuale | esatto |
 | Campo reattivo: forze = −∇E | differenze finite | 10⁻⁸ |
 | Campo reattivo: geometrie (H₂O 105°, CH₄ 109,47°, C–C/C=C/C≡C) ed energie di reazione (2 H₂ + O₂: −434 contro −484 kJ/mol) | dati sperimentali | pochi % |
+| Dinamica molecolare: ⟨r⟩ nel cubo = 0,6617 L (costante di Robbins), g(r) = 1 per il gas ideale, C<sub>V</sub> dell'argon gassoso = 3/2 Nk<sub>B</sub>, volume a pressione costante uguale a quello del gas ideale | analitico | entro l'errore statistico; volume entro il 3 % |
 | Cinetica: soluzioni esatte (primo e secondo ordine, Bateman), problema rigido di Robertson (riferimento di Hairer e Wanner), equilibrio Q = k/k<sub>r</sub>, stato stazionario di Chapman, k del ciclopropano a 500 °C | analitico / Atkins | 10⁻⁵–10⁻⁷ relativo; k entro il 3 % |
 | Becher: pH di acidi e basi deboli, tamponi, K<sub>sp</sub>, calore di neutralizzazione (ΔT = 6,67 K), pK<sub>w</sub>(T) (Bandura–Lvov 2006), Nernst per Fe³⁺/Fe²⁺, redox con i metalli; convergenza di tutte le 588 combinazioni catione × anione | valori da manuale | 0,01–0,05 unità di pH |
 
@@ -117,7 +120,7 @@ js/chem/      molecole: basisData, boys, integrals, hf, gradient, optimize, vibr
 js/render/    viewer (three.js), marching (marching cubes), moleculeView
 js/ui/        periodicTable, charts, chemCharts, moleculeMode, reactionMode, labMode
 js/chem/      (laboratorio) labData, labPhysics
-js/chem/      (sandbox) reactive (campo di forze reattivo), reactiveData, md (dinamica), aimd (ab initio),
+js/chem/      (sandbox) reactive (campo di forze reattivo), reactiveData, md (dinamica), mdAnalysis (g(r), MSD, C_V), aimd (ab initio),
               sandboxData, sandboxWorker
 js/chem/      (becher) aqueous (equilibri, colore), aqueousDB (generato da MINTEQ v4), aqueousExtra, beakerReagents
 js/chem/      (cinetica) kinetics (meccanismi, integratore rigido, esperienze)

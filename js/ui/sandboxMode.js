@@ -45,6 +45,7 @@ const SB = {
   lastCharts: 0,
   userPaused: false,
   photonFlash: null,
+  phys: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,12 @@ function startWorker() {
     if (m.type === 'frame') {
       SB.frame = m;
       SB.fresh = true;
+      if (m.phys) {
+        const key = (p) => `${p?.elements?.join(',')}|${p?.rdf?.pair?.join('-')}|${p?.barostat?.on}|${p?.barostat?.P0}`;
+        const changed = key(m.phys) !== key(SB.phys);
+        SB.phys = m.phys;
+        if (changed && active) renderControls();
+      }
       if (m.census) {
         SB.census = m.census;
         SB.history = m.census.history;
@@ -77,6 +84,8 @@ function startWorker() {
     } else if (m.type === 'forcefield') {
       SB.forceField = m.kind;
       if (active) renderControls();
+    } else if (m.type === 'snapshot') {
+      saveSnapshot(m.name, m.data);
     } else if (m.type === 'photon') {
       SB.photonFlash = { i: m.i, j: m.j, t: performance.now(), lambda: m.lambda };
     } else if (m.type === 'error') {
@@ -469,7 +478,29 @@ function renderSide() {
     <div class="ctl" style="margin-top:8px"><label class="lbl" for="sb-count">Quantità: <span id="sb-count-out">${SB.count}</span></label>
       <div class="range-row"><input type="range" id="sb-count" min="1" max="40" step="1" value="${SB.count}"><button type="button" class="btn" id="sb-add">Aggiungi ${escapeHtml(addLabel())}</button></div></div>
     <p class="hint">Con lo strumento <b>Aggiungi</b> (a destra) puoi anche cliccare nella scatola per mettere una molecola dove vuoi.</p>
-    ${SB.info ? `<p class="hint warn">${SB.info}</p>` : ''}`;
+    ${SB.info ? `<p class="hint warn">${SB.info}</p>` : ''}
+    <label class="lbl" for="sb-save-name">I tuoi esperimenti (salvati in questo browser)</label>
+    <div class="smiles-row"><input id="sb-save-name" placeholder="nome dell'esperimento" spellcheck="false"><button type="button" class="btn" id="sb-save">Salva</button></div>
+    ${savedList().length ? `<ul class="sb-saves">${savedList().map((x, k) => `<li><button type="button" class="linkish" data-load="${k}" title="Riprendi da questo stato">${escapeHtml(x.name)}</button> <span class="desc-muted">${x.data.Z.length} atomi · ${new Date(x.date).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}</span> <button type="button" class="linkish" data-del="${k}" title="Elimina">✕</button></li>`).join('')}</ul>` : ''}
+    <div class="btn-row"><button type="button" class="btn" id="sb-xyz" title="Coordinate atomiche nel formato XYZ, leggibile da Avogadro, VMD, Jmol…">Esporta .xyz</button></div>`;
+  $('sb-save').addEventListener('click', () => post({ type: 'snapshot', name: ($('sb-save-name').value.trim() || `esperimento ${savedList().length + 1}`).slice(0, 60) }));
+  $('sb-xyz').addEventListener('click', () => post({ type: 'snapshot', name: '\u0000xyz' }));
+  $('element-card').querySelectorAll('[data-load]').forEach(b => b.addEventListener('click', () => {
+    const x = savedList()[+b.dataset.load];
+    if (!x) return;
+    SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.phys = null;
+    SB.preset = { ...SB.preset, name: x.name, text: `Esperimento salvato il ${new Date(x.date).toLocaleString('it-IT')}.`, tips: [] };
+    post({ type: 'restore', data: x.data });
+    post({ type: 'set', paused: false, T: x.data.T });
+    SB.userPaused = false; scene.framed = false;
+    renderSide(); renderControls(); renderAnalysis();
+  }));
+  $('element-card').querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+    const list = savedList();
+    list.splice(+b.dataset.del, 1);
+    writeSaved(list);
+    renderSide();
+  }));
   $('sb-preset').addEventListener('change', (e) => loadPreset(PRESETS.find(x => x.id === e.target.value)));
   $('sb-restart').addEventListener('click', () => loadPreset(SB.preset));
   $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.selected = -1; renderAnalysis(); });
@@ -488,6 +519,35 @@ function renderSide() {
   });
   $('sb-count').addEventListener('input', (e) => { SB.count = +e.target.value; $('sb-count-out').textContent = SB.count; });
   $('sb-add').addEventListener('click', () => post({ type: 'add', ...addPayload(SB.count) }));
+}
+
+const SAVE_KEY = 'atlante-sandbox-esperimenti';
+function savedList() {
+  try { const v = JSON.parse(localStorage.getItem(SAVE_KEY) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function writeSaved(list) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(list)); return true; } catch { return false; }
+}
+
+/** Risposta del worker a "snapshot": salva nel browser oppure esporta le coordinate in formato XYZ. */
+function saveSnapshot(name, data) {
+  if (name === '\u0000xyz') {
+    const lines = [String(data.Z.length), `Atlante Orbitale, sandbox: scatola ${data.box.toFixed(2)} A, T = ${data.T.toFixed(1)} K`];
+    data.Z.forEach((z, i) => lines.push(`${sym(z).padEnd(2)} ${data.pos.slice(3 * i, 3 * i + 3).map(v => v.toFixed(5).padStart(11)).join(' ')}`));
+    const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'chemical/x-xyz' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'sandbox.xyz';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+  const r = (v) => Math.round(v * 1e5) / 1e5;
+  const compact = { ...data, pos: data.pos.map(r), vel: data.vel.map(v => Math.round(v * 1e7) / 1e7) };
+  const list = savedList();
+  list.unshift({ name, date: Date.now(), data: compact });
+  if (list.length > 12) list.length = 12;
+  SB.info = writeSaved(list) ? `Salvato "${name}".` : 'Impossibile salvare: la memoria del browser è piena o non disponibile.';
+  renderSide();
 }
 
 function addLabel() {
@@ -523,6 +583,7 @@ function renderControls() {
   const spf = st?.stepsPerFrame ?? 40;
   const lightOn = st?.light?.on ?? false;
   const photonKJ = 119626.566 / SB.lambda;
+  const baro = SB.phys?.barostat ?? { on: false, P0: 1 };
   $('controls').innerHTML = `
     <div class="ctl"><span class="lbl">Simulazione</span>
       <div class="btn-row" style="margin-top:0">
@@ -541,6 +602,15 @@ function renderControls() {
     </div>
     <div class="ctl"><label class="lbl" for="sb-box">Lato della scatola (volume)</label>
       <div class="range-row"><input type="range" id="sb-box" min="10" max="60" step="0.5" value="${box}"><output id="sb-box-out">${nf(box, 1)} Å</output></div></div>
+    <div class="ctl"><span class="lbl">Pressione</span>
+      <div class="seg" id="sb-baro">
+        <button type="button" data-v="0" aria-pressed="${!baro.on}" title="Volume fisso (NVT o NVE)">volume fisso</button>
+        <button type="button" data-v="1" aria-pressed="${baro.on}" title="Il volume si adatta per mantenere la pressione scelta (barostato di Berendsen)">pressione costante</button>
+      </div>
+      <div class="range-row" style="margin-top:4px"><label for="sb-p0">P₀ (bar)</label><input id="sb-p0" type="text" inputmode="decimal" value="${baro.P0}" style="width:80px"></div>
+      <p class="hint">Barostato di Berendsen (τ<sub>P</sub> = 10 ps): la scatola si allarga o si stringe finché la pressione sulle pareti vale P₀.</p></div>
+    <div class="ctl"><span class="lbl">Analisi</span>
+      <div class="range-row"><label for="sb-rdf">g(r) fra</label><select id="sb-rdf">${rdfOptions()}</select><button type="button" class="btn" id="sb-reset-an" title="Azzera g(r), spostamento quadratico medio e fluttuazioni di energia">Azzera</button></div></div>
     <div class="ctl"><label class="lbl" for="sb-speed">Velocità (passi per fotogramma)</label>
       <div class="range-row"><input type="range" id="sb-speed" min="1" max="200" step="1" value="${spf}"><output id="sb-speed-out">${spf}</output></div></div>
     <div class="ctl"><span class="lbl">Strumento</span></div>
@@ -570,6 +640,10 @@ function renderControls() {
   seg('sb-thermo', (v) => post({ type: 'set', thermostat: v === '1' }));
   seg('sb-ff', (v) => post({ type: 'set', forceField: v }));
   $('sb-box').addEventListener('input', (e) => { const v = +e.target.value; $('sb-box-out').textContent = `${nf(v, 1)} Å`; post({ type: 'set', box: v }); });
+  seg('sb-baro', (v) => post({ type: 'set', barostat: { on: v === '1' } }));
+  $('sb-p0').addEventListener('change', (e) => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (Number.isFinite(v) && v > 0) post({ type: 'set', barostat: { P0: v } }); });
+  $('sb-rdf').addEventListener('change', (e) => post({ type: 'set', rdfPair: e.target.value.split('-').map(Number) }));
+  $('sb-reset-an').addEventListener('click', () => post({ type: 'resetAnalysis' }));
   $('sb-speed').addEventListener('input', (e) => { $('sb-speed-out').textContent = e.target.value; post({ type: 'set', stepsPerFrame: +e.target.value }); });
   seg('sb-tool', (v) => { SB.tool = v; $('sb-tool-hint').textContent = TOOLS.find(t => t.id === v).title; });
   $('sb-lambda').addEventListener('input', (e) => {
@@ -584,6 +658,17 @@ function renderControls() {
   seg('sb-color', (v) => { SB.color = v; SB.fresh = true; renderLegend(); });
   seg('sb-style', (v) => { SB.style = v; SB.fresh = true; });
   renderLegend();
+}
+
+function rdfOptions() {
+  const els = SB.phys?.elements ?? [];
+  const cur = SB.phys?.rdf?.pair?.join('-');
+  const opts = [];
+  for (let a = 0; a < els.length; a++) for (let b = a; b < els.length; b++) {
+    const v = `${els[a]}-${els[b]}`;
+    opts.push(`<option value="${v}" ${v === cur || `${els[b]}-${els[a]}` === cur ? 'selected' : ''}>${sym(els[a])}–${sym(els[b])}</option>`);
+  }
+  return opts.join('') || '<option>—</option>';
 }
 
 /** Colore di una lunghezza d'onda; ultravioletto e infrarosso con colori convenzionali. */
@@ -646,7 +731,28 @@ function renderPanelBody() {
       <dt>Lavoro esterno (scintille, luce)</dt><dd>${sgn(s.work * KJ_PER_EV, 1)}</dd>
       <dt>Totale − scambi</dt><dd>${kj(s.Etot - s.heatBath - s.work)}</dd>
     </dl>
-    <p class="hint">"Totale − scambi" è costante: è il primo principio della termodinamica (ΔU = Q + W) verificato passo per passo.</p></div>`;
+    <p class="hint">"Totale − scambi" è costante: è il primo principio della termodinamica (ΔU = Q + W) verificato passo per passo.</p></div>
+    ${physHtml(s)}`;
+}
+
+/** Grandezze di chimica fisica misurate sulla traiettoria. */
+function physHtml(s) {
+  const ph = SB.phys;
+  if (!ph) return '';
+  const R = 8.314462618;
+  const cv = ph.cv, nMol = ph.nMol || 1;
+  const cvMol = cv ? cv.Cv / nMol * KJ_PER_EV * 1000 : null;       // J/(mol K) per mole di molecole
+  const cvErr = cv ? cv.err / nMol * KJ_PER_EV * 1000 : null;
+  const monatomic = ph.N === nMol;
+  return `<div><h3>Chimica fisica</h3>
+    <dl class="info-list">
+      <dt>C<sub>V</sub> dalle fluttuazioni</dt><dd>${cv && !cv.stationary ? 'non definita: il sistema non è in equilibrio (reazioni o riscaldamento in corso)' : cv ? `${nf(cvMol, 1)} ± ${nf(cvErr, 1)} J/(mol K)` : (s.thermostat && !ph.barostat?.on ? 'in accumulo…' : 'serve il termostato a volume fisso')}</dd>
+      ${cv?.stationary ? `<dt class="sub">in unità di R per molecola</dt><dd>${nf(cvMol / R, 2)} R${monatomic ? ' (gas monoatomico ideale: 1,50 R)' : ''}</dd><dt class="sub">campioni</dt><dd>${cv.samples}</dd>` : ''}
+      <dt>Coefficiente di diffusione D</dt><dd>${ph.msd?.D !== null && ph.msd?.D !== undefined ? `${nf(ph.msd.D * 1e5, 3)}·10⁻⁵ cm²/s` : '—'}</dd>
+      <dt class="sub">esponente α di MSD ∝ t^α</dt><dd>${ph.msd?.alpha !== null && ph.msd?.alpha !== undefined ? nf(ph.msd.alpha, 2) : '—'}</dd>
+      ${ph.rdf ? `<dt>Primo picco di g(r) ${sym(ph.rdf.pair[0])}–${sym(ph.rdf.pair[1])}</dt><dd>${nf(Math.max(...ph.rdf.g), 2)} a ${nf(ph.rdf.r[ph.rdf.g.indexOf(Math.max(...ph.rdf.g))], 2)} Å</dd>` : ''}
+    </dl>
+    <p class="hint">C<sub>V</sub> = (⟨E²⟩ − ⟨E⟩²)/(k<sub>B</sub>T²) nell'insieme canonico (errore dalla media a blocchi). È classica: ogni vibrazione conta k<sub>B</sub> anche quando nella realtà è "congelata" dalla quantizzazione. D dalla relazione di Einstein, MSD = 6Dt.</p></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -660,8 +766,10 @@ function drawCharts() {
   const H = SB.history;
   const muted = cssVar('--muted');
   // 1. energia / temperatura / composizione nel tempo
-  $('radial-title').textContent = 'Andamento nel tempo';
-  if (H.length > 1) {
+  $('radial-title').textContent = { rdf: 'Struttura: funzione di distribuzione radiale', msd: 'Diffusione: spostamento quadratico medio' }[SB.chart1] ?? 'Andamento nel tempo';
+  if (SB.chart1 === 'rdf') drawRDF();
+  else if (SB.chart1 === 'msd') drawMSD();
+  else if (H.length > 1) {
     const ts = H.map(h => h.t / 1000);
     const xmin = ts[0], xmax = Math.max(ts[ts.length - 1], xmin + 0.1);
     if (SB.chart1 === 'energy') {
@@ -733,6 +841,35 @@ function drawCharts() {
     drawXY($('chart-slice'), { series, xmin: ts[0], xmax: Math.max(ts[ts.length - 1], ts[0] + 0.1), ymin: 0, ymax, xlabel: 't (ps)', ylabel: 'numero di molecole' });
     $('slice-note').innerHTML = 'Le specie sono i gruppi di atomi uniti da legami (ordine di legame > 0,5). Le curve sono la cinetica chimica che emerge dagli urti.';
   } else { clearCanvas($('chart-slice')); $('slice-note').textContent = ''; }
+}
+
+function drawRDF() {
+  const r = SB.phys?.rdf;
+  if (!r) { clearCanvas($('chart-radial')); $('radial-note').textContent = 'g(r) si accumula durante la simulazione.'; return; }
+  const [za, zb] = r.pair;
+  const gmax = Math.max(1.5, ...r.g) * 1.1;
+  drawXY($('chart-radial'), {
+    series: [{ xs: r.r, ys: r.g, color: cssVar('--accent'), width: 2.2, label: `g(r) ${sym(za)}–${sym(zb)}`, fill: `color-mix(in srgb, ${cssVar('--accent')} 15%, transparent)` }],
+    hlines: [{ y: 1, label: 'gas ideale', color: cssVar('--muted') }],
+    xmin: 0, xmax: r.r[r.r.length - 1] + 0.05, ymin: 0, ymax: gmax, xlabel: 'r (Å)', ylabel: 'g(r)',
+  });
+  const k = r.g.indexOf(Math.max(...r.g));
+  $('radial-note').innerHTML = `Funzione di distribuzione radiale fra ${sym(za)} e ${sym(zb)} di molecole diverse, media su ${r.samples} configurazioni. È normalizzata sulla distribuzione delle distanze di punti uniformi nel cubo di lato ${nf(r.L, 1)} Å, quindi g = 1 significa "nessuna struttura". Primo picco: g = ${nf(r.g[k], 2)} a ${nf(r.r[k], 2)} Å (primo guscio di vicini). Nei liquidi compaiono altri gusci smorzati; nel gas g ≈ 1 oltre il diametro atomico.`;
+}
+
+function drawMSD() {
+  const m = SB.phys?.msd;
+  if (!m || m.points.length < 3) { clearCanvas($('chart-radial')); $('radial-note').textContent = 'Lo spostamento quadratico medio si accumula durante la simulazione.'; return; }
+  const xs = m.points.map(p => p[0] / 1000), ys = m.points.map(p => p[1]);
+  const series = [{ xs, ys, color: cssVar('--accent'), width: 2.2, label: 'MSD simulato' }];
+  if (m.fit) series.push({ xs: [m.fit.t0 / 1000, m.fit.t1 / 1000], ys: [m.fit.a + m.fit.b * m.fit.t0, m.fit.a + m.fit.b * m.fit.t1], color: cssVar('--phase-neg'), width: 2, dash: [5, 4], label: 'retta di Einstein' });
+  const ymax = Math.max(...ys, 1) * 1.1;
+  drawXY($('chart-radial'), {
+    series, hlines: m.saturation < ymax * 1.5 ? [{ y: m.saturation, label: 'pareti: L²/2', color: cssVar('--muted') }] : [],
+    xmin: 0, xmax: Math.max(xs[xs.length - 1], 0.01), ymin: 0, ymax: Math.max(ymax, m.saturation < ymax * 1.5 ? m.saturation * 1.08 : 0), xlabel: 't (ps)', ylabel: 'MSD (Å²)',
+  });
+  const regime = m.alpha === null ? '' : m.alpha > 1.6 ? 'moto balistico (α ≈ 2: gli atomi volano liberi fra un urto e l\'altro, come in un gas rarefatto)' : m.alpha > 1.25 ? 'transizione fra moto balistico e diffusivo' : m.alpha > 0.75 ? 'regime diffusivo (α ≈ 1)' : 'moto confinato (α < 1: gabbia dei vicini, solido o pareti)';
+  $('radial-note').innerHTML = `⟨|r(t) − r(0)|²⟩ degli atomi. Einstein: MSD = 6 D t nel regime diffusivo. Esponente α = d ln MSD/d ln t = ${m.alpha === null ? '—' : nf(m.alpha, 2)}: ${regime}. ${m.D !== null ? `<b>D = ${nf(m.D * 1e5, 3)}·10⁻⁵ cm²/s</b>.` : 'D non si riporta finché il moto non è diffusivo.'} Le pareti limitano MSD a L²/2.`;
 }
 
 function clearCanvas(c) {

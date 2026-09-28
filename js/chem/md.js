@@ -76,6 +76,8 @@ export class Simulation {
     this.species = new Map();
     this.clamped = 0;
     this.provider = null;    // forze alternative (per esempio Hartree–Fock ab initio)
+    // controllo della pressione per riscalamento del volume (accoppiamento debole di Berendsen)
+    this.barostat = { on: false, P0: 1, tau: 10000 };
   }
 
   get N() { return this.Z.length; }
@@ -250,6 +252,7 @@ export class Simulation {
       }
       for (let c = 0; c < 3; c++) pos[3 * i + c] += dt * vel[3 * i + c];
     }
+    if (this.barostat.on && this.pSamples > 50) this.rescaleVolume();
     let Wgrab = 0;
     if (this.grab && this.grab.i < N) {
       const i = this.grab.i;
@@ -269,6 +272,24 @@ export class Simulation {
     this.pAccum = this.pAccum * decay + this.wallForce;
     this.pSamples = this.pSamples * decay + 1;
     if (this.stepCount % this.censusEvery === 0) this.census();
+  }
+
+  /**
+   * Barostato di Berendsen (J. Chem. Phys. 81, 3684, 1984): d ln V/dt = (P − P₀)/(τ_P B), con il modulo di
+   * compressibilità stimato come B ≈ max(P, P₀) (esatto per il gas ideale, prudente per i liquidi). Le posizioni
+   * e il lato della scatola si riscalano insieme. Dà la densità media giusta, non le fluttuazioni di volume
+   * dell'insieme isotermo-isobaro.
+   */
+  rescaleVolume() {
+    const P = this.measurePressure();
+    const B = Math.max(Math.abs(P), Math.abs(this.barostat.P0), 1);
+    let dlnV = this.dt / this.barostat.tau * (P - this.barostat.P0) / B;
+    dlnV = Math.max(-2e-5, Math.min(2e-5, dlnV));
+    const s = Math.exp(dlnV / 3);
+    const newBox = this.box * s;
+    if (newBox < 6 || newBox > 200) return;
+    this.box = newBox;
+    for (let k = 0; k < 3 * this.N; k++) this.pos[k] *= s;
   }
 
   /** Pressione sulle pareti: forza totale media / area totale (6 L²), in bar. */
