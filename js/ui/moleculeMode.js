@@ -133,6 +133,13 @@ function loadEntry(entry) {
   loadSmiles(entry.smiles, { multiplicity: entry.multiplicity, lib: LIBRARY_DATA[entry.id] ?? null });
 }
 
+/** Carica una molecola arrivata da un'altra modalità (per esempio un frammento della sandbox). */
+export function openMoleculeSmiles(smiles, name = 'Molecola dalla sandbox') {
+  M.entry = null;
+  M.name = name;
+  loadSmiles(smiles);
+}
+
 function loadSmiles(smiles, { multiplicity, lib = null } = {}) {
   cancelAll();
   stopVibration();
