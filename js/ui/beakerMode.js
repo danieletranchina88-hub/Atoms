@@ -128,8 +128,11 @@ function drawBeaker() {
   const s = B.beaker.summary();
   const ink = cssVar('--text'), muted = cssVar('--muted'), line = cssVar('--line');
   // geometria del becher
-  const bh = Math.min(h * 0.72, w * 0.62), bw = bh * 0.72;
-  const x0 = w * 0.40 - bw / 2, y1 = h * 0.9, y0 = y1 - bh;
+  const narrow = w < 560;
+  const mw = narrow ? Math.max(92, w * 0.28) : 132, mh = narrow ? 50 : 58;
+  const bh = Math.min(h * 0.72, (w - mw - 60) * 0.95 / 0.72, w * 0.62), bw = bh * 0.72;
+  const x0 = narrow ? 16 + 12 : w * 0.40 - bw / 2, y1 = h * 0.9, y0 = y1 - bh;
+  const bigFont = narrow ? '600 19px "IBM Plex Mono", monospace' : '600 24px "IBM Plex Mono", monospace';
   // animazione del livello e del colore
   const target = Math.min(1, s.V / CAPACITY);
   B.anim.level += (target - B.anim.level) * 0.12;
@@ -141,7 +144,8 @@ function drawBeaker() {
   g.strokeStyle = line; g.beginPath(); g.moveTo(0, y1 + 4); g.lineTo(w, y1 + 4); g.stroke();
   // liquido
   if (s.V > 0) {
-    const [r, gg, b] = B.anim.color.map(Math.round);
+    // una leggera tinta azzurra rende visibile anche l'acqua incolore (soprattutto su sfondo chiaro)
+    const [r, gg, b] = B.anim.color.map((c, k) => Math.round(0.88 * c + 0.12 * [150, 185, 225][k]));
     const grad = g.createLinearGradient(x0, 0, x0 + bw, 0);
     grad.addColorStop(0, `rgba(${r},${gg},${b},0.78)`);
     grad.addColorStop(0.5, `rgba(${r},${gg},${b},0.62)`);
@@ -157,7 +161,7 @@ function drawBeaker() {
     g.closePath();
     g.fill();
     // menisco
-    g.strokeStyle = `rgba(${r},${gg},${b},0.95)`;
+    g.strokeStyle = `rgba(${Math.round(r * 0.7)},${Math.round(gg * 0.7)},${Math.round(b * 0.75)},0.95)`;
     g.lineWidth = 1.5;
     g.beginPath(); g.moveTo(x0 + 3, liquidTop - 2); g.quadraticCurveTo(x0 + bw / 2, liquidTop + 4, x0 + bw - 3, liquidTop - 2); g.stroke();
   }
@@ -227,23 +231,23 @@ function drawBeaker() {
   const px0 = x0 + bw * 0.28;
   g.strokeStyle = muted; g.lineWidth = 3;
   g.beginPath(); g.moveTo(px0, y0 - 40); g.lineTo(px0, Math.max(liquidTop + 30, y0 + 20)); g.stroke();
-  const mw = 132, mh = 58, mX = x0 + bw + 36, mY = y0 + 10;
+  const mX = narrow ? w - mw - 10 : x0 + bw + 36, mY = y0 + 10;
   g.fillStyle = cssVar('--panel-2'); g.strokeStyle = line; g.lineWidth = 1;
   g.fillRect(mX, mY, mw, mh); g.strokeRect(mX, mY, mw, mh);
   g.fillStyle = muted; g.font = '11px "IBM Plex Sans", sans-serif'; g.fillText('pHmetro', mX + 8, mY + 15);
-  g.fillStyle = ink; g.font = '600 24px "IBM Plex Mono", monospace';
+  g.fillStyle = ink; g.font = bigFont;
   g.fillText(s.V > 0 ? nf(s.pH, 2) : '—', mX + 8, mY + 44);
   // termometro
   const tX = mX, tY = mY + mh + 16;
   g.fillStyle = cssVar('--panel-2'); g.fillRect(tX, tY, mw, mh); g.strokeRect(tX, tY, mw, mh);
   g.fillStyle = muted; g.font = '11px "IBM Plex Sans", sans-serif'; g.fillText('termometro', tX + 8, tY + 15);
-  g.fillStyle = ink; g.font = '600 24px "IBM Plex Mono", monospace';
+  g.fillStyle = ink; g.font = bigFont;
   g.fillText(`${nf(s.T - 273.15, 1)} °C`, tX + 8, tY + 44);
   // volume
   const vY = tY + mh + 16;
   g.fillStyle = cssVar('--panel-2'); g.fillRect(tX, vY, mw, mh); g.strokeRect(tX, vY, mw, mh);
   g.fillStyle = muted; g.font = '11px "IBM Plex Sans", sans-serif'; g.fillText('volume', tX + 8, vY + 15);
-  g.fillStyle = ink; g.font = '600 24px "IBM Plex Mono", monospace';
+  g.fillStyle = ink; g.font = bigFont;
   g.fillText(`${nf(s.V, 1)} mL`, tX + 8, vY + 44);
   // buretta durante la titolazione
   if (B.drip) {

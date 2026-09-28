@@ -140,15 +140,21 @@ button, select, input { font: inherit; color: inherit; }
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 3px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.modes::-webkit-scrollbar { display: none; }
 .modes button {
   border: 0;
   background: transparent;
-  padding: 7px 16px;
+  padding: 7px 14px;
   border-radius: 999px;
   cursor: pointer;
   font-weight: 500;
   color: var(--muted);
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .modes button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
 .modes button:not([aria-selected="true"]):hover { color: var(--text); }
@@ -478,7 +484,7 @@ select {
   .brand { flex: 1; }
   .icon-btn { order: 2; }
   .modes { width: 100%; order: 3; }
-  .modes button { flex: 1; padding: 7px 8px; }
+  .modes button { flex: 0 0 auto; padding: 7px 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation-duration: 2.4s; }

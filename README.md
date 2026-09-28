@@ -2,7 +2,7 @@
 
 Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, molecole, legami e reazioni calcolati **dai principi primi**, cioè risolvendo l'equazione di Schrödinger. Nessuna forma è disegnata a mano e nessun valore è inventato: ogni grandezza viene da un calcolo numerico, verificato contro programmi e dati di riferimento.
 
-## Le cinque modalità
+## Le modalità
 
 | Modalità | Cosa fa |
 |---|---|
@@ -11,6 +11,8 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | **Legami σ π** | Orbitali molecolari LCAO σ, σ\*, π, π\* di molecole biatomiche e orbitali ibridi sp…sp³d², costruiti dagli orbitali atomici calcolati. |
 | **Molecole** | Sandbox molecolare con Hartree–Fock *ab initio*. Si parte da una libreria di 67 molecole, da una stringa SMILES o modificando la molecola con un clic sugli atomi. Calcola: legami singoli, doppi e tripli (ordine di Lewis e ordine di Mayer quantistico), elettronegatività (Pauling, Allen), cariche formali, numeri di ossidazione, cariche parziali (Mulliken, Löwdin), VSEPR e ibridazione, risonanza, momento di dipolo, orbitali molecolari in 3D (con carattere σ/π e legante/antilegante), densità elettronica, potenziale elettrostatico, geometria ottimizzata, vibrazioni con spettro IR, spettro UV-visibile (CIS), spettro fotoelettronico (Koopmans), termodinamica statistica, curva di dissociazione RHF/UHF. |
 | **Reazioni** | Termochimica e cinetica: ΔE, ΔH, ΔS, ΔG e K<sub>p</sub> in funzione della temperatura, confronto con i ΔH° sperimentali. Stati di transizione, energie di attivazione e costanti di velocità (Eyring con correzione tunnel), grafico di Arrhenius, animazione della coordinata di reazione. |
+| **Sandbox** | Dinamica molecolare in tempo reale: si mettono atomi e molecole in una scatola (24 elementi, 20 molecole pronte, qualunque SMILES) e si osservano legami che si formano e si rompono. Si controllano temperatura (termostato o sistema isolato), volume, luce di lunghezza d'onda scelta (fotolisi), scintille; si possono afferrare gli atomi con una "pinzetta". Riconosce da sola specie e reazioni (registro delle reazioni, curve di concentrazione), misura la pressione sulle pareti e la distribuzione di Maxwell–Boltzmann, verifica il primo principio passo per passo. Per sistemi fino a 8 atomi le forze possono venire direttamente da Hartree–Fock (dinamica *ab initio*). |
+| **Becher** | Chimica in soluzione: uno scaffale con acidi, basi, sali, ioni metallici, indicatori, metalli e marmo. Per ogni aggiunta calcola l'equilibrio completo: pH, precipitati (K<sub>sp</sub>), complessi, idrossidi anfoteri, reazioni redox con i metalli (Nernst), gas (H₂, CO₂), calore e temperatura, colore della soluzione dallo spettro, equazione ionica netta, curva di titolazione goccia a goccia. |
 | **Laboratorio** | Le leggi della chimica fisica calcolate punto per punto: gas reali (van der Waals, costruzione di Maxwell, punto critico, fattore Z, Clausius–Clapeyron), acidi e basi (pH esatto dal bilancio di carica, titolazioni anche di acidi poliprotici, diagrammi di distribuzione, capacità tampone, indicatori), elettrochimica (pile, Nernst, ΔG = −nFE, K), cinetica (leggi integrate, reazioni consecutive, Arrhenius). |
 
 ## La fisica
@@ -39,6 +41,18 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - VSEPR (AX<sub>n</sub>E<sub>m</sub>), ibridazione, carattere ionico di Pauling 1 − e<sup>−(Δχ)²/4</sup>.
 - Geometria 3D di partenza: geometria delle distanze più repulsione dei domini elettronici (modello di Gillespie).
 
+### Sandbox: dinamica molecolare reattiva
+- Equazioni di Newton integrate con velocity Verlet; termostato stocastico di Bussi–Donadio–Parrinello (insieme canonico) oppure sistema isolato (NVE); pressione come forza media sulle pareti.
+- Campo di forze reattivo a ordine di legame (forma di Abell–Tersoff–Brenner). L'ordine di legame nasce dalla valenza libera degli atomi, con la conservazione della valenza σ e la riduzione dei π coniugati (benzene: 1,5). Lunghezza ed energia seguono la relazione di Pauling r(n) = r₁ − c ln n, D(n) = D₁nᵖ, con parametri ricavati dalle energie medie di legame tabulate.
+- Cariche parziali per equalizzazione dell'elettronegatività (split-charge equilibration, parametri QEq/UFF); angoli dal teorema di Coulson (cos θ = −1/λ) con la correzione VSEPR per le coppie solitarie; van der Waals UFF; legame a idrogeno con il termine di DREIDING.
+- Fotoni di energia E = hc/λ assorbiti dai legami; riconoscimento automatico di specie e reazioni con isteresi sull'ordine di legame.
+- Dinamica *ab initio*: UHF a ogni passo con gradiente analitico, stato di spin più stabile (O₂ tripletto), soluzione a spin rotto per la rottura dei legami.
+
+### Becher: equilibri in soluzione acquosa
+- Bilanci di massa e legge di azione di massa per circa 80 specie e 28 solidi (costanti di Martell–Smith e CRC), risolti con Newton–Raphson; coefficienti di attività di Davies.
+- Precipitazione e dissoluzione con gli indici di saturazione (regola delle fasi); redox con i metalli fino ad annullare la f.e.m. di Nernst, con la sovratensione dell'idrogeno; CO₂ oltre la solubilità di Henry.
+- Calore con la legge di Hess (ΔfH° delle tabelle NBS) e ΔT = q/(m c<sub>p</sub>); colore dalla legge di Lambert–Beer e dalle funzioni colorimetriche CIE 1931.
+
 ## Verifiche
 
 `npm test` esegue tutte le verifiche numeriche:
@@ -53,6 +67,9 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | Energie di eccitazione CIS e forze dell'oscillatore | PySCF (TDA) | 10⁻³ eV |
 | Frequenze HF/6-31G\* dell'acqua (1827, 4071, 4189 cm⁻¹) | letteratura | 1 cm⁻¹ |
 | Strutture di Lewis, risonanza, numeri di ossidazione, VSEPR, gruppi puntuali | casi da manuale | esatto |
+| Campo reattivo: forze = −∇E | differenze finite | 10⁻⁸ |
+| Campo reattivo: geometrie (H₂O 105°, CH₄ 109,47°, C–C/C=C/C≡C) ed energie di reazione (2 H₂ + O₂: −434 contro −484 kJ/mol) | dati sperimentali | pochi % |
+| Becher: pH di acidi e basi deboli, tamponi, K<sub>sp</sub>, calore di neutralizzazione (ΔT = 6,67 K), redox | valori da manuale | 0,01–0,05 unità di pH |
 
 `npm run test:all` calcola tutti i 118 atomi.
 
@@ -62,6 +79,8 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - Hartree–Fock non contiene la correlazione elettronica. MP2 ne recupera gran parte, ma con basi piccole restano errori di decine di kJ/mol sulle energie di reazione.
 - Le molecole sono isolate, in fase gassosa (niente solvente). Le basi disponibili arrivano fino al kripton.
 - Le frequenze sono armoniche e scalate con i fattori empirici di Scott e Radom.
+- Sandbox: il campo reattivo è classico (niente stati di spin, niente ipervalenza, barriere qualitative); la dinamica ab initio è limitata a pochi atomi e Hartree–Fock con base minima sovrastima le barriere (H + H₂: 1,0 eV contro 0,42 eV).
+- Becher: costanti a 25 °C, attività di Davies (fino a I ≈ 0,5 M), nessuna cinetica: ogni aggiunta arriva subito all'equilibrio.
 
 ## Avvio
 
@@ -73,7 +92,7 @@ npm test                                   # verifiche numeriche
 node tools/precompute.mjs --parallel 4     # ricalcola la libreria di molecole (ore)
 ```
 
-Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`.
+Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`, `index.html#sandbox`, `index.html#becher`.
 
 ## Struttura
 
@@ -87,6 +106,10 @@ js/chem/      molecole: basisData, boys, integrals, hf, gradient, optimize, vibr
 js/render/    viewer (three.js), marching (marching cubes), moleculeView
 js/ui/        periodicTable, charts, chemCharts, moleculeMode, reactionMode, labMode
 js/chem/      (laboratorio) labData, labPhysics
+js/chem/      (sandbox) reactive (campo di forze reattivo), reactiveData, md (dinamica), aimd (ab initio),
+              sandboxData, sandboxWorker
+js/chem/      (becher) aqueous (equilibri, colore), aqueousData
+js/ui/        sandboxMode, beakerMode
 tools/        precompute.mjs (libreria di molecole e stati di transizione), atomSummary.mjs,
               build-artifact.py (versione a pagina singola)
 tests/        verifiche numeriche
