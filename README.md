@@ -80,6 +80,7 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | Strutture di Lewis, risonanza, numeri di ossidazione, VSEPR, gruppi puntuali | casi da manuale | esatto |
 | Campo reattivo: forze = −∇E | differenze finite | 10⁻⁸ |
 | Campo reattivo: geometrie (H₂O 105°, CH₄ 109,47°, C–C/C=C/C≡C) ed energie di reazione (2 H₂ + O₂: −434 contro −484 kJ/mol) | dati sperimentali | pochi % |
+| Campo reattivo: entalpie di atomizzazione di 23 molecole contro la legge di Hess sulle ΔfH° (CODATA; NBS in Atkins, tab. 2.5) | sperimentale | scarto medio 2,7 % su 20 molecole con legami ordinari (tutte entro il 7 %); N₂ −11 %, CO₂ −18 %, CO −37 % |
 | Dinamica molecolare: ⟨r⟩ nel cubo = 0,6617 L (costante di Robbins), g(r) = 1 per il gas ideale, C<sub>V</sub> dell'argon gassoso = 3/2 Nk<sub>B</sub>, volume a pressione costante uguale a quello del gas ideale | analitico | entro l'errore statistico; volume entro il 3 % |
 | Cinetica: soluzioni esatte (primo e secondo ordine, Bateman), problema rigido di Robertson (riferimento di Hairer e Wanner), equilibrio Q = k/k<sub>r</sub>, stato stazionario di Chapman, k del ciclopropano a 500 °C | analitico / Atkins | 10⁻⁵–10⁻⁷ relativo; k entro il 3 % |
 | Becher: pH di acidi e basi deboli, tamponi, K<sub>sp</sub>, calore di neutralizzazione (ΔT = 6,67 K), pK<sub>w</sub>(T) (Bandura–Lvov 2006), Nernst per Fe³⁺/Fe²⁺, redox con i metalli; convergenza di tutte le 588 combinazioni catione × anione | valori da manuale | 0,01–0,05 unità di pH |
@@ -93,6 +94,7 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - Le molecole sono isolate, in fase gassosa (niente solvente). Le basi disponibili arrivano fino al kripton.
 - Le frequenze sono armoniche e scalate con i fattori empirici di Scott e Radom.
 - Sandbox: il campo reattivo è classico (niente stati di spin, niente ipervalenza, barriere qualitative); la dinamica ab initio è limitata a pochi atomi e Hartree–Fock con base minima sovrastima le barriere (H + H₂: 1,0 eV contro 0,42 eV).
+- Sandbox: il campo reattivo sottostima le energie di atomizzazione di qualche percento (la regolarizzazione degli ordini di legame dà n ≈ 0,97 per un legame singolo) e molto di più per i legami multipli corti o con cariche formali (N₂, CO₂, CO).
 - Cinetica: simulazioni isoterme a volume costante; le costanti di fotolisi del ciclo di Chapman sono ordini di grandezza; il quinto passo dell'Oregonator è fenomenologico.
 - Becher: il modello di attività vale fino a I ≈ 0,5–1 M; le ΔrH mancanti nel database vengono trascurate (segnalato con *); nessuna cinetica: ogni aggiunta arriva subito all'equilibrio (i solidi che si formano solo in tempi geologici sono esclusi, come l'ossidazione e la riduzione dell'acqua).
 
