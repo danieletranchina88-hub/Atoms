@@ -103,5 +103,52 @@ export const PRESETS = [
     text: 'N₂ + 3 H₂ ⇌ 2 NH₃ è esotermica, ma il triplo legame N≡N (945 kJ/mol) non si rompe negli urti: senza catalizzatore non succede nulla, anche a 1500 K. Nel processo Haber–Bosch il ferro abbassa la barriera.',
     tips: ['Prova a rompere N₂ con un fotone UV da 120 nm (10 eV).'],
   },
+  {
+    id: 'aimd-h3', name: 'Ab initio: H + H₂ oltre la barriera', forceField: 'hf', box: 10, T: 300, dt: 0.2, speed: 2,
+    atoms: [
+      { Z: 1, pos: [-3.2, 0, 0], vel: [0.1433, 0, 0] },
+      { Z: 1, pos: [-0.355, 0, 0], vel: [-0.0717, 0, 0] },
+      { Z: 1, pos: [0.355, 0, 0], vel: [-0.0717, 0, 0] },
+    ],
+    text: 'Dinamica ab initio: a ogni passo si risolvono le equazioni di Hartree–Fock e le forze sono il gradiente dell\'energia. L\'atomo di idrogeno arriva con 1,6 eV di energia relativa, più della barriera (1,0 eV in HF/STO-3G; 0,42 eV sperimentale): si forma una nuova molecola H₂ e l\'altro atomo se ne va.',
+    tips: ['Guarda gli ordini di legame di Mayer: al passaggio per lo stato di transizione valgono circa 0,5 e 0,5.', 'Prova il preset "sotto la barriera": l\'atomo rimbalza.'],
+  },
+  {
+    id: 'aimd-h3-slow', name: 'Ab initio: H + H₂ sotto la barriera', forceField: 'hf', box: 10, T: 300, dt: 0.2, speed: 2,
+    atoms: [
+      { Z: 1, pos: [-3.2, 0, 0], vel: [0.0878, 0, 0] },
+      { Z: 1, pos: [-0.355, 0, 0], vel: [-0.0439, 0, 0] },
+      { Z: 1, pos: [0.355, 0, 0], vel: [-0.0439, 0, 0] },
+    ],
+    text: 'Stessa collisione con 0,6 eV: l\'energia non basta a superare la barriera di attivazione, l\'atomo rimbalza e la molecola resta vibrando. È l\'origine microscopica dell\'energia di attivazione dell\'equazione di Arrhenius.',
+    tips: [],
+  },
+  {
+    id: 'aimd-h2', name: 'Ab initio: rottura del legame di H₂', forceField: 'hf', box: 10, T: 300, dt: 0.2, speed: 2,
+    atoms: [
+      { Z: 1, pos: [-0.37, 0, 0], vel: [-0.245, 0, 0] },
+      { Z: 1, pos: [0.37, 0, 0], vel: [0.245, 0, 0] },
+    ],
+    text: 'H₂ riceve 6,2 eV di energia vibrazionale, più dell\'energia di dissociazione: il legame si allunga e si rompe. Per descrivere due atomi separati serve la funzione d\'onda a spin non ristretto (UHF): gli elettroni α e β si localizzano su atomi diversi.',
+    tips: ['Osserva ⟨S²⟩ nel pannello: da 0 (singoletto puro) sale verso 1 quando il legame si rompe.'],
+  },
+  {
+    id: 'aimd-water', name: 'Ab initio: vibrazioni dell\'acqua', forceField: 'hf', box: 10, T: 1500, dt: 0.25, thermalize: 1500, speed: 4,
+    atoms: [
+      { Z: 8, pos: [0, 0, 0.07] },
+      { Z: 1, pos: [0.76, 0, -0.52] },
+      { Z: 1, pos: [-0.76, 0, -0.52] },
+    ],
+    text: 'Una molecola d\'acqua isolata con energia termica di 1500 K. Stiramenti e piegamento si mescolano; le cariche di Mulliken e gli ordini di legame di Mayer oscillano con la geometria.',
+    tips: ['Colora per carica parziale.'],
+    color: 'charge',
+  },
+  {
+    id: 'aimd-o2', name: 'Ab initio: O₂ è un tripletto',
+    forceField: 'hf', box: 10, T: 300, dt: 0.25, thermalize: 600, speed: 4,
+    atoms: [{ Z: 8, pos: [-0.6, 0, 0] }, { Z: 8, pos: [0.6, 0, 0] }],
+    text: 'Il calcolo confronta singoletto e tripletto e sceglie il più stabile: per O₂ è il tripletto, con due elettroni spaiati negli orbitali π* (regola di Hund). È il motivo per cui l\'ossigeno liquido è attratto da un magnete.',
+    tips: [],
+  },
   { id: 'empty', name: 'Scatola vuota', box: 20, T: 300, add: [], text: 'Aggiungi atomi e molecole dal pannello a sinistra, oppure con lo strumento "aggiungi" cliccando nella scatola.', tips: [] },
 ];

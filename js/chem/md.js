@@ -75,6 +75,7 @@ export class Simulation {
     this.stepCount = 0;
     this.species = new Map();
     this.clamped = 0;
+    this.provider = null;    // forze alternative (per esempio Hartree–Fock ab initio)
   }
 
   get N() { return this.Z.length; }
@@ -155,6 +156,17 @@ export class Simulation {
     return placed;
   }
 
+  /** Inserisce atomi con posizioni (Å) e velocità (Å/fs) assegnate. */
+  addAtoms(list) {
+    const start = this.N;
+    this.Z = [...this.Z, ...list.map(a => a.Z)];
+    this.resize(this.Z.length);
+    list.forEach((a, k) => {
+      this.pos.set(a.pos, 3 * (start + k));
+      this.vel.set(a.vel ?? [0, 0, 0], 3 * (start + k));
+    });
+  }
+
   remove(indices) {
     const drop = new Set(indices);
     const keep = this.Z.map((_, i) => i).filter(i => !drop.has(i));
@@ -183,7 +195,7 @@ export class Simulation {
   forces() {
     const { N, pos, F } = this;
     if (!N) { this.res = { E: 0, parts: { bond: 0, angle: 0, vdw: 0, es: 0 }, q: new Float64Array(0), bonds: [] }; this.Ewall = 0; return; }
-    this.res = this.ff.compute(this.Z, pos, F);
+    this.res = this.provider ? this.provider.compute(this.Z, pos, F) : this.ff.compute(this.Z, pos, F);
     // pareti morbide: E = ½ k d² per ogni atomo oltre il bordo della scatola
     const h = this.box / 2;
     let Ew = 0, Fw = 0;

@@ -7,6 +7,7 @@ import { parseSmiles } from './smiles.js';
 import { embedMolecule } from './embed.js';
 import { analyzeStructure } from './structure.js';
 import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
+import { makeHFProvider, aimdFeasible } from './aimd.js';
 
 const BOHR_ANG = 0.52917721090;
 let sim = new Simulation({ box: 20, T: 300 });
@@ -58,12 +59,44 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
   if (t.Z.some(z => ATOM_PARAMS[z][0] > 0)) sim.dt = Math.min(sim.dt, 0.4);
   const placed = sim.addMolecule(t, count, T ?? sim.T, at);
   sim.res = null;
+  if (forceField === 'hf') setForceField('hf');
   sim.census();
   return placed;
 }
 
+let forceField = 'reactive';
+let hfBasis = 'STO-3G';
+
+/** Sceglie il modello delle forze; con Hartree–Fock verifica che il sistema sia abbastanza piccolo. */
+function setForceField(kind, basis = hfBasis) {
+  hfBasis = basis;
+  if (kind === 'hf') {
+    const f = aimdFeasible(sim.Z, basis);
+    if (!f.ok) { postMessage({ type: 'info', text: f.reason }); kind = 'reactive'; }
+  }
+  forceField = kind;
+  sim.provider = kind === 'hf' ? makeHFProvider({ basis }) : null;
+  sim.res = null;
+  if (kind === 'hf') sim.dt = Math.min(sim.dt, 0.25);
+  postMessage({ type: 'forcefield', kind });
+}
+
 function loadPreset(p) {
   sim = new Simulation({ box: p.box, T: p.T, dt: p.dt ?? 0.4 });
+  stepsPerFrame = p.speed ?? 40;
+  if (p.atoms) {
+    sim.addAtoms(p.atoms);
+    if (p.thermalize) for (let i = 0; i < sim.N; i++) sim.thermalize(i, p.thermalize);
+    sim.thermostat = p.thermostat ?? false;
+    setForceField(p.forceField ?? 'reactive');
+    sim.forces();
+    sim.census();
+    light = { ...light, on: false };
+    lastEventSent = 0;
+    mbHist = null;
+    return { placed: p.atoms.length, wanted: p.atoms.length };
+  }
+  setForceField('reactive');
   let placed = 0, wanted = 0;
   for (const [s, n] of p.add) {
     wanted += n;
@@ -134,6 +167,7 @@ function frame() {
       Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Etot: sim.totalEnergy(),
       heatBath: sim.heatBath, work: sim.work, P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
+      forceField, hf: sim.provider?.info ?? null,
     },
     mb: speedHistogram(),
   };
@@ -186,7 +220,7 @@ onmessage = (ev) => {
         break;
       }
       case 'clear': sim.clear(); lastEventSent = 0; mbHist = null; break;
-      case 'remove': sim.remove(m.indices); sim.census(); lastEventSent = sim.events.length; break;
+      case 'remove': sim.remove(m.indices); sim.provider?.reset(); sim.census(); lastEventSent = sim.events.length; break;
       case 'set':
         if (m.T !== undefined) sim.T = m.T;
         if (m.thermostat !== undefined) sim.thermostat = m.thermostat;
@@ -197,6 +231,7 @@ onmessage = (ev) => {
         if (m.stepsPerFrame !== undefined) stepsPerFrame = m.stepsPerFrame;
         if (m.light) light = { ...light, ...m.light };
         if (m.mbSpecies !== undefined) { mbSpecies = m.mbSpecies; mbHist = null; }
+        if (m.forceField !== undefined) setForceField(m.forceField, m.basis ?? hfBasis);
         break;
       case 'step': for (let k = 0; k < (m.n ?? 1); k++) sim.step(); break;
       case 'grab': sim.grab = m.i === null ? null : { i: m.i, target: m.target }; break;

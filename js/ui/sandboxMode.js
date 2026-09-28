@@ -74,6 +74,9 @@ function startWorker() {
     } else if (m.type === 'info') {
       SB.info = m.text;
       renderSide();
+    } else if (m.type === 'forcefield') {
+      SB.forceField = m.kind;
+      if (active) renderControls();
     } else if (m.type === 'photon') {
       SB.photonFlash = { i: m.i, j: m.j, t: performance.now(), lambda: m.lambda };
     } else if (m.type === 'error') {
@@ -450,7 +453,10 @@ function renderSide() {
   $('element-card').innerHTML = `
     <h3 class="side-h">Sandbox chimica</h3>
     <label class="lbl" for="sb-preset">Esperimento</label>
-    <select id="sb-preset">${PRESETS.map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</select>
+    <select id="sb-preset">
+      <optgroup label="Campo di forze reattivo">${PRESETS.filter(x => !x.atoms).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
+      <optgroup label="Ab initio (Hartree–Fock)">${PRESETS.filter(x => x.atoms).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
+    </select>
     <p class="mol-note">${p.text}</p>
     ${p.tips?.length ? `<ul class="sb-tips">${p.tips.map(t => `<li>${t}</li>`).join('')}</ul>` : ''}
     <div class="btn-row"><button type="button" class="btn" id="sb-restart">Ricomincia</button><button type="button" class="btn" id="sb-clear">Svuota la scatola</button></div>
@@ -523,6 +529,11 @@ function renderControls() {
         <button type="button" class="btn" id="sb-play">${SB.userPaused ? '▶ Avvia' : '❚❚ Pausa'}</button>
         <button type="button" class="btn" id="sb-step" ${SB.userPaused ? '' : 'disabled'}>+10 fs</button>
       </div></div>
+    <div class="ctl"><span class="lbl">Forze sugli atomi</span></div>
+    <div class="seg" id="sb-ff">
+      <button type="button" data-v="reactive" aria-pressed="${(st?.forceField ?? SB.forceField ?? 'reactive') === 'reactive'}" title="Campo di forze reattivo: centinaia di atomi in tempo reale">campo reattivo</button>
+      <button type="button" data-v="hf" aria-pressed="${(st?.forceField ?? SB.forceField) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo: forze dalla meccanica quantistica, fino a 8 atomi">Hartree–Fock ab initio</button>
+    </div>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
       <button type="button" data-v="1" aria-pressed="${thermo}" title="Termostato di Bussi: scambia calore con un bagno a temperatura costante (insieme canonico NVT)">Termostato</button>
@@ -557,6 +568,7 @@ function renderControls() {
   $('sb-step').addEventListener('click', () => post({ type: 'step', n: Math.round(10 / (st?.dt ?? 0.4)) }));
   $('sb-T').addEventListener('input', (e) => { const v = Math.pow(10, +e.target.value); $('sb-T-out').textContent = `${nf(v, 0)} K`; post({ type: 'set', T: v }); });
   seg('sb-thermo', (v) => post({ type: 'set', thermostat: v === '1' }));
+  seg('sb-ff', (v) => post({ type: 'set', forceField: v }));
   $('sb-box').addEventListener('input', (e) => { const v = +e.target.value; $('sb-box-out').textContent = `${nf(v, 1)} Å`; post({ type: 'set', box: v }); });
   $('sb-speed').addEventListener('input', (e) => { $('sb-speed-out').textContent = e.target.value; post({ type: 'set', stepsPerFrame: +e.target.value }); });
   seg('sb-tool', (v) => { SB.tool = v; $('sb-tool-hint').textContent = TOOLS.find(t => t.id === v).title; });
@@ -598,7 +610,7 @@ function renderPanelBody() {
   const Z = Pid > 0 ? s.P / Pid : NaN;
   const kj = (e) => nf(e * KJ_PER_EV, 1);
   $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole</small>`;
-  $('viewport-note').innerHTML = `Dinamica molecolare reattiva: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
+  $('viewport-note').innerHTML = `${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : 'Dinamica molecolare reattiva'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
   $('panel-body').innerHTML = `
     <div><h3>Stato termodinamico</h3>
     <dl class="info-list">
@@ -610,11 +622,21 @@ function renderPanelBody() {
       <dt>Volume</dt><dd>${nf(V / 1000, 2)} nm³</dd>
       <dt>Densità numerica</dt><dd>${nf(nMol / V * 1e27 / NA, 2)} mol/L</dd>
     </dl></div>
+    ${s.forceField === 'hf' && s.hf ? `<div><h3>Calcolo quantistico a ogni passo</h3>
+    <dl class="info-list">
+      <dt>Metodo</dt><dd>UHF/${s.hf.basis}</dd>
+      <dt>Funzioni di base</dt><dd>${s.hf.nbf}</dd>
+      <dt>Molteplicità di spin 2S+1</dt><dd>${s.hf.multiplicity} (${['', 'singoletto', 'doppietto', 'tripletto', 'quartetto'][s.hf.multiplicity] ?? ''})</dd>
+      <dt>⟨S²⟩ (esatto ${nf((s.hf.multiplicity - 1) / 2 * ((s.hf.multiplicity - 1) / 2 + 1), 2)})</dt><dd>${nf(s.hf.S2, 3)}</dd>
+      <dt>Iterazioni SCF</dt><dd>${s.hf.iterations}${s.hf.converged ? '' : ' (non convergente)'}</dd>
+    </dl>
+    <p class="hint">Cariche di Mulliken e ordini di legame di Mayer dalla funzione d'onda. Energia totale elettronica + nucleare.</p></div>` : ''}
     <div><h3>Energia (kJ/mol di scatola)</h3>
     <dl class="info-list">
       <dt>Cinetica</dt><dd>${kj(s.Ekin)}</dd>
       <dt>Potenziale</dt><dd>${kj(s.Epot + s.Ewall)}</dd>
-      ${s.parts ? `<dt class="sub">· legami covalenti</dt><dd>${kj(s.parts.bond)}</dd>
+      ${s.parts && s.parts.hf !== undefined ? `<dt class="sub">· energia Hartree–Fock</dt><dd>${kj(s.parts.hf)}</dd>` : ''}
+      ${s.parts && s.parts.bond !== undefined ? `<dt class="sub">· legami covalenti</dt><dd>${kj(s.parts.bond)}</dd>
       <dt class="sub">· angoli</dt><dd>${kj(s.parts.angle)}</dd>
       <dt class="sub">· van der Waals</dt><dd>${kj(s.parts.vdw)}</dd>
       <dt class="sub">· elettrostatica</dt><dd>${kj(s.parts.es)}</dd>
@@ -766,7 +788,9 @@ function renderLiveAnalysis() {
     $('sb-species').querySelectorAll('[data-mb]').forEach(b => b.addEventListener('click', () => post({ type: 'set', mbSpecies: b.dataset.mb })));
   }
   // reazioni
-  const real = SB.events.filter(e => !e.exchange);
+  // con pochi atomi (ab initio) anche lo scambio di atomi uguali è la reazione da osservare
+  const showExchange = (SB.frame?.stats.forceField === 'hf') || (SB.frame?.N ?? 99) <= 8;
+  const real = SB.events.filter(e => showExchange || !e.exchange);
   const agg = new Map();
   for (const e of real) {
     const k = `${e.reactants.join(' + ')} → ${e.products.join(' + ')}`;
@@ -776,7 +800,7 @@ function renderLiveAnalysis() {
   const recent = real.slice(-14).reverse();
   $('sb-events').innerHTML = `<h3>Registro delle reazioni</h3>
     ${real.length ? `<div class="analysis-grid">
-      <div><p class="lbl">Ultimi eventi</p><ul class="sb-log">${recent.map(e => `<li><span class="t">${nf(e.t / 1000, 2)} ps</span> ${e.reactants.join(' + ')} → ${e.products.join(' + ')}</li>`).join('')}</ul></div>
+      <div><p class="lbl">Ultimi eventi</p><ul class="sb-log">${recent.map(e => `<li><span class="t">${nf(e.t / 1000, 3)} ps</span> ${e.reactants.join(' + ')} → ${e.products.join(' + ')}${e.exchange ? ' <span class="desc-muted">(scambio di atomi)</span>' : ''}</li>`).join('')}</ul></div>
       <div><p class="lbl">Reazioni elementari più frequenti</p><ul class="sb-log">${top.map(([k, n]) => `<li><span class="t">${n}×</span> ${k}</li>`).join('')}</ul></div>
     </div>` : '<p class="desc-muted">Ancora nessuna reazione. Alza la temperatura, usa una scintilla o accendi la luce.</p>'}
     <p class="desc-muted">Una reazione è registrata quando cambia la connettività: un legame si forma (ordine > 0,55) o si rompe (< 0,35). Le reazioni che scambiano solo atomi uguali (H + H₂ → H₂ + H) non sono elencate.</p>`;
