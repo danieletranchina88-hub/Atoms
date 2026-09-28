@@ -13,6 +13,7 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | **Reazioni** | Termochimica e cinetica: ΔE, ΔH, ΔS, ΔG e K<sub>p</sub> in funzione della temperatura, confronto con i ΔH° sperimentali. Stati di transizione, energie di attivazione e costanti di velocità (Eyring con correzione tunnel), grafico di Arrhenius, animazione della coordinata di reazione. |
 | **Sandbox** | Dinamica molecolare in tempo reale: si mettono atomi e molecole in una scatola (24 elementi, 20 molecole pronte, qualunque SMILES) e si osservano legami che si formano e si rompono. Si controllano temperatura (termostato o sistema isolato), volume, luce di lunghezza d'onda scelta (fotolisi), scintille; si possono afferrare gli atomi con una "pinzetta". Riconosce da sola specie e reazioni (registro delle reazioni, curve di concentrazione), misura la pressione sulle pareti e la distribuzione di Maxwell–Boltzmann, verifica il primo principio passo per passo. Per sistemi fino a 8 atomi le forze possono venire direttamente da Hartree–Fock (dinamica *ab initio*). |
 | **Becher** | Chimica in soluzione con reagenti liberi: si compone qualunque sale, acido o base da 21 cationi × 28 anioni (in soluzione a qualunque concentrazione o come solido), si aggiungono molecole (NH₃, etilendiammina, EDTA, KHP, indicatori), metalli e minerali, si scalda con una piastra termostatata. Per ogni aggiunta calcola l'equilibrio completo: pH, precipitati (K<sub>sp</sub>), complessi, idrossidi anfoteri, reazioni redox con i metalli (Nernst), gas (H₂, CO₂), calore e temperatura, colore della soluzione dallo spettro, equazione ionica netta, curva di titolazione goccia a goccia. |
+| **Cinetica** | Meccanismi di reazione scritti liberamente (costanti fisse, Arrhenius, forma k₀(T/300)ⁿ, tempi di dimezzamento, reazioni reversibili, ordini non stechiometrici, specie costanti), integrati con un metodo implicito per sistemi rigidi. Curve c(t), ordine apparente dalle leggi integrate, tempo di dimezzamento, grafico di Arrhenius, parametri di Eyring, velocità dei singoli passi, equilibri. Esperienze con costanti di letteratura: N₂O₅, ciclopropano, SN1 e SN2 (Atkins), serie radioattiva ²¹⁰Bi → ²¹⁰Po (NNDC), ciclo di Chapman dell'ozono (IUPAC), reazione oscillante di Belousov–Zhabotinsky (Oregonator). |
 | **Laboratorio** | Le leggi della chimica fisica calcolate punto per punto: gas reali (van der Waals, costruzione di Maxwell, punto critico, fattore Z, Clausius–Clapeyron), acidi e basi (pH esatto dal bilancio di carica, titolazioni anche di acidi poliprotici, diagrammi di distribuzione, capacità tampone, indicatori), elettrochimica (pile, Nernst, ΔG = −nFE, K), cinetica (leggi integrate, reazioni consecutive, Arrhenius). |
 
 ## La fisica
@@ -55,6 +56,12 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - Precipitazione e dissoluzione con gli indici di saturazione (regola delle fasi); redox con i metalli fino ad annullare la f.e.m. di Nernst, con la sovratensione dell'idrogeno; CO₂ oltre la solubilità di Henry. L'Eh è mostrato solo quando c'è una coppia redox con entrambe le forme presenti (altrimenti un elettrodo non misurerebbe un potenziale stabile).
 - Calore con la legge di Hess dalle ΔrH delle reazioni e ΔT = q/(m c<sub>p</sub>); colore dalla legge di Lambert–Beer e dalle funzioni colorimetriche CIE 1931.
 
+### Cinetica: meccanismi e sistemi rigidi
+- Legge di azione di massa per ogni passo, r = k Π cᵢ^oᵢ, e k(T) = A (T/300)ⁿ exp(−E<sub>a</sub>/RT).
+- Integratore di Rosenbrock ROS2 (Verwer, Spee, Blom e Hundsdorfer, SIAM J. Sci. Comput. 20, 1456, 1999): L-stabile, del secondo ordine, jacobiana analitica, passo adattivo.
+- Analisi: leggi integrate di ordine 0, 1, 2 con R², tempo di dimezzamento, Arrhenius, Eyring (ΔH‡ = E<sub>a</sub> − RT), bilancio di elementi e carica di ogni passo.
+- Fonti: Atkins, *Physical Chemistry*, tabelle 22.1 e 22.4; IUPAC (Atkinson et al., Atmos. Chem. Phys. 4, 1461, 2004); NNDC/ENSDF; Field e Noyes (1974) con le costanti di Field e Försterling (1986); atmosfera standard USA 1976.
+
 ## Verifiche
 
 `npm test` esegue tutte le verifiche numeriche:
@@ -71,6 +78,7 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | Strutture di Lewis, risonanza, numeri di ossidazione, VSEPR, gruppi puntuali | casi da manuale | esatto |
 | Campo reattivo: forze = −∇E | differenze finite | 10⁻⁸ |
 | Campo reattivo: geometrie (H₂O 105°, CH₄ 109,47°, C–C/C=C/C≡C) ed energie di reazione (2 H₂ + O₂: −434 contro −484 kJ/mol) | dati sperimentali | pochi % |
+| Cinetica: soluzioni esatte (primo e secondo ordine, Bateman), problema rigido di Robertson (riferimento di Hairer e Wanner), equilibrio Q = k/k<sub>r</sub>, stato stazionario di Chapman, k del ciclopropano a 500 °C | analitico / Atkins | 10⁻⁵–10⁻⁷ relativo; k entro il 3 % |
 | Becher: pH di acidi e basi deboli, tamponi, K<sub>sp</sub>, calore di neutralizzazione (ΔT = 6,67 K), pK<sub>w</sub>(T) (Bandura–Lvov 2006), Nernst per Fe³⁺/Fe²⁺, redox con i metalli; convergenza di tutte le 588 combinazioni catione × anione | valori da manuale | 0,01–0,05 unità di pH |
 
 `npm run test:all` calcola tutti i 118 atomi.
@@ -82,6 +90,7 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - Le molecole sono isolate, in fase gassosa (niente solvente). Le basi disponibili arrivano fino al kripton.
 - Le frequenze sono armoniche e scalate con i fattori empirici di Scott e Radom.
 - Sandbox: il campo reattivo è classico (niente stati di spin, niente ipervalenza, barriere qualitative); la dinamica ab initio è limitata a pochi atomi e Hartree–Fock con base minima sovrastima le barriere (H + H₂: 1,0 eV contro 0,42 eV).
+- Cinetica: simulazioni isoterme a volume costante; le costanti di fotolisi del ciclo di Chapman sono ordini di grandezza; il quinto passo dell'Oregonator è fenomenologico.
 - Becher: il modello di attività vale fino a I ≈ 0,5–1 M; le ΔrH mancanti nel database vengono trascurate (segnalato con *); nessuna cinetica: ogni aggiunta arriva subito all'equilibrio (i solidi che si formano solo in tempi geologici sono esclusi, come l'ossidazione e la riduzione dell'acqua).
 
 ## Avvio
@@ -94,7 +103,7 @@ npm test                                   # verifiche numeriche
 node tools/precompute.mjs --parallel 4     # ricalcola la libreria di molecole (ore)
 ```
 
-Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`, `index.html#sandbox`, `index.html#becher`.
+Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`, `index.html#sandbox`, `index.html#becher`, `index.html#cinetica`.
 
 ## Struttura
 
@@ -111,7 +120,8 @@ js/chem/      (laboratorio) labData, labPhysics
 js/chem/      (sandbox) reactive (campo di forze reattivo), reactiveData, md (dinamica), aimd (ab initio),
               sandboxData, sandboxWorker
 js/chem/      (becher) aqueous (equilibri, colore), aqueousDB (generato da MINTEQ v4), aqueousExtra, beakerReagents
-js/ui/        sandboxMode, beakerMode
+js/chem/      (cinetica) kinetics (meccanismi, integratore rigido, esperienze)
+js/ui/        sandboxMode, beakerMode, kineticsMode
 tools/        precompute.mjs (libreria di molecole e stati di transizione), atomSummary.mjs, buildAqueousDB.mjs,
               build-artifact.py (versione a pagina singola)
 tests/        verifiche numeriche

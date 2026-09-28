@@ -541,18 +541,20 @@ export function drawProfile(canvas, { left, right, curves, reference }) {
  * Grafico cartesiano generico con limiti espliciti.
  * opts: { series:[{xs,ys,color,width,dash,label,fill}], xmin,xmax,ymin,ymax, xlabel, ylabel,
  *         vlines:[{x,label,color,dash}], hlines:[{y,label,color,dash}], hbands:[{y0,y1,color,label}],
- *         points:[{x,y,color,label}], legend:true, logY:false }
+ *         points:[{x,y,color,label}], legend:true, logY:false, logX:false }
  */
 export function drawXY(canvas, o) {
   const { ctx, w, h } = setup(canvas);
   const ink = cssVar('--text');
   const muted = cssVar('--muted');
   const grid = cssVar('--chart-grid');
-  const pad = { l: 52, r: 14, t: o.legend === false ? 12 : 28, b: 34 };
+  const pad = { l: o.padLeft ?? 52, r: 14, t: o.legend === false ? 12 : 28, b: 34 };
   const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
   const tr = o.logY ? (v) => Math.log10(Math.max(v, 1e-300)) : (v) => v;
+  const trx = o.logX ? (v) => Math.log10(Math.max(v, 1e-300)) : (v) => v;
   const y0 = tr(o.ymin), y1 = tr(o.ymax);
-  const X = (x) => pad.l + (x - o.xmin) / (o.xmax - o.xmin) * pw;
+  const x0 = trx(o.xmin), x1 = trx(o.xmax);
+  const X = (x) => pad.l + (trx(x) - x0) / (x1 - x0) * pw;
   const Y = (y) => pad.t + (1 - (tr(y) - y0) / (y1 - y0)) * ph;
   const nice = (range, target) => {
     const raw = range / target;
@@ -572,13 +574,22 @@ export function drawXY(canvas, o) {
     if (b.label) { ctx.fillStyle = muted; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(b.label, pad.l + 4, ya + 2); }
   }
   ctx.fillStyle = muted;
-  const sx = nice(o.xmax - o.xmin, Math.max(3, Math.floor(pw / 80)));
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (let v = Math.ceil(o.xmin / sx) * sx; !o.noXTicks && v <= o.xmax + 1e-12; v += sx) {
-    const x = X(v);
-    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
-    ctx.fillText(fmtNum(v), x, pad.t + ph + 5);
+  if (o.logX) {
+    const stepE = Math.max(1, Math.ceil((x1 - x0) / Math.max(3, Math.floor(pw / 60))));
+    for (let e = Math.ceil(x0); !o.noXTicks && e <= x1; e += stepE) {
+      const x = X(Math.pow(10, e));
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+      ctx.fillText(`10${sup(e)}`, x, pad.t + ph + 5);
+    }
+  } else {
+    const sx = nice(o.xmax - o.xmin, Math.max(3, Math.floor(pw / 80)));
+    for (let v = Math.ceil(o.xmin / sx) * sx; !o.noXTicks && v <= o.xmax + 1e-12; v += sx) {
+      const x = X(v);
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+      ctx.fillText(fmtNum(v), x, pad.t + ph + 5);
+    }
   }
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
@@ -620,7 +631,7 @@ export function drawXY(canvas, o) {
     let started = false;
     for (let i = 0; i < s.xs.length; i++) {
       const yv = s.ys[i];
-      if (!Number.isFinite(yv)) { started = false; continue; }
+      if (!Number.isFinite(yv) || (o.logX && !(s.xs[i] > 0)) || (o.logY && !(yv > 0))) { started = false; continue; }
       const px = X(s.xs[i]), py = Y(yv);
       if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
     }
@@ -684,7 +695,7 @@ function fmtNum(v) {
   const a = Math.abs(v);
   if (a !== 0 && (a >= 1e5 || a < 1e-3)) {
     const e = Math.floor(Math.log10(a));
-    return `${+(v / Math.pow(10, e)).toFixed(1)}·10${sup(e)}`;
+    return `${String(+(v / Math.pow(10, e)).toFixed(1)).replace('.', ',')}·10${sup(e)}`;
   }
   return String(+v.toPrecision(4)).replace('.', ',');
 }
