@@ -1,0 +1,12 @@
+{
+  "name": "atlante-orbitale",
+  "version": "1.0.0",
+  "description": "Simulazione quantistica degli orbitali atomici di tutti i 118 elementi (DFT-LDA autoconsistente) con visualizzazione 3D.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "npx http-server -c-1 -p 8080 .",
+    "test": "node tests/scf-reference.mjs && node tests/wavefunction.mjs && node tests/hf-reference.mjs && node tests/gradient.mjs && node tests/properties.mjs && node tests/chemistry.mjs",
+    "test:all": "node tests/all-elements.mjs"
+  }
+}
