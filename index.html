@@ -35,6 +35,7 @@
       <button type="button" role="tab" id="mode-molecule" data-mode="molecule" aria-selected="false">Molecole</button>
       <button type="button" role="tab" id="mode-reaction" data-mode="reaction" aria-selected="false">Reazioni</button>
       <button type="button" role="tab" id="mode-lab" data-mode="lab" aria-selected="false">Laboratorio</button>
+      <button type="button" role="tab" id="mode-sandbox" data-mode="sandbox" aria-selected="false">Sandbox</button>
     </nav>
     <button type="button" class="icon-btn" id="theme-toggle" aria-label="Cambia tema chiaro/scuro">◐</button>
   </header>
@@ -94,6 +95,10 @@
       <figcaption>
         <span id="radial-title">Distribuzione radiale di probabilità</span>
         <label class="mini-toggle atom-only"><input type="checkbox" id="radial-log"> scala log</label>
+        <select id="sb-chart1" class="sb-only" aria-label="Grandezza nel tempo">
+          <option value="energy">energia</option>
+          <option value="temperature">temperatura</option>
+        </select>
       </figcaption>
       <canvas id="chart-radial" aria-label="Grafico della distribuzione radiale"></canvas>
       <p class="chart-note" id="radial-note"></p>
@@ -195,6 +200,12 @@
         <p>Gas reali con l'equazione di van der Waals e la costruzione di Maxwell. pH esatto dal bilancio di carica per acidi mono- e poliprotici. Pile galvaniche con l'equazione di Nernst. Leggi cinetiche integrate e reazioni consecutive.</p>
         <p class="eq">(P + a/V²)(V − b) = RT,&nbsp;&nbsp; E = E° − (RT/nF) ln Q</p>
         <p>Ogni curva è calcolata punto per punto dalle equazioni, senza formule approssimate dei casi limite.</p>
+      </article>
+      <article>
+        <h3>11 · Sandbox: dinamica molecolare reattiva</h3>
+        <p>Nella sandbox gli atomi si muovono secondo F = ma (algoritmo velocity Verlet). L'energia potenziale è un campo di forze reattivo: l'ordine di legame nasce dalla valenza libera degli atomi, e lunghezza ed energia seguono la relazione di Pauling con i dati tabulati. Le cariche vengono dall'equalizzazione dell'elettronegatività.</p>
+        <p class="eq">r(n) = r₁ − c ln n,&nbsp;&nbsp; D(n) = D₁ nᵖ,&nbsp;&nbsp; cos θ = −1/λ</p>
+        <p>Il termostato di Bussi riproduce l'insieme canonico; la pressione è la forza media sulle pareti. Specie e reazioni vengono riconosciute automaticamente dai legami.</p>
       </article>
       <article>
         <h3>Limiti del modello</h3>
