@@ -365,7 +365,9 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 5px 8px;
+  max-width: 100%;
 }
+body[data-mode="beaker"] #element-card select { width: 100%; }
 
 .panel h3 {
   font: 600 14px/1.25 var(--font-display);
