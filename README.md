@@ -6,11 +6,12 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 
 | Modalità | Cosa fa |
 |---|---|
-| **Atomo** | I 118 elementi con un calcolo autoconsistente DFT-LDA. Nuvola elettronica, gusci, configurazione (con le eccezioni alla regola di Madelung), caselle ↑↓ secondo Hund, energie degli orbitali, Z<sub>eff</sub> di Slater, energia di ionizzazione calcolata contro quella misurata. |
+| **Atomo** | I 118 elementi con un calcolo autoconsistente DFT-LDA. Tavola periodica colorabile per elettronegatività, ionizzazione, affinità elettronica e raggio calcolato. Nuvola elettronica, gusci, configurazione (con le eccezioni alla regola di Madelung), caselle ↑↓ secondo Hund, energie degli orbitali, Z<sub>eff</sub> di Slater, energia di ionizzazione calcolata contro quella misurata. |
 | **Orbitale** | Qualunque orbitale (n, l, m) fino a n = 7: p<sub>x</sub>, d<sub>z²</sub>, i sette f… Nuvola Monte Carlo, isosuperficie colorata per fase, nodi radiali e angolari, sezione piana di ψ. |
 | **Legami σ π** | Orbitali molecolari LCAO σ, σ\*, π, π\* di molecole biatomiche e orbitali ibridi sp…sp³d², costruiti dagli orbitali atomici calcolati. |
-| **Molecole** | Sandbox molecolare con Hartree–Fock *ab initio*. Si parte da una libreria di 67 molecole, da una stringa SMILES o modificando la molecola con un clic sugli atomi. Calcola: legami singoli, doppi e tripli (ordine di Lewis e ordine di Mayer quantistico), elettronegatività (Pauling, Allen), cariche formali, numeri di ossidazione, cariche parziali (Mulliken, Löwdin), VSEPR e ibridazione, risonanza, momento di dipolo, orbitali molecolari in 3D, densità elettronica, potenziale elettrostatico, geometria ottimizzata, vibrazioni con spettro IR, termodinamica statistica, curva di dissociazione. |
+| **Molecole** | Sandbox molecolare con Hartree–Fock *ab initio*. Si parte da una libreria di 67 molecole, da una stringa SMILES o modificando la molecola con un clic sugli atomi. Calcola: legami singoli, doppi e tripli (ordine di Lewis e ordine di Mayer quantistico), elettronegatività (Pauling, Allen), cariche formali, numeri di ossidazione, cariche parziali (Mulliken, Löwdin), VSEPR e ibridazione, risonanza, momento di dipolo, orbitali molecolari in 3D (con carattere σ/π e legante/antilegante), densità elettronica, potenziale elettrostatico, geometria ottimizzata, vibrazioni con spettro IR, spettro UV-visibile (CIS), spettro fotoelettronico (Koopmans), termodinamica statistica, curva di dissociazione RHF/UHF. |
 | **Reazioni** | Termochimica e cinetica: ΔE, ΔH, ΔS, ΔG e K<sub>p</sub> in funzione della temperatura, confronto con i ΔH° sperimentali. Stati di transizione, energie di attivazione e costanti di velocità (Eyring con correzione tunnel), grafico di Arrhenius, animazione della coordinata di reazione. |
+| **Laboratorio** | Le leggi della chimica fisica calcolate punto per punto: gas reali (van der Waals, costruzione di Maxwell, punto critico, fattore Z, Clausius–Clapeyron), acidi e basi (pH esatto dal bilancio di carica, titolazioni anche di acidi poliprotici, diagrammi di distribuzione, capacità tampone, indicatori), elettrochimica (pile, Nernst, ΔG = −nFE, K), cinetica (leggi integrate, reazioni consecutive, Arrhenius). |
 
 ## La fisica
 
@@ -26,7 +27,8 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 - Correlazione elettronica MP2 e UMP2 (Møller–Plesset al secondo ordine, nucleo congelato).
 - Gradiente analitico dell'energia (derivate degli integrali), ottimizzazione quasi-Newton con Hessiana modello di Lindh, aggiornamento BFGS e passi RFO.
 - Frequenze armoniche dall'Hessiana (differenze finite dei gradienti analitici), proiezione di traslazioni e rotazioni, intensità IR da ∂μ/∂Q.
-- Stati di transizione con il partitioned-RFO di Baker e aggiornamento di Bofill.
+- Stati di transizione con il partitioned-RFO di Baker e aggiornamento di Bofill. Ogni minimo della libreria è controllato: se compare una frequenza immaginaria, la struttura viene spostata lungo quel modo e riottimizzata.
+- Stati eccitati di singoletto con CIS (Tamm–Dancoff), forze dell'oscillatore e spettro UV-visibile.
 - Termodinamica statistica (gas ideale, rotore rigido, oscillatore armonico): funzioni di partizione traslazionale, rotazionale e vibrazionale. Numero di simmetria dal gruppo puntuale, riconosciuto automaticamente.
 - Analisi della funzione d'onda: popolazioni di Mulliken e Löwdin, ordini di legame di Mayer, ⟨S²⟩, potenziale elettrostatico esatto sulla superficie di densità 0,002 e/bohr³.
 
@@ -47,7 +49,8 @@ Un laboratorio di chimica quantistica che gira nel browser: atomi, orbitali, mol
 | Orbitali dell'idrogeno (energie, ⟨r⟩) | soluzione esatta | 10⁻⁷ |
 | Energie HF (H₂O, NH₃, O₂ tripletto; STO-3G…6-31G\*\*) | PySCF 2.14 | 10⁻¹² Ha |
 | Gradienti analitici HF e UHF | PySCF | 10⁻⁸ Ha/bohr |
-| Cariche di Mulliken, dipolo, MP2, UMP2 | PySCF | 10⁻⁷ |
+| Cariche di Mulliken, dipolo, MP2, UMP2, potenziale elettrostatico | PySCF | 10⁻⁷ |
+| Energie di eccitazione CIS e forze dell'oscillatore | PySCF (TDA) | 10⁻³ eV |
 | Frequenze HF/6-31G\* dell'acqua (1827, 4071, 4189 cm⁻¹) | letteratura | 1 cm⁻¹ |
 | Strutture di Lewis, risonanza, numeri di ossidazione, VSEPR, gruppi puntuali | casi da manuale | esatto |
 
@@ -70,7 +73,7 @@ npm test                                   # verifiche numeriche
 node tools/precompute.mjs --parallel 4     # ricalcola la libreria di molecole (ore)
 ```
 
-Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`.
+Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`.
 
 ## Struttura
 
@@ -82,7 +85,9 @@ js/chem/      molecole: basisData, boys, integrals, hf, gradient, optimize, vibr
               properties (Mulliken, Mayer, MP2), smiles, structure (Lewis, VSEPR, ossidazione),
               embed, elementData, library, libraryData (precalcolata), moleculeWorker, moleculeClient
 js/render/    viewer (three.js), marching (marching cubes), moleculeView
-js/ui/        periodicTable, charts, chemCharts, moleculeMode, reactionMode
-tools/        precompute.mjs (libreria di molecole e stati di transizione)
+js/ui/        periodicTable, charts, chemCharts, moleculeMode, reactionMode, labMode
+js/chem/      (laboratorio) labData, labPhysics
+tools/        precompute.mjs (libreria di molecole e stati di transizione), atomSummary.mjs,
+              build-artifact.py (versione a pagina singola)
 tests/        verifiche numeriche
 ```

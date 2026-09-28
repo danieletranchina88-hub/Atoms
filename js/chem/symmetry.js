@@ -175,9 +175,9 @@ export function analyzeSymmetry(atoms, masses) {
     pg = planes.length ? 'Cs' : inversion ? 'Ci' : 'C1';
   } else {
     const main = cnAxes.find(a => a.n === nMax).axis;
-    const perpC2 = cnAxes.filter(a => a.n % 2 === 0 && Math.abs(dot(a.axis, main)) < 1e-3).length;
-    const sigmaH = planes.some(p => Math.abs(Math.abs(dot(p, main)) - 1) < 1e-3);
-    const sigmaV = planes.filter(p => Math.abs(dot(p, main)) < 1e-3).length;
+    const perpC2 = cnAxes.filter(a => a.n % 2 === 0 && Math.abs(dot(a.axis, main)) < 2e-2).length;
+    const sigmaH = planes.some(p => Math.abs(Math.abs(dot(p, main)) - 1) < 2e-3);
+    const sigmaV = planes.filter(p => Math.abs(dot(p, main)) < 2e-2).length;
     if (perpC2 >= 1) {
       pg = sigmaH ? `D${nMax}h` : sigmaV ? `D${nMax}d` : `D${nMax}`;
     } else if (sigmaH) {

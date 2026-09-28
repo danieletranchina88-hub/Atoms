@@ -10,8 +10,7 @@ import { analyzeStructure, connectivityFromGeometry } from '../chem/structure.js
 import { thermochemistry } from '../chem/vibrations.js';
 import { buildMolecule } from '../render/moleculeView.js';
 import { textSprite } from '../render/viewer.js';
-import { drawEnthalpy, drawBars, drawProfile } from './chemCharts.js';
-import { drawLineChart } from './charts.js';
+import { drawEnthalpy, drawBars, drawProfile, drawXY } from './chemCharts.js';
 import { FREQ_SCALE } from './moleculeMode.js';
 
 const BOHR_ANG = 0.52917721090;
@@ -19,7 +18,7 @@ const HARTREE_KJ = 2625.4996394799;
 const R_GAS = 8.314462618e-3; // kJ/(mol K)
 const $ = (id) => document.getElementById(id);
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const nf = (v, d = 1) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Number(v).toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d }));
+const nf = (v, d = 1) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Number(v).toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: Math.abs(v) >= 1e4 }));
 
 let viewer = null;
 let active = false;
@@ -354,14 +353,18 @@ function drawCharts() {
   const dG = Ts.map(T => thermo(rx, T).dG);
   const dH = Ts.map(T => thermo(rx, T).dH);
   const TdS = Ts.map((T, i) => dH[i] - dG[i]);
-  drawLineChart($('chart-levels'), {
+  const all = [...dG, ...dH, ...TdS.map(v => -v), 0];
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const padY = 0.08 * Math.max(hi - lo, 10);
+  drawXY($('chart-levels'), {
     series: [
-      { xs: Ts, ys: dG, color: cssVar('--accent'), label: 'ΔG°(T)', width: 2.2, keepZero: true },
-      { xs: Ts, ys: dH, color: cssVar('--phase-neg'), label: 'ΔH°(T)', dash: [5, 4], keepZero: true },
-      { xs: Ts, ys: TdS.map(v => -v), color: cssVar('--muted'), label: '−TΔS°', dash: [2, 3], keepZero: true },
+      { xs: Ts, ys: dG, color: cssVar('--accent'), label: 'ΔG°(T)', width: 2.2 },
+      { xs: Ts, ys: dH, color: cssVar('--phase-neg'), label: 'ΔH°(T)', dash: [5, 4] },
+      { xs: Ts, ys: TdS.map(v => -v), color: cssVar('--muted'), label: '−TΔS°', dash: [2, 3] },
     ],
-    log: false, signed: true, xlabel: 'T (K)', ylabel: 'kJ/mol',
-    markers: [{ x: R.T, label: `${nf(R.T, 0)} K`, color: cssVar('--accent') }],
+    xmin: 100, xmax: 2000, ymin: lo - padY, ymax: hi + padY, xlabel: 'T (K)', ylabel: 'kJ/mol',
+    vlines: [{ x: R.T, label: `${nf(R.T, 0)} K`, color: cssVar('--accent') }],
+    hlines: [{ y: 0, color: cssVar('--muted') }],
   });
   $('levels-title').textContent = 'Energia libera in funzione di T';
   $('levels-note').textContent = `Dove ΔG° < 0 la reazione è favorita (K > 1). ${t.dS < 0 ? 'ΔS° < 0: l\'aumento di T sfavorisce i prodotti (principio di Le Châtelier).' : 'ΔS° > 0: l\'aumento di T favorisce i prodotti.'}`;
@@ -550,10 +553,11 @@ function drawBarrierCharts() {
   // energia di attivazione di Arrhenius dalla pendenza a T corrente: Ea = −R d(ln k)/d(1/T)
   const h = 1;
   const Ea = -8.314462618e-3 * (Math.log(barrierData(R.T + h).k) - Math.log(barrierData(R.T - h).k)) / (1 / (R.T + h) - 1 / (R.T - h));
-  drawLineChart($('chart-levels'), {
-    series: [{ xs, ys: lnk, color: cssVar('--accent'), label: 'ln k (Eyring + tunnel)', width: 2.2, keepZero: true }],
-    log: false, signed: true, xlabel: '1000/T (K⁻¹)', ylabel: `ln k (${t.molecularity === 2 ? 'cm³ s⁻¹' : 's⁻¹'})`,
-    markers: [{ x: 1000 / R.T, label: `${nf(R.T, 0)} K`, color: cssVar('--accent') }],
+  const kLo = Math.min(...lnk), kHi = Math.max(...lnk);
+  drawXY($('chart-levels'), {
+    series: [{ xs, ys: lnk, color: cssVar('--accent'), label: 'ln k (Eyring + tunnel)', width: 2.2 }],
+    xmin: 0.5, xmax: 5, ymin: kLo - 0.05 * (kHi - kLo), ymax: kHi + 0.05 * (kHi - kLo), xlabel: '1000/T (K⁻¹)', ylabel: `ln k (${t.molecularity === 2 ? 'cm³ s⁻¹' : 's⁻¹'})`,
+    vlines: [{ x: 1000 / R.T, label: `${nf(R.T, 0)} K`, color: cssVar('--accent') }],
   });
   $('levels-title').textContent = 'Grafico di Arrhenius';
   $('levels-note').textContent = `ln k = ln A − Ea/RT: la pendenza è −Ea/R. A ${nf(R.T, 0)} K, Ea = ${nf(Ea, 1)} kJ/mol (≈ ΔH‡ + ${t.molecularity === 2 ? '2' : ''}RT).`;

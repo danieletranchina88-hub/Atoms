@@ -104,6 +104,41 @@ function computeTS(b) {
   };
 }
 
+/**
+ * Se una geometria ha frequenze immaginarie non è un minimo ma un punto di sella:
+ * si sposta la struttura lungo il modo immaginario e si riottimizza, finché tutte le frequenze sono reali.
+ */
+function refineMinimum(id) {
+  const mol = MOLECULES.find(m => m.id === id);
+  const d = JSON.parse(fs.readFileSync(path.join(CACHE, `${id}.json`), 'utf8'));
+  const log = (...a) => console.log(`[${id}]`, ...a);
+  let atoms = d.geometry.map(([Z, x, y, z]) => ({ Z, xyz: [x / BOHR_ANG, y / BOHR_ANG, z / BOHR_ANG] }));
+  const opts = { basis: d.basis, charge: d.charge, multiplicity: d.multiplicity };
+  let freqs = d.freqs;
+  for (let round = 0; round < 4; round++) {
+    const imag = freqs.filter(f => f.freq < 0);
+    if (!imag.length) break;
+    log('frequenze immaginarie', imag.map(f => f.freq.toFixed(0)).join(', '), '→ spostamento lungo il modo');
+    const mode = imag[0].d;
+    atoms = atoms.map((a, i) => ({ ...a, xyz: a.xyz.map((v, k) => v + 0.3 * mode[3 * i + k]) }));
+    const opt = optimizeGeometry(atoms, { ...opts, maxSteps: 100, gmax: 1.5e-4, grms: 1e-4, onStep: s => log('passo', s.step, s.energy.toFixed(8), s.gmax.toExponential(2)) });
+    atoms = opt.atoms;
+    const f = harmonicFrequencies(atoms, opts);
+    freqs = f.modes.map(m => ({ freq: +m.freq.toFixed(2), ir: +(m.ir ?? 0).toFixed(3), mu: +m.reducedMass.toFixed(4), d: Array.from(m.displacement, v => +v.toFixed(4)) }));
+  }
+  const res = runHF(atoms, opts);
+  const th = thermochemistry(atoms, freqs.map(f => ({ freq: f.freq })), res.energy, { multiplicity: d.multiplicity });
+  const sym = analyzeSymmetry(atoms, atoms.map(a => ISOTOPE_MASS[a.Z]));
+  const out = {
+    ...d, geometry: atoms.map(a => [a.Z, ...a.xyz.map(v => +(v * BOHR_ANG).toFixed(6))]),
+    energy: res.energy, mp2: mp2Energy(res).energy, dipole: dipoleMoment(res).debye,
+    freqs, thermo: pickThermo(th), pointGroup: sym.pointGroup, sigma: sym.sigma,
+  };
+  fs.writeFileSync(path.join(CACHE, `${id}.json`), JSON.stringify(out));
+  log('fatto:', sym.pointGroup, 'E', res.energy.toFixed(8), 'immaginarie rimaste', freqs.filter(f => f.freq < 0).length);
+  void mol;
+}
+
 function pickThermo(th) {
   return { zpe: th.zpe, Hcorr: th.Hcorr, Gcorr: th.Gcorr, S: th.S, Cv: th.Cv, T: th.T };
 }
@@ -129,7 +164,10 @@ function merge() {
 }
 
 const args = process.argv.slice(2);
-if (args[0] === '--merge') {
+if (args[0] === '--refine') {
+  for (const id of args.slice(1)) refineMinimum(id);
+  merge();
+} else if (args[0] === '--merge') {
   merge();
 } else if (args[0] === '--parallel') {
   const nproc = +args[1] || 4;

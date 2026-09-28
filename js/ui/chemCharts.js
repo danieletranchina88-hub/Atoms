@@ -430,7 +430,7 @@ export function drawBars(canvas, { items, unit }) {
   const ink = cssVar('--text');
   const muted = cssVar('--muted');
   const grid = cssVar('--chart-grid');
-  const pad = { l: 118, r: 60, t: 10, b: 22 };
+  const pad = { l: 128, r: 64, t: 10, b: 22 };
   const vmax = Math.max(1, ...items.map(i => Math.abs(i.value)));
   const X = (v) => pad.l + (w - pad.l - pad.r) / 2 + v / vmax * (w - pad.l - pad.r) / 2;
   const rowH = (h - pad.t - pad.b) / items.length;
@@ -447,10 +447,11 @@ export function drawBars(canvas, { items, unit }) {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(it.label, pad.l - 8, y + bh / 2);
+    // valore nella colonna di destra, sempre leggibile
     ctx.font = `11px ${MONO}`;
     ctx.fillStyle = muted;
-    ctx.textAlign = it.value < 0 ? 'right' : 'left';
-    ctx.fillText(fmt(it.value, 1), it.value < 0 ? xa - 4 : xb + 4, y + bh / 2);
+    ctx.textAlign = 'right';
+    ctx.fillText(fmt(it.value, 1), w - 4, y + bh / 2);
   });
   ctx.font = `11px ${FONT}`;
   ctx.fillStyle = muted;
