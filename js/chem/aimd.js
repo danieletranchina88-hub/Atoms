@@ -38,8 +38,9 @@ export function makeHFProvider({ basis = 'STO-3G' } = {}) {
         const cands = [];
         for (const m of [low, low + 2]) {
           if (m - 1 > nel) continue;
-          try { cands.push(run(m, null, m === 1)); } catch { /* molteplicità impossibile */ }
+          try { const r = run(m, null, m === 1); if (r.converged && Number.isFinite(r.energy)) cands.push(r); } catch { /* molteplicità impossibile */ }
         }
+        if (!cands.length) throw new Error('SCF non convergente: nessuna forza HF utilizzabile.');
         res = cands.reduce((a, b) => (b.energy < a.energy ? b : a));
         multiplicity = res.multiplicity;
       } else {
@@ -53,6 +54,7 @@ export function makeHFProvider({ basis = 'STO-3G' } = {}) {
           } catch { /* resta la soluzione precedente */ }
         }
       }
+      if (!res.converged || !Number.isFinite(res.energy)) throw new Error('SCF non convergente: dinamica sospesa.');
       step++;
       guess = { Pa: res.Pa, Pb: res.Pb };
       const grad = hfGradient(res);

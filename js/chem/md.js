@@ -8,7 +8,7 @@
 import { ReactiveFF } from './reactive.js';
 import { ELEMENTS } from '../physics/elements.js';
 import { hillFormula } from './smiles.js';
-import { KB_EV } from './reactiveData.js';
+import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
 
 export const ACC = 0.00964853321;        // (eV/Å)/amu → Å/fs²
 export const MV2 = 1 / ACC;              // amu·Å²/fs² → eV
@@ -42,11 +42,16 @@ export function makeRng(seed = 12345) {
       if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
     }
   };
-  return { uni, gauss, gamma };
+  return { uni, gauss, gamma,
+    state: () => ({ s, spare }),
+    restore: (v) => { s = v.s >>> 0 || 1; spare = v.spare; },
+  };
 }
 
 export class Simulation {
   constructor({ box = 24, T = 300, dt = 0.4, seed = 2024 } = {}) {
+    if (![box, T, dt].every(Number.isFinite) || box <= 0 || T < 0 || dt <= 0) throw new Error('Parametri MD non validi.');
+    this.seed = seed;
     this.ff = new ReactiveFF();
     this.rng = makeRng(seed);
     this.Z = [];
@@ -61,6 +66,7 @@ export class Simulation {
     this.dt = dt;
     this.time = 0;
     this.res = null;
+    this.Egrab = 0;
     this.Ewall = 0;
     this.wallForce = 0;
     this.pAccum = 0; this.pSamples = 0; this.pressure = 0;
@@ -75,6 +81,10 @@ export class Simulation {
     this.stepCount = 0;
     this.species = new Map();
     this.clamped = 0;
+    this.eventSerial = 0;
+    this.censusSerial = 0;
+    this.energyReference = null;
+    this.matterExchange = 0;
     this.provider = null;    // forze alternative (per esempio Hartree–Fock ab initio)
   }
 
@@ -91,10 +101,74 @@ export class Simulation {
   }
 
   clear() {
-    this.Z = [];
-    this.resize(0);
-    this.time = 0; this.heatBath = 0; this.work = 0; this.events = []; this.history = []; this.species = new Map();
-    this.grab = null;
+    const { box, T, dt, seed, thermostat, tau } = this;
+    Object.assign(this, new Simulation({ box, T, dt, seed }));
+    this.thermostat = thermostat; this.tau = tau;
+    this.forces(); this.census();
+  }
+
+  resetMeasurements() {
+    this.history = []; this.events = []; this.frags = []; this.species = new Map();
+    this.fragOf = null; this.bondedPrev.clear();
+    this.pAccum = 0; this.pSamples = 0; this.pressure = 0;
+    this.heatBath = 0; this.work = 0; this.matterExchange = 0;
+    this.forces(); this.energyReference = this.totalEnergy();
+    this.census();
+  }
+
+  changeBox(box) {
+    if (!Number.isFinite(box) || box <= 0) throw new Error('Volume non valido.');
+    if (!this.res) this.forces();
+    const before = this.totalEnergy();
+    this.box = box; this.forces();
+    this.work += this.totalEnergy() - before;
+    this.pAccum = 0; this.pSamples = 0; this.pressure = 0;
+  }
+
+  setGrab(grab) {
+    if (grab && (!Number.isInteger(grab.i) || grab.i < 0 || grab.i >= this.N ||
+      grab.target?.length !== 3 || !grab.target.every(Number.isFinite))) throw new Error('Pinzetta non valida.');
+    if (!this.res) this.forces();
+    const before = this.totalEnergy();
+    this.grab = grab; this.forces();
+    this.work += this.totalEnergy() - before;
+  }
+
+  rethermalize() {
+    const before = this.kinetic();
+    for (let i = 0; i < this.N; i++) this.thermalize(i, this.T);
+    this.heatBath += this.kinetic() - before;
+  }
+
+  /** Changing particle inventory is an open-system energy exchange, not numerical drift. */
+  editInventory(edit) {
+    if (!this.res) this.forces();
+    const before = this.totalEnergy();
+    const saved = { Z: [...this.Z], pos: this.pos.slice(), vel: this.vel.slice(), F: this.F.slice(),
+      mass: this.mass.slice(), res: this.res, Ewall: this.Ewall, Egrab: this.Egrab, wallForce: this.wallForce,
+      grab: this.grab ? { i: this.grab.i, target: [...this.grab.target] } : null,
+      fragOf: this.fragOf, bondedPrev: new Set(this.bondedPrev) };
+    const randomState = this.rng.state(), split = new Map(this.ff.splitPrev);
+    try {
+      const result = edit();
+      this.provider?.reset(); this.forces();
+      this.matterExchange += this.totalEnergy() - before;
+      this.census();
+      return result;
+    } catch (error) {
+      Object.assign(this, saved); this.rng.restore(randomState); this.ff.splitPrev = split;
+      this.provider?.reset();
+      throw error;
+    }
+  }
+
+  diagnostics() {
+    if (!this.res) this.forces();
+    const conserved = this.totalEnergy() - this.heatBath - this.work - this.matterExchange;
+    if (this.energyReference === null) this.energyReference = conserved;
+    return { drift: conserved - this.energyReference, reference: this.energyReference,
+      totalCharge: Array.from(this.res.q).reduce((a, b) => a + b, 0),
+      inventory: this.Z.reduce((out, z) => { out[z] = (out[z] ?? 0) + 1; return out; }, {}) };
   }
 
   /** Velocità di Maxwell–Boltzmann alla temperatura T per l'atomo i. */
@@ -122,6 +196,11 @@ export class Simulation {
    * Restituisce quante copie sono state inserite (la scatola può essere piena).
    */
   addMolecule(template, count = 1, T = this.T, at = null) {
+    if (!Number.isInteger(count) || count < 1 || count > 400 || this.N + count * template.Z.length > 400)
+      throw new Error('Massimo 400 atomi nella scatola.');
+    if (!template.Z.length || template.Z.some(z => !ATOM_PARAMS[z]) ||
+        template.pos.length !== 3 * template.Z.length || !Array.from(template.pos).every(Number.isFinite))
+      throw new Error('Geometria o elemento non supportato.');
     const n0 = template.Z.length;
     // centro della molecola
     const c = [0, 1, 2].map(k => template.pos.reduce((s, _, i) => (i % 3 === k ? s + template.pos[i] : s), 0) / n0);
@@ -158,6 +237,9 @@ export class Simulation {
 
   /** Inserisce atomi con posizioni (Å) e velocità (Å/fs) assegnate. */
   addAtoms(list) {
+    if (this.N + list.length > 400 || list.some(a => !ATOM_PARAMS[a.Z] || a.pos?.length !== 3 ||
+      !a.pos.every(Number.isFinite) || (a.vel && (a.vel.length !== 3 || !a.vel.every(Number.isFinite)))))
+      throw new Error('Atomi non validi (massimo 400, coordinate finite).');
     const start = this.N;
     this.Z = [...this.Z, ...list.map(a => a.Z)];
     this.resize(this.Z.length);
@@ -194,8 +276,10 @@ export class Simulation {
 
   forces() {
     const { N, pos, F } = this;
-    if (!N) { this.res = { E: 0, parts: { bond: 0, angle: 0, vdw: 0, es: 0 }, q: new Float64Array(0), bonds: [] }; this.Ewall = 0; return; }
+    if (!N) { this.res = { E: 0, parts: { bond: 0, angle: 0, vdw: 0, es: 0 }, q: new Float64Array(0), bonds: [] }; this.Ewall = 0; this.Egrab = 0; this.wallForce = 0; this.F.fill(0); return; }
     this.res = this.provider ? this.provider.compute(this.Z, pos, F) : this.ff.compute(this.Z, pos, F);
+    if (!Number.isFinite(this.res.E) || !Array.from(F).every(Number.isFinite))
+      throw new Error('Forze o energia non finite: simulazione arrestata.');
     // pareti morbide: E = ½ k d² per ogni atomo oltre il bordo della scatola
     const h = this.box / 2;
     let Ew = 0, Fw = 0;
@@ -206,9 +290,14 @@ export class Simulation {
     }
     this.Ewall = Ew;
     this.wallForce = Fw;
+    this.Egrab = 0;
     if (this.grab && this.grab.i < N) {
       const i = this.grab.i;
-      for (let c = 0; c < 3; c++) F[3 * i + c] += K_GRAB * (this.grab.target[c] - pos[3 * i + c]);
+      for (let c = 0; c < 3; c++) {
+        const d = this.grab.target[c] - pos[3 * i + c];
+        F[3 * i + c] += K_GRAB * d;
+        this.Egrab += 0.5 * K_GRAB * d * d;
+      }
     }
   }
 
@@ -218,49 +307,48 @@ export class Simulation {
     if (!N || !this.thermostat) return;
     const nf = 3 * N;
     const K = this.kinetic();
-    if (K <= 0) { for (let i = 0; i < N; i++) this.thermalize(i, this.T); return; }
+    if (K <= 0) { this.rethermalize(); return; }
     const Kt = 0.5 * nf * KB_EV * this.T;
     const c = Math.exp(-this.dt / this.tau);
     const r1 = this.rng.gauss();
     const s2 = nf > 1 ? 2 * this.rng.gamma((nf - 1) / 2) : 0;
     const Knew = K + (1 - c) * (Kt * (r1 * r1 + s2) / nf - K) + 2 * r1 * Math.sqrt(c * (1 - c) * Kt * K / nf);
-    const alpha = Math.sqrt(Math.max(Knew, 0) / K);
+    // The sign of the scaling factor is required by the exact CSVR transition.
+    const sign = Kt === 0 || r1 + Math.sqrt(c * K * nf / ((1 - c) * Kt)) >= 0 ? 1 : -1;
+    const alpha = sign * Math.sqrt(Math.max(Knew, 0) / K);
     for (let k = 0; k < 3 * N; k++) this.vel[k] *= alpha;
     this.heatBath += Knew - K;
   }
 
   step() {
     const { N, dt, pos, vel, mass } = this;
+    if (!Number.isFinite(dt) || dt <= 0) throw new Error('Passo temporale non valido.');
     if (!this.res) this.forces();
-    const F = this.F;
-    // velocity Verlet: v(t+½dt) = v + ½ a dt;  x(t+dt) = x + v dt;  v(t+dt) = v(t+½dt) + ½ a(t+dt) dt
-    const maxStep = 0.25;
+    this.diagnostics();
+    // Reject an unsafe step before changing the trajectory. Never clip velocity.
     for (let i = 0; i < N; i++) {
-      const a = 0.5 * dt * ACC / mass[i];
-      for (let c = 0; c < 3; c++) vel[3 * i + c] += a * F[3 * i + c];
-      // limite di sicurezza allo spostamento per passo (atomi sovrapposti, urti violentissimi)
-      const vx = vel[3 * i], vy = vel[3 * i + 1], vz = vel[3 * i + 2];
-      const disp = Math.sqrt(vx * vx + vy * vy + vz * vz) * dt;
-      if (disp > maxStep) {
-        const f = maxStep / disp;
-        const before = 0.5 * mass[i] * (vx * vx + vy * vy + vz * vz) * MV2;
-        vel[3 * i] *= f; vel[3 * i + 1] *= f; vel[3 * i + 2] *= f;
-        this.work -= before * (1 - f * f);
-        this.clamped++;
+      const d = [0, 1, 2].map(c => dt * (vel[3*i+c] + 0.5 * dt * ACC / mass[i] * this.F[3*i+c]));
+      if (!d.every(Number.isFinite) || Math.hypot(...d) > 0.25)
+        throw new Error('Passo instabile (> 0,25 Å): riduci Δt o correggi la geometria. Nessuna velocità è stata tagliata.');
+    }
+    const oldPos = pos.slice(), oldVel = vel.slice(), oldF = this.F.slice();
+    const oldRes = this.res, oldWall = this.Ewall, oldGrab = this.Egrab, oldWallForce = this.wallForce;
+    const oldSplit = new Map(this.ff.splitPrev);
+    try {
+      for (let i = 0; i < N; i++) for (let c = 0; c < 3; c++) {
+        vel[3*i+c] += 0.5 * dt * ACC / mass[i] * this.F[3*i+c];
+        pos[3*i+c] += dt * vel[3*i+c];
       }
-      for (let c = 0; c < 3; c++) pos[3 * i + c] += dt * vel[3 * i + c];
+      this.forces();
+      for (let i = 0; i < N; i++) for (let c = 0; c < 3; c++)
+        vel[3*i+c] += 0.5 * dt * ACC / mass[i] * this.F[3*i+c];
+      if (!Array.from(vel).every(Number.isFinite)) throw new Error('Velocità non finite.');
+    } catch (error) {
+      pos.set(oldPos); vel.set(oldVel); this.F.set(oldF); this.res = oldRes;
+      this.Ewall = oldWall; this.Egrab = oldGrab; this.wallForce = oldWallForce;
+      this.ff.splitPrev = oldSplit; this.provider?.reset();
+      throw error;
     }
-    let Wgrab = 0;
-    if (this.grab && this.grab.i < N) {
-      const i = this.grab.i;
-      for (let c = 0; c < 3; c++) Wgrab += K_GRAB * (this.grab.target[c] - pos[3 * i + c]) * vel[3 * i + c] * dt;
-    }
-    this.forces();
-    for (let i = 0; i < N; i++) {
-      const a = 0.5 * dt * ACC / mass[i];
-      for (let c = 0; c < 3; c++) vel[3 * i + c] += a * F[3 * i + c];
-    }
-    this.work += Wgrab;
     this.bussi();
     this.time += dt;
     this.stepCount++;
@@ -288,11 +376,11 @@ export class Simulation {
   }
 
   /**
-   * Assorbimento di un fotone di lunghezza d'onda λ (nm): l'energia E = hc/λ va in un legame scelto a caso,
-   * come moto relativo dei due atomi lungo l'asse del legame. Se E supera l'energia di legame, il legame si rompe
-   * (fotolisi, come Cl₂ + hν → 2 Cl·).
+   * Deposito meccanico hc/λ nel moto relativo di una coppia. Non modella fotolisi:
+   * mancano stati eccitati, sezioni d'urto e probabilità di assorbimento.
    */
   photon(lambdaNm, filter = null) {
+    if (!Number.isFinite(lambdaNm) || lambdaNm <= 0) throw new Error('Lunghezza d’onda non valida.');
     const E = 1239.841984 / lambdaNm; // eV
     const bonds = (this.res?.bonds ?? []).filter(b => b.n * b.w > 0.5 && (!filter || filter(this.Z[b.i], this.Z[b.j])));
     if (!bonds.length) return null;
@@ -300,9 +388,12 @@ export class Simulation {
     const { i, j } = b;
     const u = [0, 1, 2].map(c => this.pos[3 * j + c] - this.pos[3 * i + c]);
     const r = Math.hypot(...u);
+    if (r < 1e-10) throw new Error('Atomi sovrapposti.');
     u.forEach((_, c) => { u[c] /= r; });
     const mi = this.mass[i], mj = this.mass[j], mu = mi * mj / (mi + mj);
-    const dv = Math.sqrt(2 * E / (mu * MV2));
+    const vr = u.reduce((sum, x, c) => sum + x * (this.vel[3*j+c] - this.vel[3*i+c]), 0);
+    // Solve 1/2 μ [(vr + Δv)^2 − vr^2] = E including the initial relative motion.
+    const dv = Math.sqrt(vr * vr + 2 * E / (mu * MV2)) - vr;
     const K0 = this.kinetic();
     for (let c = 0; c < 3; c++) {
       this.vel[3 * i + c] -= mu / mi * dv * u[c];
@@ -369,7 +460,7 @@ export class Simulation {
         for (const e of ev.values()) {
           e.reactants.sort(); e.products.sort();
           const same = e.reactants.join('+') === e.products.join('+');
-          this.events.push({ t: this.time, reactants: e.reactants, products: e.products, exchange: same });
+          this.events.push({ serial: ++this.eventSerial, t: this.time, reactants: e.reactants, products: e.products, exchange: same });
         }
         if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
       }
@@ -380,11 +471,12 @@ export class Simulation {
     this.species = counts;
     this.frags = frags;
     const E = this.totalEnergy();
-    this.history.push({ t: this.time, counts: Object.fromEntries(counts), T: this.temperature(), E, Ep: (this.res?.E ?? 0) + this.Ewall, Ec: E - this.heatBath - this.work, P: this.pressure });
+    this.censusSerial++;
+    this.history.push({ t: this.time, counts: Object.fromEntries(counts), T: this.temperature(), E, Ep: (this.res?.E ?? 0) + this.Ewall + this.Egrab, Ec: E - this.heatBath - this.work - this.matterExchange, P: this.pressure });
     if (this.history.length > 2000) this.history.splice(0, this.history.length - 2000);
   }
 
   totalEnergy() {
-    return this.kinetic() + (this.res?.E ?? 0) + this.Ewall;
+    return this.kinetic() + (this.res?.E ?? 0) + this.Ewall + this.Egrab;
   }
 }

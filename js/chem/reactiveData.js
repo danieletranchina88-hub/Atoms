@@ -1,5 +1,5 @@
-// Parametri del campo di forze reattivo della sandbox. Ogni numero viene da una tabella di dati
-// sperimentali o da un modello pubblicato; nessun parametro è stato "aggiustato" a mano.
+// Parametri del potenziale didattico del progetto. Combina dati medi, stime e costanti
+// empiriche: non è un campo di forze pubblicato e validato per reazioni generali.
 //
 //  • valenza (numero di legami covalenti normali) ed elettroni di valenza: regola dell'ottetto;
 //  • raggi covalenti di Pyykkö (Chem. Eur. J. 2009) quando manca la lunghezza di legame misurata;
@@ -125,11 +125,12 @@ export function bondData(Za, Zb, paulingChi) {
     if (sw > 0) { p = sp / sw; c = sc / sw; }
   } else {
     // formula di Pauling: D(A–B) = ½[D(A–A) + D(B–B)] + 96,5 (Δχ)² kJ/mol
-    const homo = (Z) => BOND_TABLE[pairKey(Z, Z)]?.[0] ?? HOMONUCLEAR_FALLBACK[Z] ?? 100;
-    const dchi = (paulingChi[Za] ?? 2) - (paulingChi[Zb] ?? 2);
+    const homo = (Z) => { const value = BOND_TABLE[pairKey(Z, Z)]?.[0] ?? HOMONUCLEAR_FALLBACK[Z]; if (value === undefined) throw new Error(`Dati di legame mancanti per Z=${Z}.`); return value; };
+    if (!Number.isFinite(paulingChi[Za]) || !Number.isFinite(paulingChi[Zb])) throw new Error('Elettronegatività non disponibile.');
+    const dchi = paulingChi[Za] - paulingChi[Zb];
     D1 = 0.5 * (homo(Za) + homo(Zb)) + 96.5 * dchi * dchi;
     r1 = pa[2] + pb[2];
-    source = 'Pauling';
+    source = 'stima empirica di Pauling (non misura)';
   }
   return { D1, r1, p, c, source };
 }

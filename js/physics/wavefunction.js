@@ -41,6 +41,17 @@ export class RadialFunction {
     return this.R[i] * (1 - f) + this.R[i + 1] * f;
   }
 
+  /** Cumulative radial probability on the normalized numerical grid. */
+  probabilityWithin(r) {
+    if (!Number.isFinite(r) || r < 0) throw new Error('Raggio non valido.');
+    if (r <= this.r[0]) return 0;
+    if (r >= this.r[this.N - 1]) return 1;
+    let lo = 0, hi = this.N - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (this.r[m] < r) lo = m; else hi = m; }
+    const f = (r - this.r[lo]) / (this.r[hi] - this.r[lo]);
+    return this.cdf[lo] + f * (this.cdf[hi] - this.cdf[lo]);
+  }
+
   /** Raggio campionato dalla distribuzione P(r) = u(r)². */
   sampleR(rand) {
     const q = rand();
