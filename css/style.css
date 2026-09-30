@@ -717,3 +717,39 @@ body[data-mode="kinetics"] .viewport-legend { top: 54px; bottom: auto; left: 14p
 .kn-grid input { width: 100%; box-sizing: border-box; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-family: var(--font-mono); }
 body[data-mode="kinetics"] #element-card select { width: 100%; }
 td.eqn { white-space: normal; font-family: var(--font-mono); font-size: 12px; }
+
+/* Simulation first: visible model, compact readings, optional theory. */
+.model-status { padding: 9px 14px; border-left: 3px solid var(--accent); background: var(--panel); color: var(--muted); font-size: 12px; }
+details > summary { cursor: pointer; padding: 9px 0; color: var(--accent); font-weight: 600; }
+details[open] > summary { margin-bottom: 12px; }
+.method > summary { font: 600 18px var(--font-display); }
+.cell-activity, #sb-dt, .mixture-controls input[type="number"] { width: 100%; padding: 8px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+.cell-activity:invalid, #sb-dt:invalid { border-color: var(--phase-neg); }
+.mixture-controls { display: grid; grid-template-columns: 1fr 1fr 2fr auto; gap: 14px; align-items: end; }
+.mixture-controls label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.metric-strip { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
+.metric-strip span { padding: 8px 12px; background: var(--panel-2); border-radius: 6px; font-size: 12px; }
+.metric-strip b { display: block; font: 500 17px var(--font-mono); color: var(--accent); }
+.source-links { margin-top: 20px !important; }
+meter { width: 100%; min-width: 70px; }
+#orb-probe-out { display: block; font-size: 12px; color: var(--accent); }
+@media (min-width: 1281px) {
+  body[data-mode="sandbox"] .viewport { min-height: 640px; }
+  body[data-mode="sandbox"] .element-card, body[data-mode="sandbox"] .panel { max-height: 920px; overflow-y: auto; }
+}
+@media (max-width: 700px) {
+  .mixture-controls { grid-template-columns: 1fr 1fr; }
+  .model-status { font-size: 11px; }
+  .data-table { font-size: 11px; }
+  #rx-mixture-results { overflow-x: auto; }
+}
+
+#live-metrics { display: none; }
+body[data-mode="sandbox"] #live-metrics { display: flex; margin: 0; }
+body[data-mode="sandbox"] #live-metrics span { flex: 1; background: var(--panel); }
+
+.element-card select { width: 100%; max-width: 100%; min-width: 0; }
+@media (max-width: 640px) {
+  body[data-mode="sandbox"] #live-metrics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  body[data-mode="sandbox"] #live-metrics b { font-size: 14px; overflow-wrap: anywhere; }
+}

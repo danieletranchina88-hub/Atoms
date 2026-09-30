@@ -3,6 +3,7 @@
 //   ΔH(T) = ΔE + Δ[ZPE + E_termica + RT]           (termodinamica statistica)
 //   ΔG(T) = ΔH − TΔS,   K = exp(−ΔG°/RT)
 
+import { extentState, extentBounds, equilibriumExtent } from '../chem/reactionExtent.js';
 import { MOLECULES, REACTIONS, BARRIERS, moleculeById } from '../chem/library.js';
 import { LIBRARY_DATA } from '../chem/libraryData.js';
 import { parseSmiles, hillFormula } from '../chem/smiles.js';
@@ -31,6 +32,7 @@ const R = {
   method: 'mp2',
   scaled: true,
   T: 298.15,
+  extent: 0.3, volumeL: 10, feed: 1,
 };
 
 export function initReactionMode(v) {
@@ -98,7 +100,7 @@ function balance(rx) {
   add(rx.left, -1);
   add(rx.right, 1);
   const bad = [...count.entries()].filter(([, v]) => v !== 0);
-  return { ok: bad.length === 0 && charge === 0, bad, charge };
+  return { ok: rx.left.length > 0 && rx.right.length > 0 && [...rx.left, ...rx.right].every(([c]) => Number.isInteger(c) && c > 0) && bad.length === 0 && charge === 0, bad, charge };
 }
 
 /** Grandezze di reazione alla temperatura T. */
@@ -243,7 +245,7 @@ function renderResults() {
         <dt>ΔS°</dt><dd>${nf(t.dS)} J/(mol·K)</dd>
         <dt>ΔG° = ΔH° − TΔS°</dt><dd><b>${nf(t.dG)}</b> kJ/mol</dd>
         <dt>K<sub>p</sub> = e<sup>−ΔG°/RT</sup></dt><dd>${Ktxt}</dd>
-        <dt>Spontanea (ΔG° &lt; 0)</dt><dd>${t.dG < 0 ? 'sì' : 'no'}</dd>
+        <dt>Verso favorito allo stato standard</dt><dd>${t.dG < 0 ? 'sì' : 'no'}</dd>
         ${Tinv && Tinv > 0 && Math.sign(t.dH) === Math.sign(t.dS) ? `<dt>Inversione (ΔG° = 0)</dt><dd>≈ ${nf(Tinv, 0)} K</dd>` : ''}
       </dl>
     </div>
@@ -397,12 +399,61 @@ function renderAnalysis() {
       <td>${s.pointGroup}</td><td class="num">${s.sigma}</td></tr>`;
   }).join('');
   $('analysis').innerHTML = `
-    <h2>Dati delle specie (${nf(R.T, 0)} K, 1 atm)</h2>
+    ${R.kind === 'thermo' ? '<div id="rx-mixture"></div>' : ''}
+    <details><summary>Dati delle specie (${nf(R.T, 0)} K, 1 atm)</summary>
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Specie</th><th>Base</th><th class="num">E HF (Ha)</th><th class="num">E MP2 (Ha)</th><th class="num">ZPE (kJ/mol)</th><th class="num">H − E (kJ/mol)</th><th class="num">S° (J/mol·K)</th><th class="num">G − E (kJ/mol)</th><th>Gruppo</th><th class="num">σ</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-    <p class="desc-muted">Per ogni specie: geometria ottimizzata, frequenze armoniche dall'hessiana analitica-numerica, funzioni di partizione traslazionale q<sub>t</sub> = (2πmkT/h²)<sup>3/2</sup>kT/p, rotazionale q<sub>r</sub> = √π/σ · √(T³/Θ<sub>A</sub>Θ<sub>B</sub>Θ<sub>C</sub>), vibrazionale q<sub>v</sub> = Π 1/(1 − e<sup>−hν/kT</sup>). L'energia MP2 aggiunge la correlazione elettronica alla geometria HF.</p>`;
+    <p class="desc-muted">Per ogni specie: geometria ottimizzata, frequenze armoniche dall'hessiana analitica-numerica, funzioni di partizione traslazionale q<sub>t</sub> = (2πmkT/h²)<sup>3/2</sup>kT/p, rotazionale q<sub>r</sub> = √π/σ · √(T³/Θ<sub>A</sub>Θ<sub>B</sub>Θ<sub>C</sub>), vibrazionale q<sub>v</sub> = Π 1/(1 − e<sup>−hν/kT</sup>). L'energia MP2 aggiunge la correlazione elettronica alla geometria HF.</p></details>`;
+  if (R.kind === 'thermo') renderMixture();
+}
+
+function renderMixture() {
+  const rx = current(), box = $('rx-mixture');
+  if (!box) return;
+  if (!balance(rx).ok) { box.textContent = 'Bilancia atomi e carica prima di calcolare la miscela.'; return; }
+  const t = thermo(rx, R.T);
+  if (t.missing.length) { box.textContent = 'Dati termodinamici incompleti.'; return; }
+  // Aggregate repeated species: one inventory entry per chemical species.
+  const map = new Map();
+  for (const [side, sign] of [[rx.left, -1], [rx.right, 1]]) side.forEach(([nu, id], i) => {
+    const x = map.get(id) ?? { id, nu: 0, n0: 0 };
+    x.nu += sign * nu;
+    if (sign < 0) x.n0 += nu * (i === 0 ? R.feed : 1);
+    map.set(id, x);
+  });
+  const list = [...map.values()];
+  if (!list.some(s => s.nu < 0) || !list.some(s => s.nu > 0)) { box.textContent = 'Reazione netta nulla: nessun avanzamento indipendente.'; return; }
+  const { lo, hi } = extentBounds(list), xi = lo + R.extent * (hi - lo);
+  const options = { T: R.T, volumeL: R.volumeL, lnK: t.lnK };
+  const fmt = x => Number.isFinite(x) ? nf(x, 4) : x === Infinity ? '+∞' : x === -Infinity ? '−∞' : 'indeterminato';
+  box.innerHTML = `<h2>Reattore ideale · modifica e misura</h2>
+    <div class="mixture-controls">
+      <label>Carica del primo reagente (× coefficiente)<input id="rx-feed" type="number" min="0.1" max="10" step="0.1" value="${R.feed}"></label>
+      <label>Volume (L)<input id="rx-volume" type="number" min="0.1" max="1000" step="0.1" value="${R.volumeL}"></label>
+      <label>Avanzamento ξ: <output id="rx-xi-label">${nf(xi, 4)} mol</output><input id="rx-xi" type="range" min="0" max="1" step="0.001" value="${R.extent}"></label>
+      <button type="button" class="btn" id="rx-equilibrate">Porta all’equilibrio</button>
+    </div>
+    <p class="hint">Gas ideali · T e V fissi · prodotti iniziali assenti · K dal modello ${R.method.toUpperCase()}. Avanzamento stechiometrico, non tempo né velocità. Reazioni concorrenti escluse.</p>
+    <div id="rx-mixture-results"></div>`;
+  const results = () => {
+    const v = extentState(list, lo + R.extent * (hi - lo), { ...options, volumeL: R.volumeL });
+    const e = equilibriumExtent(list, { ...options, volumeL: R.volumeL });
+    $('rx-xi-label').textContent = `${nf(lo + R.extent * (hi - lo), 4)} mol`;
+    $('rx-mixture-results').innerHTML = `<div class="metric-strip"><span>ξ massimo <b>${nf(hi, 4)} mol</b></span><span>P <b>${nf(v.pressureBar, 3)} bar</b></span><span>ΔᵣG <b>${fmt(v.dG)} kJ/mol</b></span><span>log₁₀ Q <b>${fmt(v.lnQ / Math.LN10)}</b></span></div>
+      <table class="data-table"><thead><tr><th>Specie</th><th>ν</th><th>n₀ (mol)</th><th>n(ξ) (mol)</th><th>Composizione</th></tr></thead><tbody>
+      ${v.amounts.map(a => `<tr><td>${formula(a.id)}</td><td>${a.nu}</td><td>${nf(a.n0, 3)}</td><td>${nf(a.n, 4)}</td><td><meter min="0" max="${Math.max(1, ...v.amounts.map(x => Math.max(x.n, x.n0)))}" value="${a.n}">${nf(a.n, 4)}</meter></td></tr>`).join('')}</tbody></table>
+      <p class="hint">nᵢ = nᵢ₀ + νᵢξ · ΔᵣG = RT ln(Q/K). Equilibrio ξ ≈ ${nf(e.xi, 6)} mol${e.resolved ? '' : ' (limite di precisione numerica vicino all’esaurimento di una specie)'}.</p>`;
+  };
+  $('rx-xi').addEventListener('input', e => { R.extent = +e.target.value; results(); });
+  $('rx-volume').addEventListener('input', e => { if (e.target.checkValidity() && e.target.value) { R.volumeL = +e.target.value; results(); } });
+  $('rx-feed').addEventListener('change', e => { if (e.target.checkValidity() && e.target.value) { R.feed = +e.target.value; renderMixture(); } });
+  $('rx-equilibrate').addEventListener('click', () => {
+    const e = equilibriumExtent(list, { ...options, volumeL: R.volumeL });
+    R.extent = hi === lo ? 0 : (e.xi - lo) / (hi - lo); $('rx-xi').value = R.extent; results();
+  });
+  results();
 }
 
 // ---------------------------------------------------------------------------

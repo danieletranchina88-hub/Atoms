@@ -13,7 +13,7 @@ import { RDF, MSD, HeatCapacity } from './mdAnalysis.js';
 
 const BOHR_ANG = 0.52917721090;
 let sim = new Simulation({ box: 20, T: 300 });
-let paused = false;
+let paused = true;
 let stepsPerFrame = 40;
 let light = { on: false, lambda: 400, rate: 2 };   // fotoni per picosecondo
 let lastLightTime = 0;
@@ -79,7 +79,7 @@ function restore(d) {
   setForceField(d.forceField ?? 'reactive');
   sim.forces();
   sim.census();
-  lastEventSent = 0; mbHist = null;
+  censusSent = -1; lastEventSent = 0; mbHist = null;
   resetAnalysis();
 }
 
@@ -87,6 +87,8 @@ function restore(d) {
 function template(smiles) {
   if (templates.has(smiles)) return templates.get(smiles);
   const g = parseSmiles(smiles);
+  if (!g.atoms.length || g.atoms.some(a => !ATOM_PARAMS[a.Z] || a.charge))
+    throw new Error('Sandbox: solo specie neutre con elementi supportati.');
   const an = analyzeStructure({ atoms: g.atoms, bonds: g.bonds, charge: 0 });
   const at = embedMolecule(g, an.atoms.map(a => a.lonePairs + a.radical), { seeds: 2, iterations: 1500 });
   const Z = at.map(a => a.Z);
@@ -118,10 +120,13 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
   const t = template(s);
   // con atomi che formano legami serve un passo corto (vibrazioni di 10 fs); i gas nobili tollerano 2 fs
   if (t.Z.some(z => ATOM_PARAMS[z][0] > 0)) sim.dt = Math.min(sim.dt, 0.4);
-  const placed = sim.addMolecule(t, count, T ?? sim.T, at);
-  sim.res = null;
-  if (forceField === 'hf' || forceField === 'mindo3') setForceField(forceField);
-  sim.census();
+  if (forceField === 'hf') {
+    const f = aimdFeasible([...sim.Z, ...Array.from({ length: count }, () => t.Z).flat()], hfBasis);
+    if (!f.ok) throw new Error(f.reason);
+  }
+  if (forceField === 'mindo3') mindo3Check([...sim.Z, ...Array.from({ length: count }, () => t.Z).flat()]);
+  mbHist = null;
+  const placed = sim.editInventory(() => sim.addMolecule(t, count, T ?? sim.T, at));
   return placed;
 }
 
@@ -132,35 +137,38 @@ let hfBasis = 'STO-3G';
 const MINDO3_MAX_ATOMS = 90;
 const SYM = { 1: 'H', 5: 'B', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl' };
 
+/** MINDO/3 si usa solo se tutti gli elementi e le coppie hanno parametri pubblicati: altrimenti errore esplicito. */
+function mindo3Check(Z) {
+  if (!Z.length) return;
+  const s = mindo3Supports(Z);
+  if (!s.ok) {
+    const names = s.missing.map(k => k.split('-').map(z => SYM[z] ?? `Z=${z}`).join('–')).join(', ');
+    throw new Error(`MINDO/3 non ha parametri per ${names}: usa il campo classico. Il metodo copre H, B, C, N, O, F, P, S, Cl (non tutte le coppie).`);
+  }
+  if (Z.length > MINDO3_MAX_ATOMS) throw new Error(`Il calcolo quantistico MINDO/3 è limitato a ${MINDO3_MAX_ATOMS} atomi (ce ne sarebbero ${Z.length}): ogni passo richiede la diagonalizzazione dell'hamiltoniana.`);
+}
+
 function setForceField(kind, basis = hfBasis) {
   hfBasis = basis;
   if (kind === 'hf') {
     const f = aimdFeasible(sim.Z, basis);
-    if (!f.ok) { postMessage({ type: 'info', text: f.reason }); kind = 'reactive'; }
+    if (!f.ok) throw new Error(f.reason);
   }
-  if (kind === 'mindo3') {
-    const s = mindo3Supports(sim.Z);
-    if (!sim.N) { /* scatola vuota: il metodo resta scelto */ }
-    else if (!s.ok) {
-      const names = s.missing.map(k => k.split('-').map(z => SYM[z] ?? `Z=${z}`).join('–')).join(', ');
-      postMessage({ type: 'info', text: `MINDO/3 non ha parametri per ${names}: si torna al campo classico. Il metodo copre H, B, C, N, O, F, P, S, Cl (non tutte le coppie).` });
-      kind = 'reactive';
-    } else if (sim.N > MINDO3_MAX_ATOMS) {
-      postMessage({ type: 'info', text: `Il calcolo quantistico MINDO/3 è limitato a ${MINDO3_MAX_ATOMS} atomi (ce ne sono ${sim.N}): ogni passo richiede la diagonalizzazione dell'hamiltoniana.` });
-      kind = 'reactive';
-    }
-  }
+  if (kind === 'mindo3') mindo3Check(sim.Z);
+  if (!['hf', 'reactive', 'mindo3'].includes(kind)) throw new Error('Modello non valido.');
   const same = kind === forceField && sim.provider && kind !== 'reactive';
   forceField = kind;
   if (!same) sim.provider = kind === 'hf' ? makeHFProvider({ basis }) : kind === 'mindo3' ? makeMindo3Provider() : null;
   sim.res = null;
   if (kind === 'hf') sim.dt = Math.min(sim.dt, 0.25);
   if (kind === 'mindo3') sim.dt = Math.min(sim.dt, 0.4);
+  sim.resetMeasurements(); censusSent = -1; lastEventSent = 0; mbHist = null;
   postMessage({ type: 'forcefield', kind });
 }
 
 function loadPreset(p) {
-  sim = new Simulation({ box: p.box, T: p.T, dt: p.dt ?? 0.4 });
+  sim = new Simulation({ box: p.box, T: p.T, dt: p.dt ?? 0.2, seed: p.seed ?? 2024 });
+  censusSent = -1; lastEventSent = 0; mbHist = null;
   stepsPerFrame = p.speed ?? 40;
   if (p.atoms) {
     sim.addAtoms(p.atoms);
@@ -168,7 +176,7 @@ function loadPreset(p) {
     sim.thermostat = p.thermostat ?? false;
     setForceField(p.forceField ?? 'reactive');
     sim.forces();
-    sim.census();
+    sim.resetMeasurements();
     light = { ...light, on: false };
     lastEventSent = 0;
     mbHist = null;
@@ -192,7 +200,7 @@ function loadPreset(p) {
   lastLightTime = 0;
   lastEventSent = 0;
   mbHist = null;
-  sim.census();
+  sim.resetMeasurements();
   resetAnalysis();
   return { placed, wanted };
 }
@@ -206,12 +214,15 @@ function speedHistogram() {
   if (!species) species = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
   const frags = sim.frags.filter(f => f.formula === species);
   const M = frags[0].atoms.reduce((s, i) => s + sim.mass[i], 0);
-  const vmp = Math.sqrt(2 * KB_EV * sim.T / (M * MV2)); // velocità più probabile (Å/fs)
+  const referenceT = Math.max(1e-6, sim.thermostat ? sim.T : sim.temperature());
+  const vmp = Math.sqrt(2 * KB_EV * referenceT / (M * MV2)); // velocità più probabile (Å/fs)
   const vmax = 3.2 * vmp;
   const nb = 30;
   if (!mbHist || mbHist.species !== species || Math.abs(mbHist.vmax - vmax) / vmax > 0.02) {
     mbHist = { species, vmax, M, bins: new Float64Array(nb), samples: 0 };
   }
+  if (mbHist.step === sim.stepCount) return { species, M, vmax, bins: Array.from(mbHist.bins), samples: mbHist.samples, count: frags.length, T: referenceT };
+  mbHist.step = sim.stepCount;
   // media mobile esponenziale: il grafico segue i cambi di temperatura
   const decay = 0.97;
   for (let k = 0; k < nb; k++) mbHist.bins[k] *= decay;
@@ -224,10 +235,11 @@ function speedHistogram() {
     if (k >= 0 && k < nb) mbHist.bins[k] += 1;
     mbHist.samples += 1;
   }
-  return { species, M, vmax, bins: Array.from(mbHist.bins), samples: mbHist.samples, count: frags.length, T: sim.T };
+  return { species, M, vmax, bins: Array.from(mbHist.bins), samples: mbHist.samples, count: frags.length, T: referenceT };
 }
 
 function frame() {
+  if (!sim.res) sim.forces();
   const N = sim.N;
   const res = sim.res;
   const pos = Float32Array.from(sim.pos);
@@ -245,22 +257,22 @@ function frame() {
     N, Z: Int8Array.from(sim.Z), pos, q, ke, bonds: Float32Array.from(bonds), hbonds: Int32Array.from(res?.hbonds ?? []),
     stats: {
       t: sim.time, T: sim.temperature(), Ttarget: sim.T, thermostat: sim.thermostat, box: sim.box,
-      Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Etot: sim.totalEnergy(),
-      heatBath: sim.heatBath, work: sim.work, P: sim.measurePressure(), dt: sim.dt,
+      Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Egrab: sim.Egrab, Etot: sim.totalEnergy(),
+      heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
       forceField, hf: sim.provider?.info ?? null,
     },
     mb: speedHistogram(),
   };
-  if (censusSent !== sim.history.length) {
-    censusSent = sim.history.length;
+  if (censusSent !== sim.censusSerial) {
+    censusSent = sim.censusSerial;
     msg.census = {
       species: [...sim.species.entries()].sort((a, b) => b[1] - a[1]),
       history: sim.history.slice(-600),
-      events: sim.events.slice(lastEventSent),
+      events: sim.events.filter(e => e.serial > lastEventSent),
       frags: sim.frags?.map(f => f.atoms) ?? [],
     };
-    lastEventSent = sim.events.length;
+    lastEventSent = sim.eventSerial;
     // le analisi si ricalcolano ogni 5 censimenti (la normalizzazione di g(r) costa qualche millisecondo)
     if (physSent < 0 || sim.history.length - physSent >= 5 || sim.history.length < physSent) { msg.phys = physics(); physSent = sim.history.length; }
   }
@@ -269,14 +281,15 @@ function frame() {
 
 function loop() {
   const t0 = performance.now();
-  if (!paused && sim.N) {
+  try {
+    if (!paused && sim.N) {
     let n = 0;
     while (n < stepsPerFrame && performance.now() - t0 < msTarget) {
       sim.step();
       n++;
       if (sim.stepCount % sim.censusEvery === 0) analysisSample();
       if (light.on) {
-        // fotoni: processo di Poisson con `rate` assorbimenti per picosecondo
+        // Impulsi Poisson, frequenza imposta: non una sezione di assorbimento.
         const p = light.rate * sim.dt / 1000;
         if (sim.rng.uni() < p) {
           const hit = sim.photon(light.lambda);
@@ -286,6 +299,10 @@ function loop() {
     }
   }
   frame();
+  } catch (e) {
+    paused = true;
+    postMessage({ type: 'error', text: e.message, paused: true });
+  }
   setTimeout(loop, paused ? 60 : 0);
 }
 
@@ -303,14 +320,14 @@ onmessage = (ev) => {
         postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero.` : '' });
         break;
       }
-      case 'clear': sim.clear(); lastEventSent = 0; mbHist = null; resetAnalysis(); break;
-      case 'remove': sim.remove(m.indices); sim.provider?.reset(); sim.census(); lastEventSent = sim.events.length; break;
+      case 'clear': sim.clear(); forceField = 'reactive'; light.on = false; paused = true; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); postMessage({ type: 'forcefield', kind: forceField }); break;
+      case 'remove': sim.editInventory(() => sim.remove(m.indices)); lastEventSent = sim.eventSerial; break;
       case 'set':
-        if (m.T !== undefined) sim.T = m.T;
+        if (m.T !== undefined) { if (!Number.isFinite(m.T) || m.T < 0) throw new Error('Temperatura non valida.'); sim.T = m.T; }
         if (m.thermostat !== undefined) sim.thermostat = m.thermostat;
-        if (m.tau !== undefined) sim.tau = m.tau;
-        if (m.box !== undefined) sim.box = m.box;
-        if (m.dt !== undefined) sim.dt = m.dt;
+        if (m.tau !== undefined) { if (!Number.isFinite(m.tau) || m.tau <= 0) throw new Error('Tempo del termostato non valido.'); sim.tau = m.tau; }
+        if (m.box !== undefined) sim.changeBox(m.box);
+        if (m.dt !== undefined) { if (!Number.isFinite(m.dt) || m.dt < 0.001 || m.dt > 2) throw new Error('Δt ammesso: 0,001–2 fs.'); sim.dt = m.dt; }
         if (m.paused !== undefined) paused = m.paused;
         if (m.stepsPerFrame !== undefined) stepsPerFrame = m.stepsPerFrame;
         if (m.light) light = { ...light, ...m.light };
@@ -328,19 +345,21 @@ onmessage = (ev) => {
       }
       case 'snapshot': postMessage({ type: 'snapshot', name: m.name, data: snapshot() }); break;
       case 'restore': restore(m.data); physSent = -1; break;
-      case 'step': for (let k = 0; k < (m.n ?? 1); k++) sim.step(); break;
-      case 'grab': sim.grab = m.i === null ? null : { i: m.i, target: m.target }; break;
+      case 'step': paused = true; for (let k = 0; k < Math.min(1000, m.n ?? 1); k++) sim.step(); sim.census(); break;
+      case 'grab': sim.setGrab(m.i === null ? null : { i: m.i, target: m.target }); break;
       case 'spark': sim.spark(m.center, m.radius ?? 4, m.T ?? 8000); break;
       case 'photon': {
         const hit = sim.photon(m.lambda);
         if (hit) postMessage({ type: 'photon', ...hit, lambda: m.lambda });
         break;
       }
-      case 'thermalize': for (let i = 0; i < sim.N; i++) sim.thermalize(i, sim.T); break;
+      case 'thermalize': sim.rethermalize(); break;
+      case 'reset-measurements': sim.resetMeasurements(); censusSent = -1; lastEventSent = 0; break;
       default: break;
     }
   } catch (e) {
-    postMessage({ type: 'error', text: e.message });
+    paused = true;
+    postMessage({ type: 'error', text: e.message, paused: true });
   }
 };
 

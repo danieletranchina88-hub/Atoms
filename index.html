@@ -25,7 +25,7 @@
       <span class="brand-mark" aria-hidden="true">ψ</span>
       <div>
         <h1>Atlante Orbitale</h1>
-        <p class="brand-sub">Atomi, molecole e reazioni calcolati con la meccanica quantistica</p>
+        <p class="brand-sub">Simulazioni di chimica · modelli, misure, verifiche</p>
       </div>
     </div>
     <nav class="modes" role="tablist" aria-label="Modalità">
@@ -42,6 +42,7 @@
     <button type="button" class="icon-btn" id="theme-toggle" aria-label="Cambia tema chiaro/scuro">◐</button>
   </header>
 
+  <div class="model-status" id="model-status" role="status">DFT-LDA · atomo isolato · modello non relativistico</div>
   <section class="table-band" aria-label="Tavola periodica">
     <div class="pt-scroll">
       <div class="pt" id="periodic-table"></div>
@@ -69,6 +70,7 @@
     <aside class="element-card" id="element-card" aria-live="polite"></aside>
 
     <div class="stage">
+      <div id="live-metrics" class="metric-strip"></div>
       <div class="viewport" id="viewport">
         <canvas id="lab-plot" aria-label="Grafico principale del laboratorio"></canvas>
         <div class="viewport-title" id="viewport-title"></div>
@@ -136,8 +138,8 @@
 
   <section class="analysis" id="analysis" hidden></section>
 
-  <section class="method" id="method">
-    <h2>Come viene calcolato</h2>
+  <details class="method" id="method">
+    <summary>Equazioni, approssimazioni e fonti</summary>
     <div class="method-grid">
       <article>
         <h3>1 · Equazione di Schrödinger in campo centrale</h3>
@@ -151,13 +153,13 @@
         <p>Il potenziale dipende dalla densità elettronica, che dipende a sua volta dagli orbitali. Si parte dal modello di Thomas–Fermi e si itera fino all'autoconsistenza (Kohn–Sham, come nel metodo di Herman–Skillman):</p>
         <p class="eq">V(r) = −Z/r + V<sub>H</sub>[ρ](r) + v<sub>xc</sub>[ρ](r)</p>
         <p class="eq">ρ(r) = Σ<sub>nl</sub> q<sub>nl</sub> |u<sub>nl</sub>(r)|² / 4πr²</p>
-        <p>V<sub>H</sub> è il potenziale elettrostatico della nuvola elettronica. v<sub>xc</sub> descrive scambio (Dirac) e correlazione (Vosko–Wilk–Nusair). Per H, He, Ne e Ar le energie coincidono con le tabelle di riferimento NIST fino a 10⁻⁶ hartree.</p>
+        <p>V<sub>H</sub> è il potenziale elettrostatico della nuvola elettronica. v<sub>xc</sub> descrive scambio (Dirac) e correlazione (Vosko–Wilk–Nusair). Confronto con energie teoriche LDA NIST (non energie sperimentali): tolleranza del test 2·10⁻⁵ hartree.</p>
       </article>
       <article>
         <h3>3 · Parte angolare e forme</h3>
         <p>Le forme degli orbitali vengono dalle armoniche sferiche reali: p<sub>x</sub>, p<sub>y</sub>, p<sub>z</sub>; d<sub>xy</sub>, d<sub>z²</sub> e così via; i sette orbitali f. Si usano due rappresentazioni:</p>
         <ul>
-          <li><b>Nuvola</b>: punti estratti a caso con probabilità esattamente proporzionale a |ψ|² (metodo Monte Carlo).</li>
+          <li><b>Nuvola</b>: punti estratti a caso con probabilità proporzionale, entro discretizzazione e campionamento, a |ψ|² (metodo Monte Carlo).</li>
           <li><b>Superficie</b>: superficie a |ψ| costante che racchiude il 90% (o la frazione scelta) della probabilità, estratta con l'algoritmo marching cubes.</li>
         </ul>
         <p>Il colore indica il segno (fase) di ψ, che conta quando gli orbitali si combinano nei legami.</p>
@@ -166,13 +168,13 @@
         <h3>4 · Legami: LCAO e ibridazione</h3>
         <p>Gli orbitali molecolari sono combinazioni lineari degli orbitali atomici calcolati (LCAO), con i due nuclei alla distanza di legame sperimentale:</p>
         <p class="eq">σ = φ<sub>A</sub> + φ<sub>B</sub>,&nbsp;&nbsp; σ* = φ<sub>A</sub> − φ<sub>B</sub>,&nbsp;&nbsp; π = p<sub>x,A</sub> + p<sub>x,B</sub></p>
-        <p>Gli ibridi sp, sp², sp³, sp³d, sp³d² sono combinazioni di s, p e d dello stesso atomo. Poiché s, p e d sono autostati dello stesso hamiltoniano, l'energia di un ibrido è esattamente la media pesata Σ c²ε.</p>
+        <p>Gli ibridi sono combinazioni matematiche di orbitali atomici. Le etichette sp³d e sp³d² non dimostrano il coinvolgimento di orbitali d nei legami ipervalenti. Poiché s, p e d sono autostati dello stesso hamiltoniano, l'energia di un ibrido è esattamente la media pesata Σ c²ε.</p>
       </article>
       <article>
         <h3>5 · Molecole: Hartree–Fock ab initio</h3>
         <p>Per le molecole si risolvono le equazioni di Roothaan–Hall su basi di gaussiane contratte (STO-3G, 3-21G, 6-31G, 6-31G*, 6-31G**) del Basis Set Exchange:</p>
         <p class="eq">F C = S C ε,&nbsp;&nbsp; F<sub>μν</sub> = H<sub>μν</sub> + Σ P<sub>λσ</sub>[(μν|λσ) − ½(μλ|νσ)]</p>
-        <p>Gli integrali sono calcolati con lo schema di McMurchie–Davidson e la funzione di Boys; la convergenza è accelerata con DIIS. Le molecole con elettroni spaiati usano UHF. Risultati identici a PySCF entro 10⁻¹² hartree.</p>
+        <p>Gli integrali sono calcolati con lo schema di McMurchie–Davidson e la funzione di Boys; la convergenza è accelerata con DIIS. Le molecole con elettroni spaiati usano UHF. Alcuni casi di test concordano con PySCF entro 10⁻¹¹ hartree; questo verifica l’implementazione, non l’esattezza sperimentale del modello HF.</p>
       </article>
       <article>
         <h3>6 · Geometria, vibrazioni, correlazione</h3>
@@ -207,10 +209,9 @@
       </article>
       <article>
         <h3>11 · Sandbox: dinamica molecolare reattiva</h3>
-        <p>Nella sandbox gli atomi si muovono secondo F = ma (algoritmo velocity Verlet). L'energia potenziale è un campo di forze reattivo: l'ordine di legame nasce dalla valenza libera degli atomi, e lunghezza ed energia seguono la relazione di Pauling con i dati tabulati. Le cariche vengono dall'equalizzazione dell'elettronegatività.</p>
+        <p>Nel modello classico qualitativo della sandbox gli atomi si muovono secondo F = ma (algoritmo velocity Verlet). L'energia potenziale è un campo di forze reattivo: l'ordine di legame nasce dalla valenza libera degli atomi, e lunghezza ed energia seguono la relazione di Pauling con i dati tabulati. Le cariche vengono dall'equalizzazione dell'elettronegatività.</p>
         <p class="eq">r(n) = r₁ − c ln n,&nbsp;&nbsp; D(n) = D₁ nᵖ,&nbsp;&nbsp; cos θ = −1/λ</p>
-        <p>Il termostato di Bussi riproduce l'insieme canonico; la pressione è la forza media sulle pareti. Specie e reazioni vengono riconosciute automaticamente dai legami.</p>
-      
+        <p>Il termostato di Bussi riproduce l'insieme canonico; la pressione è la forza media sulle pareti. I cambi di connettività vengono registrati; formula molecolare e soglia di legame non identificano univocamente una specie o un meccanismo.</p>
         <p>Con il motore <b>quantistico MINDO/3</b> (Bingham, Dewar, Lo 1975) a ogni passo si risolvono le equazioni di Roothaan–Hall non ristrette per tutti gli elettroni di valenza: forze, cariche, spin e reazioni vengono dalla funzione d'onda. La <b>nuvola elettronica</b> è la densità ρ(r) calcolata, disegnata a 0,002, 0,05 e 0,3 e/bohr³; gli <b>orbitali</b> HOMO e LUMO si deformano durante le reazioni.</p>
       </article>
       <article>
@@ -236,7 +237,8 @@
         <p>Il termine spettroscopico <sup>2S+1</sup>L<sub>J</sub> mostrato nella scheda è quello previsto dalle regole di Hund. Con più gusci aperti (alcuni lantanidi e attinidi) può differire da quello misurato.</p>
       </article>
     </div>
-  </section>
+    <p class="source-links"><a href="https://goldbook.iupac.org/terms/view/09068" target="_blank" rel="noopener">IUPAC · Nernst</a> · <a href="https://www.nist.gov/pml/atomic-reference-data-electronic-structure-calculations" target="_blank" rel="noopener">NIST · riferimento DFT</a> · <a href="https://cccbdb.nist.gov/" target="_blank" rel="noopener">NIST · confronto molecole</a> · <a href="https://doi.org/10.1063/1.2408420" target="_blank" rel="noopener">Bussi · termostato CSVR</a></p>
+  </details>
 
   <footer class="foot">
     <p>Unità: 1 a₀ = 52,918 pm · 1 hartree = 27,211 eV. Dati sperimentali: NIST Atomic Spectra Database, IUPAC.</p>

@@ -241,6 +241,17 @@ const isChemMode = () => CHEM_MODES.has(state.mode);
 function setMode(mode) {
   const prev = state.mode;
   state.mode = mode;
+  const models = {
+    atom: 'DFT-LDA · atomo isolato · campo centrale non relativistico; dati misurati separati dai calcoli',
+    orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
+    bond: 'LCAO e ibridi illustrativi · per energie e geometrie molecolari usa Hartree–Fock in Molecole',
+    molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
+    reaction: 'Gas ideali · HF/MP2 + rotore rigido e oscillatore armonico · equilibrio distinto dalla cinetica',
+    lab: 'Modelli termodinamici e cinetici · attività, unità e condizioni esplicite',
+    sandbox: 'Misura la dinamica · UHF per pochi atomi oppure potenziale classico qualitativo · verifica la deriva energetica',
+    beaker: 'Equilibrio in acqua a 25 °C · nessuna cinetica · Davies, affidabilità limitata ad alta forza ionica',
+  };
+  $('model-status').textContent = models[mode];
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'molecule' && mode !== 'molecule') deactivateMolecule();
   if (prev === 'reaction' && mode !== 'reaction') deactivateReaction();
@@ -332,6 +343,7 @@ function renderElementCard() {
       <dt>Orbitale esterno</dt><dd>${valence.label}, ${eV(valence.e)}</dd>
       <dt>Raggio (90% e⁻)</dt><dd>${pm(atom.r90)}</dd>
       <dt>Energia totale</dt><dd>${nfp(atom.energy.total, 7)} Ha</dd>
+      <dt>Convergenza SCF</dt><dd>${atom.converged ? 'raggiunta' : 'NON raggiunta: risultato non validato'}</dd>
       <dt>Iterazioni SCF</dt><dd>${atom.iterations} · ${atom.elapsed} ms</dd>
     </dl>`;
 }
@@ -378,7 +390,7 @@ function renderControls() {
       </div>
       ${pointsCtl}
       <p class="desc-muted">${state.atomView === 'orbitals'
-        ? 'Ogni elettrone è rappresentato dal suo orbitale reale (p<sub>x</sub>, d<sub>xy</sub>…), riempito secondo la regola di Hund. Colori per sottolivello.'
+        ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Visualizzazione nella base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempito secondo la regola di Hund. Colori per sottolivello.'
         : 'Densità elettronica totale a simmetria sferica: si vedono i gusci K, L, M… Un sottolivello pieno è sempre sferico (teorema di Unsöld).'}</p>`;
     bindSeg('atom-view', v => { state.atomView = v; renderControls(); render3D(); drawCharts(); });
   } else if (mode === 'orbital') {
@@ -392,7 +404,16 @@ function renderControls() {
       <div class="ctl"><span class="lbl">Orbitale reale (m<sub>l</sub>)</span>${segHTML('q-m', mOpts, m)}</div>
       <div class="ctl"><span class="lbl">Rappresentazione</span>${segHTML('render', renderOpts, state.render)}</div>
       ${state.render !== 'cloud' ? surfCtl : ''}
-      ${state.render !== 'surface' ? pointsCtl : ''}`;
+      ${state.render !== 'surface' ? pointsCtl : ''}
+      <div class="ctl"><label class="lbl" for="orb-probe">Sonda radiale r (a₀)</label>
+        <input id="orb-probe" type="range" min="0" max="${getOrbital(atom, n, l).radial.radiusEnclosing(0.999)}" step="any" value="${getOrbital(atom, n, l).rAvg}">
+        <output id="orb-probe-out"></output></div>`;
+    const radial = getOrbital(atom, n, l).radial;
+    const probe = () => {
+      const r = +$('orb-probe').value;
+      $('orb-probe-out').textContent = `${nf(r, 3)} a₀ · P(r′ ≤ r) = ${nf(radial.probabilityWithin(r) * 100, 2)}% · nodi: ${n-l-1} radiali, ${l} angolari`;
+    };
+    $('orb-probe').addEventListener('input', probe); probe();
     bindSeg('q-n', v => {
       const nn = +v;
       state.orbital.n = nn;

@@ -64,7 +64,11 @@ function startWorker() {
   worker.onmessage = (ev) => {
     const m = ev.data;
     if (m.type === 'frame') {
+      const oldMode = SB.frame?.stats.forceField;
+      const oldPaused = SB.userPaused;
       SB.frame = m;
+      SB.userPaused = m.stats.paused;
+      if (active && (oldMode !== m.stats.forceField || oldPaused !== SB.userPaused)) renderControls();
       SB.fresh = true;
       if (m.phys) {
         const key = (p) => `${p?.elements?.join(',')}|${p?.rdf?.pair?.join('-')}|${p?.barostat?.on}|${p?.barostat?.P0}`;
@@ -93,6 +97,7 @@ function startWorker() {
     } else if (m.type === 'photon') {
       SB.photonFlash = { i: m.i, j: m.j, t: performance.now(), lambda: m.lambda };
     } else if (m.type === 'error') {
+      if (m.paused) { SB.userPaused = true; renderControls(); }
       SB.info = `Errore: ${m.text}`;
       renderSide();
     }
@@ -144,6 +149,7 @@ export function sandboxRedraw() {
 
 function loadPreset(p) {
   SB.preset = p;
+  SB.frame = null;
   SB.events = [];
   SB.history = [];
   SB.census = null;
@@ -154,8 +160,8 @@ function loadPreset(p) {
   clearCloud();
   if (p.light) SB.lambda = p.light.lambda;
   post({ type: 'preset', preset: p });
-  post({ type: 'set', paused: false, T: p.T });
-  SB.userPaused = false;
+  post({ type: 'set', paused: true, T: p.T });
+  SB.userPaused = true;
   scene.framed = false;
   if (active) { renderSide(); renderControls(); renderAnalysis(); }
 }
@@ -171,7 +177,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 function buildScene() {
   scene.group = new THREE.Group();
   viewer.add(scene.group);
-  scene.cap = 0; scene.bcap = 0;
+  scene.cap = 0; scene.bcap = 0; scene.boxSize = 0;
   scene.atoms = null; scene.bonds = null;
   const boxGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
   scene.box = new THREE.LineSegments(boxGeo, new THREE.LineBasicMaterial({ color: cssVar('--scene-axis'), transparent: true, opacity: 0.9 }));
@@ -250,7 +256,7 @@ function updateScene() {
   const L = f.stats.box;
   if (scene.boxSize !== L) { scene.box.scale.setScalar(L); scene.boxSize = L; }
   // nuovo esperimento: inquadra la scatola quando arriva il primo fotogramma con le sue dimensioni
-  if (!scene.framed && Math.abs(L - SB.preset.box) < 1e-6) {
+  if (!scene.framed) {
     viewer.frame(L * 0.62);
     viewer.camera.position.set(0.55, -0.8, 0.45).normalize().multiplyScalar(L * 0.62 * 3.1);
     viewer.controls.target.set(0, 0, 0);
@@ -573,19 +579,19 @@ function renderSide() {
       <optgroup label="Campo di forze reattivo (classico, veloce)">${PRESETS.filter(x => !x.atoms && !x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
       <optgroup label="Ab initio (Hartree–Fock)">${PRESETS.filter(x => x.atoms && !x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
     </select>
-    <p class="mol-note">${p.text}</p>
-    ${p.tips?.length ? `<ul class="sb-tips">${p.tips.map(t => `<li>${t}</li>`).join('')}</ul>` : ''}
+    <details><summary>Obiettivo e istruzioni</summary><p class="mol-note">${p.text}</p>
+    ${p.tips?.length ? `<ul class="sb-tips">${p.tips.map(t => `<li>${t}</li>`).join('')}</ul>` : ''}</details>
     <div class="btn-row"><button type="button" class="btn" id="sb-restart">Ricomincia</button><button type="button" class="btn" id="sb-clear">Svuota la scatola</button></div>
     <label class="lbl">Aggiungi molecole</label>
     <div class="mol-list">${molBtns}</div>
     <label class="lbl">Aggiungi atomi (radicali, gas nobili)</label>
     <div class="mol-list">${elBtns}</div>
     <label class="lbl" for="sb-smiles">Oppure una molecola da SMILES</label>
-    <div class="smiles-row"><input id="sb-smiles" placeholder="es. CC(=O)O" value="${SB.add.kind === 'smiles' ? SB.add.smiles : ''}" spellcheck="false"><button type="button" class="btn" id="sb-smiles-ok">Usa</button></div>
+    <div class="smiles-row"><input id="sb-smiles" placeholder="es. CC(=O)O" value="${SB.add.kind === 'smiles' ? escapeHtml(SB.add.smiles) : ''}" spellcheck="false"><button type="button" class="btn" id="sb-smiles-ok">Usa</button></div>
     <div class="ctl" style="margin-top:8px"><label class="lbl" for="sb-count">Quantità: <span id="sb-count-out">${SB.count}</span></label>
       <div class="range-row"><input type="range" id="sb-count" min="1" max="40" step="1" value="${SB.count}"><button type="button" class="btn" id="sb-add">Aggiungi ${escapeHtml(addLabel())}</button></div></div>
     <p class="hint">Con lo strumento <b>Aggiungi</b> (a destra) puoi anche cliccare nella scatola per mettere una molecola dove vuoi.</p>
-    ${SB.info ? `<p class="hint warn">${SB.info}</p>` : ''}
+    ${SB.info ? `<p class="hint warn">${escapeHtml(SB.info)}</p>` : ''}
     <label class="lbl" for="sb-save-name">I tuoi esperimenti (salvati in questo browser)</label>
     <div class="smiles-row"><input id="sb-save-name" placeholder="nome dell'esperimento" spellcheck="false"><button type="button" class="btn" id="sb-save">Salva</button></div>
     ${savedList().length ? `<ul class="sb-saves">${savedList().map((x, k) => `<li><button type="button" class="linkish" data-load="${k}" title="Riprendi da questo stato">${escapeHtml(x.name)}</button> <span class="desc-muted">${x.data.Z.length} atomi · ${new Date(x.date).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}</span> <button type="button" class="linkish" data-del="${k}" title="Elimina">✕</button></li>`).join('')}</ul>` : ''}
@@ -610,7 +616,7 @@ function renderSide() {
   }));
   $('sb-preset').addEventListener('change', (e) => loadPreset(PRESETS.find(x => x.id === e.target.value)));
   $('sb-restart').addEventListener('click', () => loadPreset(SB.preset));
-  $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.selected = -1; renderAnalysis(); });
+  $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.userPaused = true; renderAnalysis(); });
   $('element-card').querySelectorAll('[data-mol]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'mol', id: b.dataset.mol }; renderSide(); }));
   $('element-card').querySelectorAll('[data-el]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'atom', symbol: b.dataset.el }; renderSide(); }));
   $('sb-smiles-ok').addEventListener('click', () => {
@@ -669,7 +675,7 @@ function escapeHtml(s) {
 }
 
 const TOOLS = [
-  { id: 'select', label: 'Seleziona', title: 'Clic su un atomo: legami, carica, ossidazione. Trascina per ruotare la vista.' },
+  { id: 'select', label: 'Seleziona', title: 'Clic su un atomo: distanze, ordini di legame, carica parziale. Trascina per ruotare la vista.' },
   { id: 'grab', label: 'Afferra', title: 'Trascina un atomo con una "pinzetta" elastica: puoi rompere legami o spingere molecole a reagire.' },
   { id: 'spark', label: 'Scintilla', title: 'Clic: gli atomi vicini vengono portati a 9000 K per un istante.' },
   { id: 'add', label: 'Aggiungi', title: 'Clic nella scatola: aggiunge la molecola scelta a sinistra.' },
@@ -695,13 +701,16 @@ function renderControls() {
     <div class="ctl"><span class="lbl">Simulazione</span>
       <div class="btn-row" style="margin-top:0">
         <button type="button" class="btn" id="sb-play">${SB.userPaused ? '▶ Avvia' : '❚❚ Pausa'}</button>
-        <button type="button" class="btn" id="sb-step" ${SB.userPaused ? '' : 'disabled'}>+10 fs</button>
+        <button type="button" class="btn" id="sb-step" ${SB.userPaused ? '' : 'disabled'}>1 passo</button>
       </div></div>
+    <div class="ctl"><label class="lbl" for="sb-dt">Passo Δt (fs)</label>
+      <input id="sb-dt" type="number" min="0.001" max="2" step="0.001" value="${st?.dt ?? SB.preset.dt ?? 0.2}"></div>
+    <div class="btn-row"><button class="btn" id="sb-zero">Azzera misure</button><button class="btn" id="sb-export">Esporta CSV</button></div>
     <div class="ctl"><span class="lbl">Forze sugli atomi</span></div>
     <div class="seg" id="sb-ff">
-      <button type="button" data-v="reactive" aria-pressed="${(st?.forceField ?? SB.forceField ?? 'reactive') === 'reactive'}" title="Campo di forze reattivo: centinaia di atomi in tempo reale">campo reattivo</button>
+      <button type="button" data-v="reactive" aria-pressed="${(st?.forceField ?? SB.forceField ?? 'reactive') === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico qualitativo</button>
       <button type="button" data-v="mindo3" aria-pressed="${(st?.forceField ?? SB.forceField) === 'mindo3'}" title="MINDO/3 a ogni passo: gli elettroni di valenza sono trattati con la meccanica quantistica (SCF), fino a 90 atomi di H, C, N, O, F, P, S, Cl">quantistico MINDO/3</button>
-      <button type="button" data-v="hf" aria-pressed="${(st?.forceField ?? SB.forceField) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo: tutti gli elettroni, nessun parametro empirico, fino a 8 atomi">Hartree–Fock ab initio</button>
+      <button type="button" data-v="hf" aria-pressed="${(st?.forceField ?? SB.forceField) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo: forze dalla meccanica quantistica, fino a 8 atomi">Hartree–Fock ab initio</button>
     </div>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
@@ -719,15 +728,16 @@ function renderControls() {
       <p class="hint">Barostato di Berendsen (τ<sub>P</sub> = 10 ps): la scatola si allarga o si stringe finché la pressione sulle pareti vale P₀.</p></div>
     <div class="ctl"><span class="lbl">Analisi</span>
       <div class="range-row"><label for="sb-rdf">g(r) fra</label><select id="sb-rdf">${rdfOptions()}</select><button type="button" class="btn" id="sb-reset-an" title="Azzera g(r), spostamento quadratico medio e fluttuazioni di energia">Azzera</button></div></div>
+    <details><summary>Interazioni e aspetto</summary>
     <div class="ctl"><label class="lbl" for="sb-speed">Velocità (passi per fotogramma)</label>
       <div class="range-row"><input type="range" id="sb-speed" min="1" max="200" step="1" value="${spf}"><output id="sb-speed-out">${spf}</output></div></div>
     <div class="ctl"><span class="lbl">Strumento</span></div>
     <div class="seg" id="sb-tool">${TOOLS.map(t => `<button type="button" data-v="${t.id}" aria-pressed="${SB.tool === t.id}" title="${t.title}">${t.label}</button>`).join('')}</div>
     <p class="hint" id="sb-tool-hint">${TOOLS.find(t => t.id === SB.tool).title}</p>
-    <div class="ctl"><label class="lbl" for="sb-lambda">Luce: λ = <span id="sb-lambda-out">${SB.lambda} nm</span> <i class="swatch" id="sb-lambda-sw" style="background: ${lambdaCss(SB.lambda)}"></i></label>
+    <div class="ctl"><label class="lbl" for="sb-lambda">Impulso equivalente: λ = <span id="sb-lambda-out">${SB.lambda} nm</span> <i class="swatch" id="sb-lambda-sw" style="background: ${lambdaCss(SB.lambda)}"></i></label>
       <div class="range-row"><input type="range" id="sb-lambda" min="100" max="800" step="5" value="${SB.lambda}"><output id="sb-ephoton">${nf(photonKJ, 0)} kJ/mol</output></div>
-      <div class="btn-row" style="margin-top:4px"><button type="button" class="btn" id="sb-light" aria-pressed="${lightOn}">${lightOn ? 'Spegni la luce' : 'Accendi la luce'}</button><button type="button" class="btn" id="sb-flash">Un fotone</button></div>
-      <p class="hint">E = hc/λ: ogni fotone assorbito deposita la sua energia in un legame.</p></div>
+      <div class="btn-row" style="margin-top:4px"><button type="button" class="btn" id="sb-light" aria-pressed="${lightOn}">${lightOn ? 'Ferma impulsi' : 'Impulsi ripetuti'}</button><button type="button" class="btn" id="sb-flash">Deposita hc/λ</button></div>
+      <p class="hint">Deposito meccanico di hc/λ. Assorbimento, stati eccitati e rese fotochimiche non sono calcolati.</p></div>
     <div class="ctl"><span class="lbl">Colore degli atomi</span></div>
     <div class="seg" id="sb-color">
       <button type="button" data-v="element" aria-pressed="${SB.color === 'element'}">elemento</button>
@@ -743,13 +753,23 @@ function renderControls() {
     ${SB.style === 'orbital' ? `<div class="seg" id="sb-orb" style="margin-top:4px">
       <button type="button" data-v="homo" aria-pressed="${SB.orbital === 'homo'}">HOMO</button>
       <button type="button" data-v="lumo" aria-pressed="${SB.orbital === 'lumo'}">LUMO</button>
-    </div>` : ''}`;
+    </div>` : ''}
+    </details>`;
   const seg = (id, fn) => $(id).querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     fn(b.dataset.v);
     $(id).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   }));
+  $('sb-dt').addEventListener('change', e => { if (e.target.checkValidity()) post({ type: 'set', dt: +e.target.value }); });
+  $('sb-zero').addEventListener('click', () => { SB.history = []; SB.events = []; post({ type: 'reset-measurements' }); });
+  $('sb-export').addEventListener('click', () => {
+    const rows = ['time_fs,temperature_K,total_eV,potential_eV,conserved_eV,pressure_bar',
+      ...SB.history.map(h => [h.t, h.T, h.E, h.Ep, h.Ec, h.P].join(','))];
+    const url = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'atoms-sandbox.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
   $('sb-play').addEventListener('click', () => { SB.userPaused = !SB.userPaused; post({ type: 'set', paused: SB.userPaused }); renderControls(); });
-  $('sb-step').addEventListener('click', () => post({ type: 'step', n: Math.round(10 / (st?.dt ?? 0.4)) }));
+  $('sb-step').addEventListener('click', () => post({ type: 'step', n: 1 }));
   $('sb-T').addEventListener('input', (e) => { const v = Math.pow(10, +e.target.value); $('sb-T-out').textContent = `${nf(v, 0)} K`; post({ type: 'set', T: v }); });
   seg('sb-thermo', (v) => post({ type: 'set', thermostat: v === '1' }));
   seg('sb-ff', (v) => post({ type: 'set', forceField: v }));
@@ -816,7 +836,8 @@ function renderPanelBody() {
   const Z = Pid > 0 ? s.P / Pid : NaN;
   const kj = (e) => nf(e * KJ_PER_EV, 1);
   $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole</small>`;
-  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : 'Dinamica molecolare reattiva (campo classico)'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
+  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
+  $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : 'classico qualitativo'}</b></span>`;
   $('panel-body').innerHTML = `
     <div><h3>Stato termodinamico</h3>
     <dl class="info-list">
@@ -860,10 +881,13 @@ function renderPanelBody() {
       <dt class="sub">· legami a idrogeno</dt><dd>${kj(s.parts.hbond ?? 0)}</dd>` : ''}
       <dt>Totale</dt><dd>${kj(s.Etot)}</dd>
       <dt>Calore dal termostato</dt><dd>${sgn(s.heatBath * KJ_PER_EV, 1)}</dd>
-      <dt>Lavoro esterno (scintille, luce)</dt><dd>${sgn(s.work * KJ_PER_EV, 1)}</dd>
-      <dt>Totale − scambi</dt><dd>${kj(s.Etot - s.heatBath - s.work)}</dd>
+      <dt>Lavoro esterno (pareti, impulsi, pinzetta)</dt><dd>${sgn(s.work * KJ_PER_EV, 1)}</dd>
+      <dt>Scambio per aggiunta/rimozione</dt><dd>${kj(s.matterExchange)}</dd>
+      <dt>Energia della pinzetta</dt><dd>${kj(s.Egrab)}</dd>
+      <dt>Deriva Δ(U − Q − W − E materia)</dt><dd>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</dd>
+      <dt>Somma cariche parziali</dt><dd>${sgn(s.diagnostics?.totalCharge ?? 0, 6)} e</dd>
     </dl>
-    <p class="hint">"Totale − scambi" è costante: è il primo principio della termodinamica (ΔU = Q + W) verificato passo per passo.</p></div>
+    <p class="hint">La deriva misura l’errore numerico dall’azzeramento. Confronta Δt e Δt/2 in NVE. 1 eV per scatola = 96,485 kJ per mole di copie della scatola.</p></div>
     ${physHtml(s)}`;
 }
 
@@ -915,11 +939,11 @@ function drawCharts() {
           { xs: ts, ys: ek, color: cssVar('--phase-pos'), label: 'cinetica' },
           { xs: ts, ys: ep, color: cssVar('--phase-neg'), label: 'potenziale (Δ)' },
           { xs: ts, ys: et, color: cssVar('--accent'), label: 'totale U (Δ)', width: 2 },
-          { xs: ts, ys: ec, color: cssVar('--text'), label: 'U − Q − W', dash: [5, 4], width: 1.6 },
+          { xs: ts, ys: ec, color: cssVar('--text'), label: 'U − Q − W − E materia', dash: [5, 4], width: 1.6 },
         ],
         xmin, xmax, ymin: lo - 0.05 * (hi - lo + 1), ymax: hi + 0.05 * (hi - lo + 1), xlabel: 't (ps)', ylabel: 'energia (kJ/mol)',
       });
-      $('radial-note').innerHTML = 'Quando si formano legami l\'energia potenziale scende e quella cinetica (la temperatura) sale. La linea tratteggiata U − Q − W resta piatta: è il primo principio, ΔU = Q + W.';
+      $('radial-note').innerHTML = 'Quando si formano legami l\'energia potenziale scende e quella cinetica (la temperatura) sale. La linea tratteggiata sottrae calore, lavoro e scambi di materia: una deriva segnala errore numerico.';
     } else {
       const Ts = H.map(h => h.T);
       const hi = Math.max(...Ts, SB.frame?.stats.Ttarget ?? 0) * 1.1;
@@ -958,7 +982,7 @@ function drawCharts() {
       xmin: 0, xmax: mb.vmax * toMS, ymin: 0, ymax, xlabel: 'v (m/s)', ylabel: 'f(v) (s/m)',
     });
     const vmean = Math.sqrt(8 * KB_EV * mb.T / (Math.PI * mb.M * MV2)) * toMS;
-    $('levels-note').innerHTML = `f(v) = 4π (m/2πk<sub>B</sub>T)<sup>3/2</sup> v² e<sup>−mv²/2k<sub>B</sub>T</sup>, con m = ${nf(mb.M, 2)} u e T del termostato. Velocità media teorica √(8k<sub>B</sub>T/πm) = ${nf(vmean, 0)} m/s. ${mb.count} molecole, media mobile su molti fotogrammi.`;
+    $('levels-note').innerHTML = `f(v) = 4π (m/2πk<sub>B</sub>T)<sup>3/2</sup> v² e<sup>−mv²/2k<sub>B</sub>T</sup>, con m = ${nf(mb.M, 2)} u; T del bagno in NVT, cinetica istantanea in NVE. Il confronto presuppone equilibrio termico. Velocità media teorica √(8k<sub>B</sub>T/πm) = ${nf(vmean, 0)} m/s. ${mb.count} molecole, media mobile su molti fotogrammi.`;
   } else { clearCanvas($('chart-levels')); $('levels-note').textContent = ''; }
   // 3. specie nel tempo
   $('slice-title').textContent = 'Composizione nel tempo';
@@ -971,7 +995,7 @@ function drawCharts() {
     const series = ranked.map((k, c) => ({ xs: ts, ys: H.map(h => h.counts[k] ?? 0), color: SPECIES_COLORS[c], label: `${k} (${last[k] ?? 0})`, width: 1.8 }));
     const ymax = Math.max(1, ...series.flatMap(s => s.ys)) * 1.1;
     drawXY($('chart-slice'), { series, xmin: ts[0], xmax: Math.max(ts[ts.length - 1], ts[0] + 0.1), ymin: 0, ymax, xlabel: 't (ps)', ylabel: 'numero di molecole' });
-    $('slice-note').innerHTML = 'Le specie sono i gruppi di atomi uniti da legami (ordine di legame > 0,5). Le curve sono la cinetica chimica che emerge dagli urti.';
+    $('slice-note').innerHTML = 'Frammenti per connettività: soglie 0,55 / 0,35. Formule uguali possono indicare isomeri diversi; le curve non sono costanti cinetiche sperimentali.';
   } else { clearCanvas($('chart-slice')); $('slice-note').textContent = ''; }
 }
 
@@ -1021,24 +1045,13 @@ function renderAnalysis() {
       <div id="sb-selected"></div>
       <div id="sb-species"></div>
       <div id="sb-events" class="wide"></div>
-      <article class="wide"><h3>Il modello fisico</h3>
-        <div class="analysis-grid">
-          <div>
-            <p class="desc"><b>Equazioni del moto.</b> Ogni atomo segue la legge di Newton F = ma. Le equazioni sono integrate con l'algoritmo velocity Verlet (passo 0,4 fs), che conserva l'energia: in modalità "isolato" l'energia totale resta costante.</p>
-            <p class="eq">x(t+Δt) = x + vΔt + ½aΔt²,&nbsp; v(t+Δt) = v + ½[a(t) + a(t+Δt)]Δt</p>
-            <p class="desc"><b>Legami che si formano e si rompono.</b> L'energia di legame segue il potenziale di Abell–Tersoff–Brenner. L'ordine di legame n nasce dalla valenza libera di ciascun atomo (ottetto): C ne ha 4, N 3, O 2, H e gli alogeni 1. Lunghezza ed energia seguono la relazione di Pauling:</p>
-            <p class="eq">r(n) = r₁ − c ln n,&nbsp; D(n) = D₁ nᵖ</p>
-            <p class="desc">D₁, p e c vengono dalle energie medie di legame e dalle lunghezze tabulate (C–C, C=C, C≡C…). Così 2 H₂ + O₂ → 2 H₂O libera circa 500 kJ/mol, come la legge di Hess applicata alle energie di legame.</p>
-          </div>
-          <div>
-            <p class="desc"><b>Elettronegatività e cariche.</b> Le cariche parziali si ricalcolano a ogni passo con l'equalizzazione dell'elettronegatività (principio di Sanderson): gli elettroni fluiscono lungo i legami verso l'atomo più elettronegativo, finché il potenziale chimico è uguale ovunque.</p>
-            <p class="eq">E<sub>Q</sub> = Σ (χ<sub>i</sub>q<sub>i</sub> + ½J<sub>i</sub>q<sub>i</sub>²) + Σ q<sub>i</sub>q<sub>j</sub>γ<sub>ij</sub>(r)</p>
-            <p class="desc"><b>Angoli.</b> Dal teorema di Coulson, cos θ = −1/λ per gli ibridi spᵏ (180°, 120°, 109,5°). Ogni coppia solitaria chiude l'angolo di circa 2,5° (VSEPR: NH₃ 107°, H₂O 104,5°). <b>Forze di van der Waals</b> dal campo di forze UFF. <b>Legami a idrogeno</b> D–H···A (D, A = N, O, F) con il termine del campo DREIDING, E = D<sub>hb</sub>[5(R₀/R)¹² − 6(R₀/R)¹⁰] cos⁴θ: il dimero d'acqua risulta legato di circa 15 kJ/mol a O···O = 2,9 Å.</p>
-            <p class="desc"><b>Temperatura e pressione.</b> Il termostato di Bussi–Donadio–Parrinello riscala le velocità in modo stocastico e riproduce l'insieme canonico. La pressione è la forza media degli urti sulle pareti divisa per l'area: la teoria cinetica dei gas, misurata.</p>
-            <p class="desc-muted">Limiti: è un modello classico. Gli elettroni non sono trattati esplicitamente: non ci sono stati di spin, né ioni in soluzione, né ipervalenza (SF₆, SO₃). Le barriere di reazione sono qualitative (H + H₂: circa 25 kJ/mol contro 40 misurati). Verificato contro la legge di Hess sulle ΔfH° sperimentali (CODATA, tabelle NBS): le entalpie di atomizzazione di 20 molecole con legami ordinari hanno uno scarto medio del 2,7 % (tutte entro il 7 %); i legami multipli corti o con cariche formali sono sottostimati (N₂ −11 %, CO₂ −18 %, CO −37 %). Per la chimica quantistica esatta di una singola molecola usa la modalità Molecole.</p>
-          </div>
-        </div>
-      </article>
+      <details class="wide"><summary>Modello, equazioni e limiti</summary>
+        <p>Velocity Verlet: F = −∇U, x(t+Δt) = x + vΔt + ½aΔt². NVE: energia approssimativamente conservata con errore dipendente dal passo. NVT: termostato CSVR di Bussi.</p>
+        <p>MINDO/3: nuclei classici, elettroni di valenza con SCF UHF semiempirica (Bingham, Dewar, Lo 1975) a ogni passo; fino a 90 atomi di H, B, C, N, O, F, P, S, Cl. Spin libero (livello di Fermi comune), parametri verificati contro PySCF. È un metodo semiempirico: errori tipici sui calori di formazione di circa 11 kcal/mol, legami a idrogeno sottostimati.</p>
+        <p>Hartree–Fock: nuclei classici, elettroni UHF/STO-3G; fino a 8 atomi. SCF non convergente: arresto. Lo spin iniziale è scelto fra le due molteplicità più basse, non fra tutti gli stati possibili.</p>
+        <p>Campo classico: potenziale empirico specifico del progetto, ispirato a forme pubblicate. Barriere e reazioni non validate in generale; non è un’implementazione parametrizzata di ReaxFF o REBO. Assenti solvente, fotofisica e cinetica elettronica.</p>
+        <p>Le cariche parziali non sono numeri di ossidazione. Gli ordini frazionari dinamici non determinano univocamente Lewis, ibridazione o specie chimica.</p>
+      </details>
     </div>`;
   renderLiveAnalysis();
 }
@@ -1048,10 +1061,10 @@ function renderLiveAnalysis() {
   const c = SB.census;
   // composizione
   if (c) {
-    const total = c.species.reduce((s, [, n]) => s + n, 0) || 1;
+    const total = c.species.reduce((s, [, n]) => s + n, 0);
     $('sb-species').innerHTML = `<h3>Composizione (${total} molecole)</h3>
       <div class="table-scroll short"><table class="data-table"><thead><tr><th>Specie</th><th>Nome</th><th class="num">n</th><th class="num">frazione molare</th><th></th></tr></thead><tbody>
-      ${c.species.map(([f, n]) => `<tr><td>${f}</td><td>${SPECIES_NAMES[f] ?? ''}</td><td class="num">${n}</td><td class="num">${nf(n / total, 3)}</td>
+      ${c.species.map(([f, n]) => `<tr><td>${f}</td><td>${SPECIES_NAMES[f] ? `compatibile con ${SPECIES_NAMES[f]}` : 'formula, identità non assegnata'}</td><td class="num">${n}</td><td class="num">${nf(n / total, 3)}</td>
         <td><button type="button" class="linkish" data-mb="${f}" title="Mostra la distribuzione delle velocità di questa specie">v</button></td></tr>`).join('')}
       </tbody></table></div>`;
     $('sb-species').querySelectorAll('[data-mb]').forEach(b => b.addEventListener('click', () => post({ type: 'set', mbSpecies: b.dataset.mb })));
@@ -1067,11 +1080,11 @@ function renderLiveAnalysis() {
   }
   const top = [...agg].sort((a, b) => b[1] - a[1]).slice(0, 12);
   const recent = real.slice(-14).reverse();
-  $('sb-events').innerHTML = `<h3>Registro delle reazioni</h3>
+  $('sb-events').innerHTML = `<h3>Cambi di connettività osservati</h3>
     ${real.length ? `<div class="analysis-grid">
       <div><p class="lbl">Ultimi eventi</p><ul class="sb-log">${recent.map(e => `<li><span class="t">${nf(e.t / 1000, 3)} ps</span> ${e.reactants.join(' + ')} → ${e.products.join(' + ')}${e.exchange ? ' <span class="desc-muted">(scambio di atomi)</span>' : ''}</li>`).join('')}</ul></div>
       <div><p class="lbl">Reazioni elementari più frequenti</p><ul class="sb-log">${top.map(([k, n]) => `<li><span class="t">${n}×</span> ${k}</li>`).join('')}</ul></div>
-    </div>` : '<p class="desc-muted">Ancora nessuna reazione. Alza la temperatura, usa una scintilla o accendi la luce.</p>'}
+    </div>` : '<p class="desc-muted">Nessun cambio di connettività registrato. Avvia o avanza di un passo per osservare la traiettoria.</p>'}
     <p class="desc-muted">Una reazione è registrata quando cambia la connettività: un legame si forma (ordine > 0,55) o si rompe (< 0,35). Le reazioni che scambiano solo atomi uguali (H + H₂ → H₂ + H) non sono elencate.</p>`;
   renderSelected();
 }
@@ -1082,7 +1095,7 @@ function renderSelected() {
   const f = SB.frame;
   const i = SB.selected;
   if (!f || i < 0 || i >= f.N) {
-    box.innerHTML = '<h3>Atomo selezionato</h3><p class="desc-muted">Clicca un atomo nella scatola (strumento "Seleziona") per vederne legami, carica parziale, ibridazione e numero di ossidazione.</p>';
+    box.innerHTML = '<h3>Atomo selezionato</h3><p class="desc-muted">Clicca un atomo nella scatola (strumento "Seleziona") per vederne distanze, ordini di legame e carica parziale.</p>';
     return;
   }
   const Z = f.Z[i];
@@ -1092,28 +1105,17 @@ function renderSelected() {
     if (s < 0.3) continue;
     if (a === i) partners.push({ j: b, n, s }); else if (b === i) partners.push({ j: a, n, s });
   }
-  const chi = (z) => PAULING[z] ?? 2;
-  let ox = 0;
-  for (const p of partners) {
-    const o = Math.round(p.n);
-    if (f.Z[p.j] === Z || Math.abs(chi(f.Z[p.j]) - chi(Z)) < 1e-9) continue;
-    ox += chi(f.Z[p.j]) > chi(Z) ? o : -o;
-  }
-  const sumN = partners.reduce((s, p) => s + p.n, 0);
-  const lp = Math.max(0, (valenceElectrons(Z) - sumN) / 2);
-  const steric = partners.length + Math.round(lp);
-  const hyb = { 2: 'sp', 3: 'sp²', 4: 'sp³' }[steric] ?? '—';
+  const sumN = partners.reduce((sum, p) => sum + p.n, 0);
   const frag = SB.census?.frags?.find(fr => fr.includes(i));
   const fragFormula = frag ? hillFormula(frag.map(k => ({ Z: f.Z[k] }))) : sym(Z);
-  const orderName = (n) => (n > 2.5 ? 'triplo' : n > 1.75 ? 'doppio' : n > 1.3 ? 'aromatico / delocalizzato' : n > 0.75 ? 'singolo' : 'parziale');
+  const orderName = (n) => (n > 2.5 ? 'triplo' : n > 1.75 ? 'doppio' : n > 1.3 ? 'frazionario' : n > 0.75 ? 'singolo' : 'parziale');
   box.innerHTML = `<h3>Atomo selezionato: ${sym(Z)}${i + 1} (${ELEMENTS[Z - 1].name})</h3>
     <dl class="info-list">
       <dt>Carica parziale</dt><dd>${sgn(f.q[i], 2)} e</dd>
       <dt>Elettronegatività di Pauling</dt><dd>${nf(PAULING[Z], 2)}</dd>
-      <dt>Numero di ossidazione</dt><dd>${ox > 0 ? '+' : ox < 0 ? '−' : ''}${Math.abs(ox)}</dd>
+      <dt>Numero di ossidazione</dt><dd>Richiede struttura di Lewis assegnata</dd>
       <dt>Somma degli ordini di legame</dt><dd>${nf(sumN, 2)} (valenza ${ATOM_PARAMS[Z][0]})</dd>
-      <dt>Coppie solitarie (stima)</dt><dd>${nf(lp, 1)}</dd>
-      <dt>Ibridazione (VSEPR)</dt><dd>${partners.length >= 2 ? hyb : '—'}</dd>
+
       <dt>Energia cinetica</dt><dd>${nf(f.ke[i] * KJ_PER_EV, 1)} kJ/mol</dd>
       <dt>Molecola</dt><dd>${fragFormula}${SPECIES_NAMES[fragFormula] ? ` (${SPECIES_NAMES[fragFormula]})` : ''}</dd>
     </dl>
