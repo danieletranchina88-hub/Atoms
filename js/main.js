@@ -248,10 +248,11 @@ function setMode(mode) {
     molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
     reaction: 'Gas ideali · HF/MP2 + rotore rigido e oscillatore armonico · equilibrio distinto dalla cinetica',
     lab: 'Modelli termodinamici e cinetici · attività, unità e condizioni esplicite',
-    sandbox: 'Misura la dinamica · UHF per pochi atomi oppure potenziale classico qualitativo · verifica la deriva energetica',
-    beaker: 'Equilibrio in acqua a 25 °C · nessuna cinetica · Davies, affidabilità limitata ad alta forza ionica',
+    sandbox: 'Misura la dinamica · MINDO/3 quantistico (fino a 90 atomi) o UHF ab initio (pochi atomi) oppure potenziale classico qualitativo · verifica la deriva energetica',
+    beaker: 'Equilibrio in acqua (database MINTEQ v4) · van \'t Hoff per la temperatura · nessuna cinetica · Debye–Hückel esteso/Davies, affidabilità limitata ad alta forza ionica',
+    kinetics: 'Legge di azione di massa · Arrhenius · integratore implicito per sistemi rigidi · isoterma, a volume costante',
   };
-  $('model-status').textContent = models[mode];
+  $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'molecule' && mode !== 'molecule') deactivateMolecule();
   if (prev === 'reaction' && mode !== 'reaction') deactivateReaction();
