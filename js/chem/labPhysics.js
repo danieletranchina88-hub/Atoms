@@ -1,6 +1,7 @@
 // Leggi della chimica fisica per il laboratorio: gas reali, equilibri acido-base, elettrochimica, cinetica.
 
 import { R_LBAR, R_GAS, FARADAY } from './labData.js';
+import { redoxCell } from './electrochemistry.js';
 
 // ---------------------------------------------------------------------------
 // Gas reali: equazione di van der Waals  (P + a/V²)(V − b) = RT     (V molare)
@@ -137,14 +138,8 @@ function gcd(a, b) { return b ? gcd(b, a % b) : a; }
  */
 export function galvanicCell(h1, h2, { cOxCathode = 1, cOxAnode = 1, T = 298.15 } = {}) {
   const [cat, an] = h1.E >= h2.E ? [h1, h2] : [h2, h1];
-  const n = cat.n * an.n / gcd(cat.n, an.n);
-  const E0 = cat.E - an.E;
-  const dG0 = -n * FARADAY * E0 / 1000;                  // kJ/mol
-  const lnK = n * FARADAY * E0 / (R_GAS * T);
-  // Q per coppie metallo/ione: l'anodo produce ioni, il catodo li consuma
-  const Q = Math.pow(cOxAnode, n / an.n) / Math.pow(cOxCathode, n / cat.n);
-  const E = E0 - R_GAS * T / (n * FARADAY) * Math.log(Q);
-  return { cathode: cat, anode: an, n, E0, E, dG0, dG: -n * FARADAY * E / 1000, lnK, Q };
+  if (!cat.metal || !an.metal) throw new Error('Usa redoxCell con le attività di tutte le specie per semireazioni non metalliche.');
+  return redoxCell(an, cat, { leftActivities: { [an.ox]: cOxAnode }, rightActivities: { [cat.ox]: cOxCathode }, T });
 }
 
 // ---------------------------------------------------------------------------

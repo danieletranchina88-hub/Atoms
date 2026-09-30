@@ -3,8 +3,9 @@
 import { VDW_GASES, ACIDS, BASES, INDICATORS, HALF_REACTIONS, R_LBAR, R_GAS, FARADAY } from '../chem/labData.js';
 import {
   vdwPressure, vdwCritical, vdwVolumes, maxwellConstruction, fractions, titrationPH,
-  galvanicCell, integratedRate, halfLife, consecutive,
+  integratedRate, halfLife, consecutive,
 } from '../chem/labPhysics.js';
+import { halfStoichiometry, redoxCell, cellEquation } from '../chem/electrochemistry.js';
 import { drawXY } from './chemCharts.js';
 
 const $ = (id) => document.getElementById(id);
@@ -24,7 +25,7 @@ const S = {
   tool: 'gas',
   gas: { id: 'CO2', Tr: 0.92, V: null },
   acid: { analyte: 'acetic', Ca: 0.1, Va: 25, Ct: 0.1, indicator: 'Fenolftaleina' },
-  cell: { a: 'Zn', b: 'Cu', cCat: 1, cAn: 1, T: 298.15 },
+  cell: { a: 'Zn', b: 'Cu', activities: [{}, {}], T: 298.15 },
   kin: { order: 1, k: 0.1, A0: 1, k2: 0.05, Ea: 50, Afac: 1e10 },
 };
 
@@ -86,12 +87,17 @@ function renderSide() {
   } else if (S.tool === 'cell') {
     const sel = (id, v) => `<select id="${id}">${HALF_REACTIONS.map(h => `<option value="${h.id}" ${h.id === v ? 'selected' : ''}>${h.eq}  (${h.E > 0 ? '+' : ''}${nf(h.E, 2)} V)</option>`).join('')}</select>`;
     body = `
-      <label class="lbl" for="cell-a">Semireazione 1</label>${sel('cell-a', S.cell.a)}
-      <label class="lbl" for="cell-b">Semireazione 2</label>${sel('cell-b', S.cell.b)}
-      ${slider('cell-ccat', 'Concentrazione dello ione al catodo', -6, 0, 0.1, Math.log10(S.cell.cCat), `${sci(S.cell.cCat)} M`)}
-      ${slider('cell-can', 'Concentrazione dello ione all\'anodo', -6, 0, 0.1, Math.log10(S.cell.cAn), `${sci(S.cell.cAn)} M`)}
-      ${slider('cell-T', 'Temperatura', 273, 373, 1, S.cell.T, `${nf(S.cell.T, 0)} K`)}
-      <p class="hint">Il catodo è la coppia con il potenziale di riduzione più alto. Le concentrazioni entrano nell'equazione di Nernst (attività ≈ concentrazioni).</p>`;
+      <label class="lbl" for="cell-a">Semicella sinistra (ossidazione scritta)</label>${sel('cell-a', S.cell.a)}
+      <label class="lbl" for="cell-b">Semicella destra (riduzione scritta)</label>${sel('cell-b', S.cell.b)}
+      ${[S.cell.a, S.cell.b].map((id, side) => halfStoichiometry(HALF_REACTIONS.find(h => h.id === id))
+        .filter(x => x.phase === 'aq' || x.phase === 'g').map((x, index) => {
+          const value = S.cell.activities[side][x.id] ?? 1;
+          return `<label class="lbl" for="cell-a-${side}-${index}">${side ? 'Destra' : 'Sinistra'} · ${x.id} ${x.id === 'H⁺' ? '(pH)' : x.phase === 'g' ? '(p / 1 bar)' : '(attività)'}</label>
+            <input id="cell-a-${side}-${index}" class="cell-activity" data-side="${side}" data-species="${x.id}" type="number"
+              min="${x.id === 'H⁺' ? -1 : 0.00000000000001}" max="${x.id === 'H⁺' ? 14 : 100}"
+              step="any" value="${x.id === 'H⁺' ? -Math.log10(value) : value}">`;
+        }).join('')).join('')}
+      <p class="hint">298,15 K · attività adimensionali; solidi e liquidi puri: a = 1. E° tabulati arrotondati. E &lt; 0 indica verso spontaneo inverso; nessuna velocità di reazione calcolata.</p>`;
   } else {
     body = `
       <label class="lbl">Ordine di reazione</label>
@@ -116,11 +122,14 @@ function renderSide() {
     live('acid-V', (v) => { S.acid.Va = v; }, () => `${S.acid.Va} mL`);
     live('acid-Ct', (v) => { S.acid.Ct = Math.pow(10, v); }, () => `${nf(S.acid.Ct, 3)} M`);
   } else if (S.tool === 'cell') {
-    on('cell-a', 'change', (e) => { S.cell.a = e.target.value; drawAll(); });
-    on('cell-b', 'change', (e) => { S.cell.b = e.target.value; drawAll(); });
-    live('cell-ccat', (v) => { S.cell.cCat = Math.pow(10, v); }, () => `${sci(S.cell.cCat)} M`);
-    live('cell-can', (v) => { S.cell.cAn = Math.pow(10, v); }, () => `${sci(S.cell.cAn)} M`);
-    live('cell-T', (v) => { S.cell.T = v; }, () => `${nf(S.cell.T, 0)} K`);
+    on('cell-a', 'change', (e) => { S.cell.a = e.target.value; S.cell.activities[0] = {}; renderAll(); });
+    on('cell-b', 'change', (e) => { S.cell.b = e.target.value; S.cell.activities[1] = {}; renderAll(); });
+    document.querySelectorAll('.cell-activity').forEach(input => input.addEventListener('input', () => {
+      if (!input.checkValidity() || input.value === '') return;
+      const v = Number(input.value), id = input.dataset.species;
+      S.cell.activities[+input.dataset.side][id] = id === 'H⁺' ? 10 ** -v : v;
+      drawAll();
+    }));
   } else {
     $('kin-order').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { S.kin.order = +b.dataset.v; renderAll(); }));
     live('kin-k', (v) => { S.kin.k = Math.pow(10, v); }, () => sci(S.kin.k));
@@ -340,43 +349,44 @@ function supCharge(i) { return (i > 1 ? '⁰¹²³⁴⁵⁶⁷⁸⁹'[i] : '') +
 function drawCell() {
   const h1 = HALF_REACTIONS.find(h => h.id === S.cell.a);
   const h2 = HALF_REACTIONS.find(h => h.id === S.cell.b);
-  const c = galvanicCell(h1, h2, { cOxCathode: S.cell.cCat, cOxAnode: S.cell.cAn, T: S.cell.T });
+  const c = redoxCell(h1, h2, { leftActivities: S.cell.activities[0], rightActivities: S.cell.activities[1], T: S.cell.T });
   drawCellDiagram($('lab-plot'), c);
   // Nernst: E contro log Q
+  const logQ = c.lnQ / Math.LN10;
+  const qmin = Math.min(-8, logQ - 2), qmax = Math.max(8, logQ + 2);
   const lq = [], E = [];
-  for (let x = -8; x <= 8; x += 0.1) { lq.push(x); E.push(c.E0 - R_GAS * S.cell.T / (c.n * FARADAY) * Math.log(Math.pow(10, x))); }
+  for (let x = qmin; x <= qmax; x += (qmax - qmin) / 160) { lq.push(x); E.push(c.E0 - R_GAS * S.cell.T / (c.n * FARADAY) * x * Math.LN10); }
   drawXY($('chart-radial'), {
     series: [{ xs: lq, ys: E, color: cssVar('--accent'), width: 2.2, label: 'E = E° − (RT/nF) ln Q' }],
-    xmin: -8, xmax: 8, ymin: Math.min(...E, 0) - 0.05, ymax: Math.max(...E, 0) + 0.05, xlabel: 'log₁₀ Q', ylabel: 'E (V)',
-    points: [{ x: Math.log10(c.Q), y: c.E, color: cssVar('--phase-pos'), label: `${nf(c.E, 3)} V` }],
+    xmin: qmin, xmax: qmax, ymin: Math.min(...E, 0) - 0.05, ymax: Math.max(...E, 0) + 0.05, xlabel: 'log₁₀ Q', ylabel: 'E (V)',
+    points: [{ x: c.lnQ / Math.LN10, y: c.E, color: cssVar('--phase-pos'), label: `${nf(c.E, 3)} V` }],
     hlines: [{ y: 0, label: 'equilibrio: E = 0, Q = K', color: cssVar('--muted') }],
   });
   // serie elettrochimica
   drawSeries($('chart-levels'), c);
-  // scarica della pila: E in funzione della frazione di reazione
+  // pH sensitivity, with all other activities held fixed; no invented discharge kinetics.
   const fx = [], fy = [];
-  const ca0 = S.cell.cAn, cc0 = S.cell.cCat;
-  for (let f = 0; f <= 0.999; f += 0.005) {
-    const cc = cc0 * (1 - f);
-    const ca = ca0 + cc0 * f * (c.cathode.n / c.anode.n);
-    const Q = Math.pow(ca, c.n / c.anode.n) / Math.pow(cc, c.n / c.cathode.n);
-    fx.push(f * 100); fy.push(c.E0 - R_GAS * S.cell.T / (c.n * FARADAY) * Math.log(Q));
+  for (let pH = 0; pH <= 14.01; pH += 0.1) {
+    fx.push(pH); fy.push(redoxCell(h1, h2, { T: S.cell.T,
+      leftActivities: { ...S.cell.activities[0], 'H⁺': 10 ** -pH },
+      rightActivities: { ...S.cell.activities[1], 'H⁺': 10 ** -pH } }).E);
   }
-  drawXY($('chart-slice'), { series: [{ xs: fx, ys: fy, color: cssVar('--block-f'), width: 2.2, label: 'E durante la scarica' }], xmin: 0, xmax: 100, ymin: 0, ymax: Math.max(...fy) * 1.1, xlabel: 'ione del catodo consumato (%)', ylabel: 'E (V)' });
+  drawXY($('chart-slice'), { series: [{ xs: fx, ys: fy, color: cssVar('--block-f'), width: 2.2, label: 'E(pH), altre attività fisse' }],
+    xmin: 0, xmax: 14, ymin: Math.min(...fy) - 0.1, ymax: Math.max(...fy) + 0.1, xlabel: 'pH comune alle semicelle', ylabel: 'E (V)' });
   const notation = `${c.anode.red} | ${c.anode.ox} || ${c.cathode.ox} | ${c.cathode.red}`;
   const log10K = c.lnK / Math.LN10;
   setTexts({
-    title: `Pila galvanica`, sub: notation,
-    note: 'All\'anodo (−) avviene l\'ossidazione, al catodo (+) la riduzione. Gli elettroni scorrono nel circuito esterno dall\'anodo al catodo; il ponte salino chiude il circuito con il moto degli ioni.',
+    title: `Ossidoriduzione · ${c.atEquilibrium ? 'equilibrio' : c.reverse ? 'verso spontaneo inverso' : 'verso scritto favorito'}`, sub: notation,
+    note: cellEquation(h1, h2),
     c1: 'Equazione di Nernst', n1: `A 25 °C: E = E° − (0,0592/n) log Q. La pila si scarica finché E = 0, cioè Q = K.`,
     c2: 'Serie elettrochimica', n2: 'Potenziali standard di riduzione. Più in alto: ossidanti più forti. Più in basso: riducenti più forti.',
-    c3: 'Scarica della pila', n3: 'Mentre la pila lavora gli ioni del catodo si consumano e quelli dell\'anodo si accumulano: Q cresce ed E cala, lentamente fino alla fine.',
+    c3: 'Sensibilità al pH', n3: 'Nernst a specie fissate: non include idrolisi, precipitazione, passivazione o reazioni concorrenti; a pH estremi la coppia scelta può non essere stabile.',
     results: `
       <div><h3>${notation}</h3>
       <dl class="info-list">
-        <dt>Catodo (riduzione, +)</dt><dd>${c.cathode.eq}</dd>
-        <dt>Anodo (ossidazione, −)</dt><dd>${c.anode.eq.replace('→', '←')}</dd>
-        <dt>Elettroni scambiati n</dt><dd>${c.n}</dd>
+        <dt>Destra · riduzione × ${c.rightFactor}</dt><dd>${c.cathode.eq}</dd>
+        <dt>Sinistra · ossidazione × ${c.leftFactor}</dt><dd>${c.anode.eq.replace('→', '←')}</dd>
+        <dt>log₁₀ Q</dt><dd>${nf(c.lnQ / Math.LN10, 3)}</dd><dt>Elettroni scambiati n</dt><dd>${c.n}</dd>
         <dt>E° = E°<sub>cat</sub> − E°<sub>an</sub></dt><dd>${nf(c.E0, 3)} V</dd>
         <dt>E (Nernst)</dt><dd><b>${nf(c.E, 3)} V</b></dd>
         <dt>ΔG° = −nFE°</dt><dd>${nf(c.dG0, 1)} kJ/mol</dd>
@@ -411,8 +421,8 @@ function drawCellDiagram(canvas, c) {
     ctx.fillStyle = ink; ctx.font = '600 13px "IBM Plex Sans", sans-serif';
     ctx.fillText(label, x + bw / 2, y0 + bh + 20);
   };
-  beaker(xa, `Anodo (−): ossidazione`, `${c.anode.ox} ${sci(S.cell.cAn)} M`, cssVar('--phase-neg'));
-  beaker(xc, `Catodo (+): riduzione`, `${c.cathode.ox} ${sci(S.cell.cCat)} M`, cssVar('--phase-pos'));
+  beaker(xa, c.atEquilibrium ? 'Equilibrio' : c.reverse ? 'Catodo (+)' : 'Anodo (−)', `${c.anode.ox} / ${c.anode.red}`, cssVar('--phase-neg'));
+  beaker(xc, c.atEquilibrium ? 'Equilibrio' : c.reverse ? 'Anodo (−)' : 'Catodo (+)', `${c.cathode.ox} / ${c.cathode.red}`, cssVar('--phase-pos'));
   // elettrodi
   const elec = (x, name) => {
     ctx.fillStyle = cssVar('--scene-axis');
@@ -439,8 +449,8 @@ function drawCellDiagram(canvas, c) {
   ctx.textBaseline = 'alphabetic';
   // freccia degli elettroni
   ctx.fillStyle = accent; ctx.font = '12px "IBM Plex Sans", sans-serif';
-  ctx.fillText('e⁻ →', w * 0.34, top - 8);
-  ctx.fillText('e⁻ →', w * 0.66, top - 8);
+  ctx.fillText(c.atEquilibrium ? 'I = 0' : c.reverse ? '← e⁻' : 'e⁻ →', w * 0.34, top - 8);
+  ctx.fillText(c.atEquilibrium ? 'I = 0' : c.reverse ? '← e⁻' : 'e⁻ →', w * 0.66, top - 8);
 }
 
 function drawSeries(canvas, c) {
