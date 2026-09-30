@@ -365,7 +365,9 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 5px 8px;
+  max-width: 100%;
 }
+body[data-mode="beaker"] #element-card select { width: 100%; }
 
 .panel h3 {
   font: 600 14px/1.25 var(--font-display);
@@ -677,6 +679,8 @@ body[data-mode="sandbox"] .workspace { grid-template-columns: 330px minmax(0, 1f
 #sb-chart1 { padding: 3px 6px; font-size: 12px; }
 .sb-tips { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
 .sb-tips li { margin: 2px 0; }
+.sb-saves { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12.5px; }
+.sb-saves li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 3px 0; }
 .hint.warn { color: var(--phase-pos); }
 .sb-log { list-style: none; margin: 0; padding: 0; font: 12.5px var(--font-mono); max-height: 260px; overflow: auto; }
 .sb-log li { padding: 3px 0; border-bottom: 1px solid var(--line); }
@@ -695,6 +699,23 @@ body[data-mode="beaker"] .workspace { grid-template-columns: 330px minmax(0, 1fr
 body[data-mode="beaker"] .viewport-title { text-shadow: none; }
 @media (max-width: 1280px) { body[data-mode="beaker"] .workspace { grid-template-columns: 320px minmax(0, 1fr); } }
 @media (max-width: 820px) { body[data-mode="beaker"] .workspace { grid-template-columns: minmax(0, 1fr); } }
+body[data-mode="kinetics"] #lab-plot { display: block; background: var(--panel); inset: 86px 0 0 0; height: calc(100% - 86px); }
+body[data-mode="kinetics"] .viewport { background: var(--panel); }
+body[data-mode="kinetics"] .viewport > canvas:not(#lab-plot) { visibility: hidden; }
+body[data-mode="kinetics"] .viewport-tools { display: none; }
+body[data-mode="kinetics"] .table-band { display: none; }
+body[data-mode="kinetics"] .atom-only { display: none; }
+body[data-mode="kinetics"] .workspace { grid-template-columns: 330px minmax(0, 1fr) 380px; }
+body[data-mode="kinetics"] .viewport-title { text-shadow: none; }
+@media (max-width: 1280px) { body[data-mode="kinetics"] .workspace { grid-template-columns: 320px minmax(0, 1fr); } }
+@media (max-width: 820px) { body[data-mode="kinetics"] .workspace { grid-template-columns: minmax(0, 1fr); } }
+body[data-mode="kinetics"] .viewport-legend { top: 54px; bottom: auto; left: 14px; max-width: calc(100% - 28px); pointer-events: auto; text-shadow: none; }
+.legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); cursor: pointer; font-size: 12px; }
+.legend-chip[aria-pressed="false"] { opacity: 0.4; }
+.mech-input { width: 100%; box-sizing: border-box; min-height: 180px; resize: vertical; font: 12px/1.45 var(--font-mono); background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; white-space: pre; overflow: auto; }
+.kn-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: center; font-size: 13px; }
+.kn-grid input { width: 100%; box-sizing: border-box; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-family: var(--font-mono); }
+body[data-mode="kinetics"] #element-card select { width: 100%; }
 td.eqn { white-space: normal; font-family: var(--font-mono); font-size: 12px; }
 
 /* Simulation first: visible model, compact readings, optional theory. */

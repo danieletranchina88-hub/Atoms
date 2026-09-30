@@ -15,8 +15,9 @@ Novità: reattore ideale con avanzamento, reagente limitante ed equilibrio; Nern
 | **Legami σ π** | Orbitali molecolari LCAO σ, σ\*, π, π\* di molecole biatomiche e orbitali ibridi sp…sp³d², costruiti dagli orbitali atomici calcolati. |
 | **Molecole** | Sandbox molecolare con Hartree–Fock *ab initio*. Si parte da una libreria di 67 molecole, da una stringa SMILES o modificando la molecola con un clic sugli atomi. Calcola: legami singoli, doppi e tripli (ordine di Lewis e ordine di Mayer quantistico), elettronegatività (Pauling, Allen), cariche formali, numeri di ossidazione, cariche parziali (Mulliken, Löwdin), VSEPR e ibridazione, risonanza, momento di dipolo, orbitali molecolari in 3D (con carattere σ/π e legante/antilegante), densità elettronica, potenziale elettrostatico, geometria ottimizzata, vibrazioni con spettro IR, spettro UV-visibile (CIS), spettro fotoelettronico (Koopmans), termodinamica statistica, curva di dissociazione RHF/UHF. |
 | **Reazioni** | Termochimica e cinetica: ΔE, ΔH, ΔS, ΔG e K<sub>p</sub> in funzione della temperatura, confronto con i ΔH° sperimentali. Stati di transizione, energie di attivazione e costanti di velocità (Eyring con correzione tunnel), grafico di Arrhenius, animazione della coordinata di reazione. |
-| **Sandbox** | Dinamica molecolare in tempo reale: si mettono atomi e molecole in una scatola (24 elementi, 20 molecole pronte, qualunque SMILES) e si osservano cambi di connettività previsti dal modello. Si controllano temperatura (termostato o sistema isolato), volume, impulsi meccanici di energia hc/λ (non fotolisi), scintille; si possono afferrare gli atomi con una "pinzetta". Riconosce da sola specie e reazioni (registro delle reazioni, curve di concentrazione), misura la pressione sulle pareti e la distribuzione di Maxwell–Boltzmann, misura la deriva del bilancio energetico. Per sistemi fino a 8 atomi le forze possono venire direttamente da Hartree–Fock (dinamica *ab initio*). |
-| **Becher** | Chimica in soluzione: uno scaffale con acidi, basi, sali, ioni metallici, indicatori, metalli e marmo. Per ogni aggiunta calcola l'equilibrio completo: pH, precipitati (K<sub>sp</sub>), complessi, idrossidi anfoteri, reazioni redox con i metalli (Nernst), gas (H₂, CO₂), calore e temperatura, colore della soluzione dallo spettro, equazione ionica netta, curva di titolazione goccia a goccia. |
+| **Sandbox** | Dinamica molecolare in tempo reale: si mettono atomi e molecole in una scatola (24 elementi, 20 molecole pronte, qualunque SMILES) e si osservano cambi di connettività previsti dal modello. Si controllano temperatura (termostato o sistema isolato), volume, impulsi meccanici di energia hc/λ (non fotolisi), scintille; si possono afferrare gli atomi con una "pinzetta". Riconosce da sola specie e reazioni (registro delle reazioni, curve di concentrazione), misura la pressione sulle pareti e la distribuzione di Maxwell–Boltzmann, misura la deriva del bilancio energetico. Le forze possono venire da un calcolo quantistico a ogni passo: MINDO/3 semiempirico fino a 90 atomi (reazioni e spin dalla funzione d'onda) o Hartree–Fock *ab initio* fino a 8 atomi. Stili "nuvola elettronica" (densità ρ(r) calcolata) e "orbitali" (HOMO/LUMO); g(r), diffusione, C<sub>V</sub>, barostato. |
+| **Becher** | Chimica in soluzione con reagenti liberi: si compone qualunque sale, acido o base da 21 cationi × 28 anioni (in soluzione a qualunque concentrazione o come solido), si aggiungono molecole (NH₃, etilendiammina, EDTA, KHP, indicatori), metalli e minerali, si scalda con una piastra termostatata. Per ogni aggiunta calcola l'equilibrio completo: pH, precipitati (K<sub>sp</sub>), complessi, idrossidi anfoteri, reazioni redox con i metalli (Nernst), gas (H₂, CO₂), calore e temperatura, colore della soluzione dallo spettro, equazione ionica netta, curva di titolazione goccia a goccia. |
+| **Cinetica** | Meccanismi di reazione scritti liberamente (costanti fisse, Arrhenius, forma k₀(T/300)ⁿ, tempi di dimezzamento, reazioni reversibili, ordini non stechiometrici, specie costanti), integrati con un metodo implicito per sistemi rigidi. Curve c(t), ordine apparente dalle leggi integrate, tempo di dimezzamento, grafico di Arrhenius, parametri di Eyring, velocità dei singoli passi, equilibri. Esperienze con costanti di letteratura: N₂O₅, ciclopropano, SN1 e SN2 (Atkins), serie radioattiva ²¹⁰Bi → ²¹⁰Po (NNDC), ciclo di Chapman dell'ozono (IUPAC), reazione oscillante di Belousov–Zhabotinsky (Oregonator). |
 | **Laboratorio** | Le leggi della chimica fisica calcolate punto per punto: gas reali (van der Waals, costruzione di Maxwell, punto critico, fattore Z, Clausius–Clapeyron), acidi e basi (pH esatto dal bilancio di carica, titolazioni anche di acidi poliprotici, diagrammi di distribuzione, capacità tampone, indicatori), elettrochimica (pile, Nernst, ΔG = −nFE, K), cinetica (leggi integrate, reazioni consecutive, Arrhenius). |
 
 ## La fisica
@@ -51,11 +52,23 @@ Novità: reattore ideale con avanzamento, reagente limitante ed equilibrio; Nern
 - Cariche parziali per equalizzazione dell'elettronegatività (split-charge equilibration, parametri QEq/UFF); angoli dal teorema di Coulson (cos θ = −1/λ) con la correzione VSEPR per le coppie solitarie; van der Waals UFF; legame a idrogeno con il termine di DREIDING.
 - Impulsi meccanici di energia E = hc/λ, conservando la quantità di moto; nessun modello di assorbimento; riconoscimento automatico di specie e reazioni con isteresi sull'ordine di legame.
 - Dinamica *ab initio*: UHF a ogni passo con gradiente analitico, minimo energetico tra le due molteplicità più basse provate (non ricerca completa degli stati di spin), soluzione a spin rotto per la rottura dei legami.
+- **Dinamica quantistica MINDO/3** (Bingham, Dewar, Lo, JACS 97, 1285, 1975): a ogni passo una SCF UHF per tutti gli elettroni di valenza (orbitali di Slater STO-6G), forze dal gradiente analitico, fino a 90 atomi di H, B, C, N, O, F, P, S, Cl. Parametri e formule verificati contro l'implementazione di riferimento di PySCF (calori di formazione ed energie totali entro 10⁻⁶). Lo spin è libero (livello di Fermi comune a α e β, DIIS, smearing di Fermi a 300 K): O₂ esce tripletto, CH₃ doppietto, e due radicali con spin paralleli non si legano. Le reazioni non sono programmate: nella combustione dell'idrogeno compaiono da sole H₂ + O → OH + H, H + O₂ → HO₂, OH + H₂ → H₂O + H.
+- **Come appare davvero la materia**: stile "nuvola elettronica" (densità ρ(r) dalla funzione d'onda: valenza MINDO/3 con la base ortogonalizzata alla Löwdin più il core degli atomi calcolato in DFT-LDA, oppure Hartree–Fock completo; con il campo classico la densità promolecolare degli atomi isolati) e stile "orbitali" (HOMO e LUMO calcolati, con il segno della funzione d'onda). Le griglie si calcolano in un Web Worker separato e si aggiornano durante la dinamica.
+- Chimica fisica sulla traiettoria: funzione di distribuzione radiale g(r) normalizzata sulla distribuzione esatta delle distanze nel cubo (senza condizioni periodiche), spostamento quadratico medio con esponente α e coefficiente di diffusione dalla relazione di Einstein (solo nel regime diffusivo), capacità termica C<sub>V</sub> dalle fluttuazioni dell'energia nell'insieme canonico (con errore a blocchi e controllo di stazionarietà), barostato di Berendsen per lavorare a pressione costante.
+- Esperimenti personali salvati nel browser (posizioni e velocità) ed esportazione delle coordinate in formato XYZ.
 
 ### Becher: equilibri in soluzione acquosa
-- Bilanci di massa e legge di azione di massa per circa 80 specie e 28 solidi (costanti di Martell–Smith e CRC), risolti con Newton–Raphson; coefficienti di attività di Davies.
-- Precipitazione e dissoluzione con gli indici di saturazione (regola delle fasi); redox con i metalli fino ad annullare la f.e.m. di Nernst, con la sovratensione dell'idrogeno; CO₂ oltre la solubilità di Henry.
-- Calore con la legge di Hess (ΔfH° delle tabelle NBS) e ΔT = q/(m c<sub>p</sub>); colore dalla legge di Lambert–Beer e dalle funzioni colorimetriche CIE 1931.
+- Database termodinamico **MINTEQ v4** (U.S. EPA, distribuito con [PHREEQC dell'USGS](https://www.usgs.gov/software/phreeqc-version-3)): 668 specie in soluzione e 74 solidi, ognuno con la sua fonte (NIST Critical Stability Constants, Bard 1985…). Il file è convertito da `tools/buildAqueousDB.mjs`. Aggiunte con fonte: ammino-complessi di Cu, Zn, Ni (database LLNL), FeSCN²⁺ (Inorg. Chim. Acta 2018), indicatori (Harris, *Quantitative Chemical Analysis*), entalpie di soluzione (CRC).
+- Bilanci di massa per ogni componente, compresi H⁺ ed elettroni (pe, Eh): legge di azione di massa risolta con Newton–Raphson in ln c. Coefficienti di attività di Debye–Hückel esteso (parametri WATEQ) o di Davies, con A e B calcolati dalla costante dielettrica (Malmberg–Maryott) e dalla densità dell'acqua alla temperatura del becher.
+- Dipendenza dalla temperatura con van 't Hoff dalle ΔrH del database: il pH neutro a 60 °C è 6,51.
+- Precipitazione e dissoluzione con gli indici di saturazione (regola delle fasi); redox con i metalli fino ad annullare la f.e.m. di Nernst, con la sovratensione dell'idrogeno; CO₂ oltre la solubilità di Henry. L'Eh è mostrato solo quando c'è una coppia redox con entrambe le forme presenti (altrimenti un elettrodo non misurerebbe un potenziale stabile).
+- Calore con la legge di Hess dalle ΔrH delle reazioni e ΔT = q/(m c<sub>p</sub>); colore dalla legge di Lambert–Beer e dalle funzioni colorimetriche CIE 1931.
+
+### Cinetica: meccanismi e sistemi rigidi
+- Legge di azione di massa per ogni passo, r = k Π cᵢ^oᵢ, e k(T) = A (T/300)ⁿ exp(−E<sub>a</sub>/RT).
+- Integratore di Rosenbrock ROS2 (Verwer, Spee, Blom e Hundsdorfer, SIAM J. Sci. Comput. 20, 1456, 1999): L-stabile, del secondo ordine, jacobiana analitica, passo adattivo.
+- Analisi: leggi integrate di ordine 0, 1, 2 con R², tempo di dimezzamento, Arrhenius, Eyring (ΔH‡ = E<sub>a</sub> − RT), bilancio di elementi e carica di ogni passo.
+- Fonti: Atkins, *Physical Chemistry*, tabelle 22.1 e 22.4; IUPAC (Atkinson et al., Atmos. Chem. Phys. 4, 1461, 2004); NNDC/ENSDF; Field e Noyes (1974) con le costanti di Field e Försterling (1986); atmosfera standard USA 1976.
 
 ## Verifiche
 
@@ -73,7 +86,11 @@ Novità: reattore ideale con avanzamento, reagente limitante ed equilibrio; Nern
 | Strutture di Lewis, risonanza, numeri di ossidazione, VSEPR, gruppi puntuali | casi da manuale | esatto |
 | Campo reattivo: forze = −∇E | differenze finite | 10⁻⁸ |
 | Campo reattivo: geometrie (H₂O 105°, CH₄ 109,47°, C–C/C=C/C≡C) ed energie di reazione (2 H₂ + O₂: −434 contro −484 kJ/mol) | dati sperimentali | verifica qualitativa, scarto circa 10% per H₂/O₂ |
-| Becher: pH di acidi e basi deboli, tamponi, K<sub>sp</sub>, calore di neutralizzazione (ΔT = 6,67 K), redox | valori da manuale | 0,01–0,05 unità di pH |
+| MINDO/3: ΔfH di H₂O, CH₄, OH ed energie di H₂O singoletto e tripletto contro PySCF; forze contro differenze finite; 2 CH₃ → C₂H₆ (C–C 1,53 Å) | riferimento PySCF / sperimentale | 10⁻⁶ kcal/mol; forze 10⁻⁶ eV/Å |
+| Campo reattivo: entalpie di atomizzazione di 23 molecole contro la legge di Hess sulle ΔfH° (CODATA; NBS in Atkins, tab. 2.5) | sperimentale | scarto medio 2,7 % su 20 molecole con legami ordinari (tutte entro il 7 %); N₂ −11 %, CO₂ −18 %, CO −37 % |
+| Dinamica molecolare: ⟨r⟩ nel cubo = 0,6617 L (costante di Robbins), g(r) = 1 per il gas ideale, C<sub>V</sub> dell'argon gassoso = 3/2 Nk<sub>B</sub>, volume a pressione costante uguale a quello del gas ideale | analitico | entro l'errore statistico; volume entro il 3 % |
+| Cinetica: soluzioni esatte (primo e secondo ordine, Bateman), problema rigido di Robertson (riferimento di Hairer e Wanner), equilibrio Q = k/k<sub>r</sub>, stato stazionario di Chapman, k del ciclopropano a 500 °C | analitico / Atkins | 10⁻⁵–10⁻⁷ relativo; k entro il 3 % |
+| Becher: pH di acidi e basi deboli, tamponi, K<sub>sp</sub>, calore di neutralizzazione (ΔT = 6,67 K), pK<sub>w</sub>(T) (Bandura–Lvov 2006), Nernst per Fe³⁺/Fe²⁺, redox con i metalli; convergenza di tutte le 588 combinazioni catione × anione | valori da manuale | 0,01–0,05 unità di pH |
 
 `npm run test:all` calcola tutti i 118 atomi.
 
@@ -84,7 +101,10 @@ Novità: reattore ideale con avanzamento, reagente limitante ed equilibrio; Nern
 - Le molecole sono isolate, in fase gassosa (niente solvente). Le basi disponibili arrivano fino al kripton.
 - Le frequenze sono armoniche e scalate con i fattori empirici di Scott e Radom.
 - Sandbox: il campo reattivo è classico (niente stati di spin, niente ipervalenza, barriere qualitative); la dinamica ab initio è limitata a pochi atomi e Hartree–Fock con base minima sovrastima le barriere (H + H₂: 1,0 eV contro 0,42 eV).
-- Becher: costanti a 25 °C, attività di Davies (fino a I ≈ 0,5 M), nessuna cinetica: ogni aggiunta arriva subito all'equilibrio.
+- Sandbox quantistica: MINDO/3 è un metodo semiempirico (errori tipici sui calori di formazione di circa 11 kcal/mol, legami a idrogeno sottostimati); il cambio di spin fra superfici non è modellato (lo spin segue la funzione d'onda). Oltre 60–90 atomi il calcolo diventa lento.
+- Sandbox: il campo reattivo sottostima le energie di atomizzazione di qualche percento (la regolarizzazione degli ordini di legame dà n ≈ 0,97 per un legame singolo) e molto di più per i legami multipli corti o con cariche formali (N₂, CO₂, CO).
+- Cinetica: simulazioni isoterme a volume costante; le costanti di fotolisi del ciclo di Chapman sono ordini di grandezza; il quinto passo dell'Oregonator è fenomenologico.
+- Becher: il modello di attività vale fino a I ≈ 0,5–1 M; le ΔrH mancanti nel database vengono trascurate (segnalato con *); nessuna cinetica: ogni aggiunta arriva subito all'equilibrio (i solidi che si formano solo in tempi geologici sono esclusi, come l'ossidazione e la riduzione dell'acqua).
 
 ## Avvio
 
@@ -96,7 +116,7 @@ npm test                                   # verifiche numeriche
 node tools/precompute.mjs --parallel 4     # ricalcola la libreria di molecole (ore)
 ```
 
-Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`, `index.html#sandbox`, `index.html#becher`.
+Funziona anche su GitHub Pages. Collegamenti diretti: `index.html#Fe`, `index.html#molecole`, `index.html#reazioni`, `index.html#laboratorio`, `index.html#sandbox`, `index.html#becher`, `index.html#cinetica`.
 
 ## Struttura
 
@@ -110,11 +130,13 @@ js/chem/      molecole: basisData, boys, integrals, hf, gradient, optimize, vibr
 js/render/    viewer (three.js), marching (marching cubes), moleculeView
 js/ui/        periodicTable, charts, chemCharts, moleculeMode, reactionMode, labMode
 js/chem/      (laboratorio) labData, labPhysics
-js/chem/      (sandbox) reactive (campo di forze reattivo), reactiveData, md (dinamica), aimd (ab initio),
+js/chem/      (sandbox) reactive (campo di forze reattivo), reactiveData, md (dinamica), mdAnalysis (g(r), MSD, C_V), aimd (ab initio),
+              mindo3 (dinamica quantistica semiempirica), densityWorker (nuvola elettronica e orbitali),
               sandboxData, sandboxWorker
-js/chem/      (becher) aqueous (equilibri, colore), aqueousData
-js/ui/        sandboxMode, beakerMode
-tools/        precompute.mjs (libreria di molecole e stati di transizione), atomSummary.mjs,
+js/chem/      (becher) aqueous (equilibri, colore), aqueousDB (generato da MINTEQ v4), aqueousExtra, beakerReagents
+js/chem/      (cinetica) kinetics (meccanismi, integratore rigido, esperienze)
+js/ui/        sandboxMode, beakerMode, kineticsMode
+tools/        precompute.mjs (libreria di molecole e stati di transizione), atomSummary.mjs, buildAqueousDB.mjs,
               build-artifact.py (versione a pagina singola)
 tests/        verifiche numeriche
 ```

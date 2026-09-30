@@ -86,6 +86,8 @@ export class Simulation {
     this.energyReference = null;
     this.matterExchange = 0;
     this.provider = null;    // forze alternative (per esempio Hartree–Fock ab initio)
+    // controllo della pressione per riscalamento del volume (accoppiamento debole di Berendsen)
+    this.barostat = { on: false, P0: 1, tau: 10000 };
   }
 
   get N() { return this.Z.length; }
@@ -352,11 +354,35 @@ export class Simulation {
     this.bussi();
     this.time += dt;
     this.stepCount++;
+    // barostato: ogni 10 passi, fuori dal passo di Verlet; l'energia del riscalamento è lavoro esterno
+    if (this.barostat.on && this.pSamples > 50 && this.stepCount % 10 === 0) this.rescaleVolume(10);
     // media mobile esponenziale della forza sulle pareti (memoria ≈ 2 ps)
     const decay = Math.exp(-dt / 2000);
     this.pAccum = this.pAccum * decay + this.wallForce;
     this.pSamples = this.pSamples * decay + 1;
     if (this.stepCount % this.censusEvery === 0) this.census();
+  }
+
+  /**
+   * Barostato di Berendsen (J. Chem. Phys. 81, 3684, 1984): d ln V/dt = (P − P₀)/(τ_P B), con il modulo di
+   * compressibilità stimato come B ≈ max(P, P₀) (esatto per il gas ideale, prudente per i liquidi). Le posizioni
+   * e il lato della scatola si riscalano insieme. Dà la densità media giusta, non le fluttuazioni di volume
+   * dell'insieme isotermo-isobaro.
+   */
+  rescaleVolume(every = 1) {
+    const P = this.measurePressure();
+    const B = Math.max(Math.abs(P), Math.abs(this.barostat.P0), 1);
+    let dlnV = every * this.dt / this.barostat.tau * (P - this.barostat.P0) / B;
+    dlnV = Math.max(-2e-5 * every, Math.min(2e-5 * every, dlnV));
+    const s = Math.exp(dlnV / 3);
+    const newBox = this.box * s;
+    if (newBox < 6 || newBox > 200) return;
+    if (!this.res) this.forces();
+    const before = this.totalEnergy();
+    this.box = newBox;
+    for (let k = 0; k < 3 * this.N; k++) this.pos[k] *= s;
+    this.forces();
+    this.work += this.totalEnergy() - before;
   }
 
   /** Pressione sulle pareti: forza totale media / area totale (6 L²), in bar. */

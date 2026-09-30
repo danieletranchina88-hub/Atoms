@@ -1,7 +1,7 @@
 // Marching cubes (Lorensen & Cline, 1987) per estrarre l'isosuperficie ψ = ±soglia.
 // Le tabelle dei casi sono quelle di Paul Bourke, esportate da three.js.
 
-import { edgeTable, triTable } from 'three/addons/objects/MarchingCubes.js';
+import { edgeTable, triTable } from './mcTables.js';
 
 const CORNERS = [
   [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
