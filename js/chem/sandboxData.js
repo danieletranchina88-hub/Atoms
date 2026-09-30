@@ -39,8 +39,51 @@ export const SPECIES_NAMES = {
   'He': 'elio', 'Ne': 'neon', 'Ar': 'argon', 'Kr': 'kripton', 'Xe': 'xeno', 'C': 'carbonio atomico',
 };
 
+/** 8 molecole d'acqua su un reticolo 2×2×2 (O–O = 3,1 Å, densità 1,0 g/cm³ in una scatola di 6,2 Å), orientazioni diverse. */
+function waterLattice() {
+  const out = [];
+  const r = 0.957, th = 104.5 * Math.PI / 180;
+  let k = 0;
+  for (const x of [-1.55, 1.55]) for (const y of [-1.55, 1.55]) for (const z of [-1.55, 1.55]) {
+    const a = 0.9 * k, b = 1.7 * k + 0.4;
+    // due vettori O–H nel piano ruotato di (a, b)
+    const u = [Math.cos(a), Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b)];
+    const w0 = [-Math.sin(a), Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b)];
+    const h1 = [0, 1, 2].map(c => r * (Math.cos(th / 2) * u[c] + Math.sin(th / 2) * w0[c]));
+    const h2 = [0, 1, 2].map(c => r * (Math.cos(th / 2) * u[c] - Math.sin(th / 2) * w0[c]));
+    out.push({ Z: 8, pos: [x, y, z] }, { Z: 1, pos: [x + h1[0], y + h1[1], z + h1[2]] }, { Z: 1, pos: [x + h2[0], y + h2[1], z + h2[2]] });
+    k++;
+  }
+  return out;
+}
+
 // Esperimenti: ogni riga di "add" è [SMILES o simbolo, numero di copie].
 export const PRESETS = [
+  // --- dinamica quantistica: a ogni passo una SCF MINDO/3 (elettroni trattati con la meccanica quantistica) ---
+  {
+    id: 'q-h2-o2', name: 'Combustione dell\'idrogeno', forceField: 'mindo3', quantum: true,
+    box: 10, T: 3000, add: [['[H][H]', 8], ['O=O', 4], ['[O]', 2]], style: 'cloud',
+    text: 'Dinamica quantistica: a ogni passo si risolvono le equazioni di Schrödinger (SCF MINDO/3) per tutti gli elettroni di valenza e le forze sui nuclei vengono dalla funzione d\'onda. Due atomi di ossigeno innescano la catena radicalica: H₂ + O → OH + H, H + O₂ → HO₂, OH + H₂ → H₂O + H. Nessuna di queste reazioni è programmata: emergono dagli elettroni.',
+    tips: ['Stile "nuvola elettronica": vedi la densità degli elettroni spostarsi quando un legame si rompe o si forma.', 'Stile "orbitali": l\'HOMO dei radicali (OH, H, O) è l\'orbitale spaiato che attacca le altre molecole.', 'Lo spin totale (radicali, O₂ tripletto) è calcolato, non imposto.'],
+  },
+  {
+    id: 'q-h2-cl2', name: 'Idrogeno e cloro alla luce', forceField: 'mindo3', quantum: true,
+    box: 10, T: 900, add: [['[H][H]', 6], ['ClCl', 6]], light: { lambda: 300, on: true, rate: 3 }, style: 'cloud',
+    text: 'I fotoni ultravioletti rompono Cl₂ in due atomi di cloro; la catena Cl + H₂ → HCl + H, H + Cl₂ → HCl + Cl procede con le forze calcolate dalla meccanica quantistica a ogni passo.',
+    tips: ['Colora per carica: nel prodotto HCl il cloro prende carica negativa.'],
+  },
+  {
+    id: 'q-methyl', name: 'Radicali metile che si uniscono', forceField: 'mindo3', quantum: true,
+    box: 11, T: 600, add: [['[CH3]', 8]], style: 'orbital',
+    text: 'Ogni radicale CH₃ ha un elettrone spaiato in un orbitale p del carbonio (è il suo HOMO). Quando due radicali con spin opposti si incontrano, i due orbitali si sovrappongono e formano il legame σ C–C dell\'etano: 2 CH₃ → C₂H₆. Se gli spin sono paralleli (stato di tripletto) il principio di Pauli impedisce il legame e i radicali si respingono: un effetto puramente quantistico, per cui in media solo un urto su quattro può formare il legame.',
+    tips: ['Stile "orbitali": guarda l\'HOMO passare da un orbitale p isolato a un legame fra due carboni.'],
+  },
+  {
+    id: 'q-water', name: 'Acqua liquida quantistica', forceField: 'mindo3', quantum: true,
+    box: 6.2, T: 300, atoms: waterLattice(), thermalize: 300, thermostat: true, speed: 20, style: 'cloud',
+    text: 'Otto molecole d\'acqua alla densità del liquido (1,0 g/cm³), con la struttura elettronica ricalcolata a ogni passo: le cariche, la polarizzazione delle molecole e i legami a idrogeno cambiano con la geometria. Limite noto: MINDO/3 sottostima i legami a idrogeno.',
+    tips: ['Colora per carica: O negativo, H positivo, calcolati dalla funzione d\'onda.'],
+  },
   {
     id: 'argon', name: 'Gas di argon: Maxwell–Boltzmann',
     box: 42, T: 300, dt: 2, add: [['[Ar]', 120]],

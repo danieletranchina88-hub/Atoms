@@ -8,6 +8,7 @@ import { embedMolecule } from './embed.js';
 import { analyzeStructure } from './structure.js';
 import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
 import { makeHFProvider, aimdFeasible } from './aimd.js';
+import { makeMindo3Provider, mindo3Supports } from './mindo3.js';
 import { RDF, MSD, HeatCapacity } from './mdAnalysis.js';
 
 const BOHR_ANG = 0.52917721090;
@@ -119,7 +120,7 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
   if (t.Z.some(z => ATOM_PARAMS[z][0] > 0)) sim.dt = Math.min(sim.dt, 0.4);
   const placed = sim.addMolecule(t, count, T ?? sim.T, at);
   sim.res = null;
-  if (forceField === 'hf') setForceField('hf');
+  if (forceField === 'hf' || forceField === 'mindo3') setForceField(forceField);
   sim.census();
   return placed;
 }
@@ -128,16 +129,33 @@ let forceField = 'reactive';
 let hfBasis = 'STO-3G';
 
 /** Sceglie il modello delle forze; con Hartree–Fock verifica che il sistema sia abbastanza piccolo. */
+const MINDO3_MAX_ATOMS = 90;
+const SYM = { 1: 'H', 5: 'B', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl' };
+
 function setForceField(kind, basis = hfBasis) {
   hfBasis = basis;
   if (kind === 'hf') {
     const f = aimdFeasible(sim.Z, basis);
     if (!f.ok) { postMessage({ type: 'info', text: f.reason }); kind = 'reactive'; }
   }
+  if (kind === 'mindo3') {
+    const s = mindo3Supports(sim.Z);
+    if (!sim.N) { /* scatola vuota: il metodo resta scelto */ }
+    else if (!s.ok) {
+      const names = s.missing.map(k => k.split('-').map(z => SYM[z] ?? `Z=${z}`).join('–')).join(', ');
+      postMessage({ type: 'info', text: `MINDO/3 non ha parametri per ${names}: si torna al campo classico. Il metodo copre H, B, C, N, O, F, P, S, Cl (non tutte le coppie).` });
+      kind = 'reactive';
+    } else if (sim.N > MINDO3_MAX_ATOMS) {
+      postMessage({ type: 'info', text: `Il calcolo quantistico MINDO/3 è limitato a ${MINDO3_MAX_ATOMS} atomi (ce ne sono ${sim.N}): ogni passo richiede la diagonalizzazione dell'hamiltoniana.` });
+      kind = 'reactive';
+    }
+  }
+  const same = kind === forceField && sim.provider && kind !== 'reactive';
   forceField = kind;
-  sim.provider = kind === 'hf' ? makeHFProvider({ basis }) : null;
+  if (!same) sim.provider = kind === 'hf' ? makeHFProvider({ basis }) : kind === 'mindo3' ? makeMindo3Provider() : null;
   sim.res = null;
   if (kind === 'hf') sim.dt = Math.min(sim.dt, 0.25);
+  if (kind === 'mindo3') sim.dt = Math.min(sim.dt, 0.4);
   postMessage({ type: 'forcefield', kind });
 }
 
@@ -163,6 +181,7 @@ function loadPreset(p) {
     wanted += n;
     placed += add({ smiles: s, count: n });
   }
+  if (p.forceField) setForceField(p.forceField);
   if (p.photons) {
     sim.forces();
     const [za, zb] = p.photons.pair ?? [];
@@ -301,6 +320,12 @@ onmessage = (ev) => {
         if (m.rdfPair !== undefined) { rdfPairUser = m.rdfPair; rdf.reset(m.rdfPair); physSent = -1; }
         break;
       case 'resetAnalysis': resetAnalysis(); physSent = -1; break;
+      case 'wave': {
+        // funzione d'onda corrente per il disegno della densità e degli orbitali
+        const w = sim.provider?.wavefunction?.() ?? null;
+        postMessage({ type: 'wave', reqId: m.reqId, box: sim.box, Z: sim.Z.slice(), pos: Float64Array.from(sim.pos), wave: w, forceField });
+        break;
+      }
       case 'snapshot': postMessage({ type: 'snapshot', name: m.name, data: snapshot() }); break;
       case 'restore': restore(m.data); physSent = -1; break;
       case 'step': for (let k = 0; k < (m.n ?? 1); k++) sim.step(); break;

@@ -67,6 +67,7 @@ export function makeHFProvider({ basis = 'STO-3G' } = {}) {
         }
       }
       provider.info = { multiplicity, S2: res.S2, converged: res.converged, iterations: res.iterations, nbf: res.n, basis };
+      provider.last = res;
       return {
         E: res.energy * HARTREE_EV,
         parts: { hf: res.energy * HARTREE_EV },
@@ -75,6 +76,19 @@ export function makeHFProvider({ basis = 'STO-3G' } = {}) {
         hbonds: [],
       };
     },
+  };
+  /** Funzione d'onda corrente: densità totale e orbitali di frontiera nella base gaussiana (per il disegno). */
+  provider.wavefunction = () => {
+    const r = provider.last;
+    if (!r) return null;
+    const n = r.n;
+    const P = new Float64Array(n * n);
+    for (let k = 0; k < n * n; k++) P[k] = r.Pa[k] + r.Pb[k];
+    const pick = (C, k, e, spin) => (k >= 0 && k < n ? { e, spin, c: Float64Array.from({ length: n }, (_, i) => C[i * n + k]) } : null);
+    const hA = r.nalpha - 1, hB = r.nbeta - 1;
+    const homo = hB >= 0 && r.epsB[hB] > r.epsA[hA] ? pick(r.Cb, hB, r.epsB[hB], 'β') : pick(r.Ca, hA, r.epsA[hA], 'α');
+    const lumo = r.nbeta < n && r.epsB[r.nbeta] < (r.epsA[r.nalpha] ?? Infinity) ? pick(r.Cb, r.nbeta, r.epsB[r.nbeta], 'β') : pick(r.Ca, r.nalpha, r.epsA[r.nalpha], 'α');
+    return { kind: 'gauss', basisName: basis, atoms: r.atoms.map(a => ({ Z: a.Z, xyz: a.xyz.slice() })), n, P, homo, lumo, eUnit: HARTREE_EV };
   };
   return provider;
 }
