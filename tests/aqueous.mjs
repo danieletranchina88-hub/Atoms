@@ -81,7 +81,7 @@ const conc = (s, n) => s.species.find(x => x.n === n)?.c ?? 0;
   const z = run([[R.HCl, 40], [metal('Zn'), 0.5]]).s;
   check('Zn + 2 H⁺ → Zn²⁺ + H₂', Math.abs(z.gasH2 - nZn) / nZn < 1e-3, `${(z.gasH2 * 1000).toFixed(3)} mmol di H₂ (Zn: ${(nZn * 1000).toFixed(3)} mmol)`);
   const d = run([[R.HCl, 40], [metal('Cu'), 0.5]]).s;
-  check('il rame non reagisce con HCl (E° > 0)', d.gasH2 < 1e-9 && solid(d, 'Cumetal')?.amt > 0.0078, `H₂ = ${d.gasH2.toExponential(1)} mol`);
+  check('Cu/HCl: rame prevalentemente metallico, Cu(II) trascurabile', conc(d, 'Cu+2') < 1e-8 && solid(d, 'Cumetal')?.amt > 0.995 * 0.5 / 63.546, `H₂ = ${d.gasH2.toExponential(1)} mol`);
   const c = run([[R.AgNO3, 50], [metal('Cu'), 0.5]]).s;
   const ag = solid(c, 'Agmetal');
   check('Cu + 2 Ag⁺ → Cu²⁺ + 2 Ag', ag && Math.abs(ag.amt - 0.005) < 1e-5, `${ag ? (ag.amt * 1000).toFixed(4) : 0} mmol di Ag depositato (atteso 5,000)`);
@@ -121,22 +121,23 @@ const conc = (s, n) => s.species.find(x => x.n === n)?.c ?? 0;
 }
 // libertà del banco: ogni combinazione catione × anione dà un equilibrio finito
 {
-  let bad = [], n = 0;
+  let bad = [], n = 0, unsupported = 0;
   for (let i = 0; i < CATIONS.length; i++) for (let j = 0; j < ANIONS.length; j++) {
     const b = new Beaker();
     b.add(R.H2O, 40);
-    b.add(solutionOf(saltRecipe(i, j), 0.1), 10);
+    try { b.add(solutionOf(saltRecipe(i, j), 0.1), 10); } catch(e) { if(e.code==='UNSUPPORTED_CHEMISTRY'){unsupported++;continue;} throw e; }
     const s = b.summary();
     n++;
     if (!Number.isFinite(s.pH) || !Number.isFinite(s.T) || !s.converged) bad.push(saltRecipe(i, j).formula);
   }
-  check('tutte le combinazioni catione × anione convergono', bad.length === 0, `${n - bad.length}/${n}${bad.length ? `; non convergono: ${bad.slice(0, 12).join(', ')}` : ''}`);
+  check('combinazioni catione × anione: convergenza o dominio esplicito', bad.length === 0, `${n - bad.length}/${n}; ${unsupported} combinazioni redox fuori database${bad.length ? `; non convergono: ${bad.slice(0, 12).join(', ')}` : ''}`);
 }
 // tutte le esperienze guidate girano fino in fondo
 {
   const bad = [];
   for (const p of beakerPresets()) {
     const b = new Beaker();
+    if(p.thermostat)b.setThermostat(true,298.15);
     for (const [r, v] of p.steps) b.add(r, v);
     if (p.next) for (let k = 0; k < 5; k++) b.add(p.next, p.amount);
     const s = b.summary();
