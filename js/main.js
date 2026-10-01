@@ -252,9 +252,9 @@ function setMode(mode) {
     molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
     reaction: 'Gas ideali · HF/MP2 + rotore rigido e oscillatore armonico · equilibrio distinto dalla cinetica',
     lab: 'Modelli termodinamici e cinetici · attività, unità e condizioni esplicite',
-    sandbox: 'Misura la dinamica · UHF per pochi atomi oppure potenziale classico qualitativo · verifica la deriva energetica',
+    sandbox: 'MINDO/3 semiempirico · UHF per pochi atomi · campo classico qualitativo · controlla il bilancio energetico',
     phase: 'Dinamica LJ · gas nobile modello · NVE / NVT · transizioni emergenti',
-    beaker: 'Equilibrio in acqua a 25 °C · nessuna cinetica · Davies, affidabilità limitata ad alta forza ionica',
+    beaker: 'Equilibrio MINTEQ · temperatura e attività esplicite · nessuna cinetica · validità limitata alle specie e condizioni del modello',
   };
   $('model-status').textContent = models[mode];
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
