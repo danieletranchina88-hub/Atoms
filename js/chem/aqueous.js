@@ -24,7 +24,7 @@ import { EXTRA_COMPONENTS, EXTRA_SPECIES, EXTRA_PHASES, SPECTRA, PHASE_INFO, ORG
 const LN10 = Math.LN10;
 const R_KJ = 8.314462618e-3;          // kJ/(mol K)
 const T0 = 298.15;
-const H2_OVERPOTENTIAL = 0.40;        // V: sovratensione di sviluppo dell'idrogeno su Zn e Fe (ordine di grandezza tipico)
+const H2_OVERPOTENTIAL = 0; // Equilibrio termodinamico: nessuna sovratensione empirica o previsione cinetica.
 const CP_WATER = 4.184;               // J/(g K)
 
 export const COMPONENTS = [...DB_COMPONENTS, ...EXTRA_COMPONENTS];
@@ -132,6 +132,7 @@ const PE_LIMIT = 60;
  * @param opts { guess, exclude: Set di fasi escluse, include: Set di fasi (se dato, solo queste) }
  */
 export function equilibrate(totals, V, T = T0, opts = {}) {
+  if (!(V > 0) || !Number.isFinite(V) || !Number.isFinite(T) || T < 273.15 || T > 373.15 || Object.values(totals).some(v=>!Number.isFinite(v))) throw new Error('Volume, temperatura o composizione fuori dal dominio del modello acquoso.');
   const present = COMPONENTS.filter(c => c !== 'H+' && c !== 'e-' && Math.abs(totals[c] ?? 0) > 1e-15);
   // gli elettroni sono una componente se ci sono coppie redox o metalli
   const hasRedox = totals['e-'] !== undefined;
@@ -154,6 +155,7 @@ export function equilibrate(totals, V, T = T0, opts = {}) {
   const solids = [];
   for (const p of PHASES) {
     if (p.n === 'CO2(g)') continue;
+    if (opts.include && !opts.include.has(p.n)) continue;
     if (opts.exclude?.has(p.n)) continue;
     const a = [];
     let ok = true;
@@ -338,6 +340,31 @@ export function equilibrate(totals, V, T = T0, opts = {}) {
     for (const [i, v] of e.a) si += v * (x[i] + lnG[i]);
     out.SI[e.p.n] = si / LN10;
   }
+  out.residuals = {};
+  let balancesOK = true, maxRelative = 0;
+  for (const c of comps) {
+    let found = 0, scale = Math.abs(totals[c] ?? 0);
+    for (const e of species) { const n = (e.s.c[c] ?? 0)*out.species[e.s.n]*V; found+=n; scale+=Math.abs(n); }
+    for (const [id,n] of Object.entries(out.solids)) { const v=(phaseByName(id).c[c]??0)*n;found+=v;scale+=Math.abs(v); }
+    const r=found-(totals[c]??0);out.residuals[c]=r;
+    if(Math.abs(r)>1e-12+1e-8*scale)balancesOK=false;
+    maxRelative=Math.max(maxRelative,Math.abs(r)/(1e-12+scale));
+  }
+  const physicalI=species.reduce((v,e)=>v+.5*e.s.z**2*out.species[e.s.n],0);
+  out.chargeResidual=species.reduce((v,e)=>v+e.s.z*out.species[e.s.n]*V,0)-comps.reduce((v,c)=>v+COMP_CHARGE[c]*(totals[c]??0),0);
+  out.maxRelativeResidual=maxRelative;
+  out.converged=balancesOK && Math.abs(physicalI-I)<1e-7*(1+physicalI)
+    && Object.entries(out.SI).every(([id,si])=>id==='CO2(g)' || (out.solids[id] ? Math.abs(si)<1e-5 : si<1e-5));
+  out.I=physicalI;
+  if(!out.converged && opts.retry!==false && solids.length<=20){
+    for(const candidate of solids){
+      const alternative=equilibrate(totals,V,T,{...opts,retry:false,guess:{solids:{[candidate.p.n]:1e-12}}});
+      if(alternative.converged)return alternative;
+    }
+  }
+  out.warnings=[];
+  if(!out.converged)out.warnings.push('Equilibrio non convergente: risultato non utilizzabile.');
+  if(physicalI>.5)out.warnings.push('I > 0,5 mol/L: attività fuori dal dominio diluito. Diluire.');
   return out;
 }
 
@@ -404,14 +431,20 @@ export class Beaker {
     this.st = { V: 0, totals: {}, T: T0, heat: 0, gasH2: 0, gasCO2: 0, eq: null, thermostat: false, Tset: T0 };
     this.log = [];
     this.history = [];
+    this.undoStack = [];
   }
 
   get volumeML() { return this.st.V * 1000; }
 
   setThermostat(on, T) {
-    this.st.thermostat = on;
-    if (T !== undefined) this.st.Tset = T;
-    if (on) { this.st.T = this.st.Tset; this.reequilibrate(); }
+    if(T!==undefined && (!Number.isFinite(T) || T<273.15 || T>368.15))throw new Error('Temperatura del bagno fuori intervallo 0–95 °C.');
+    const saved={...this.st,totals:{...this.st.totals}},lastGas=this.lastGas;
+    try {
+      this.st.thermostat = on;
+      if (T !== undefined) this.st.Tset = T;
+      if (on) { this.st.T = this.st.Tset; this.reequilibrate(); }
+      if(this.st.eq && !this.st.eq.converged)throw new Error('Equilibrio non convergente: temperatura ripristinata.');
+    }catch(error){this.st=saved;this.lastGas=lastGas;throw error;}
   }
 
   reequilibrate() {
@@ -475,7 +508,23 @@ export class Beaker {
 
   /** Versa: `amount` in mL per le soluzioni, in grammi per i solidi. Restituisce la voce di registro. */
   add(recipe, amount) {
-    if (!(amount > 0)) return null;
+    if (!Number.isFinite(amount) || amount<=0) return null;
+    const saved={...this.st,totals:{...this.st.totals}};
+    const logLength=this.log.length,historyLength=this.history.length,lastGas=this.lastGas;
+    try {
+      const result=this._add(recipe,amount);
+      if(result && !this.st.eq.converged)throw new Error('Equilibrio non convergente: aggiunta annullata. Prova una miscela più diluita.');
+      if(result)this.undoStack.push({st:saved,logLength,historyLength,lastGas});
+      return result;
+    } catch(error){this.st=saved;this.log.length=logLength;this.history.length=historyLength;this.lastGas=lastGas;throw error;}
+  }
+
+  undo() {
+    const previous=this.undoStack.pop();if(!previous)return false;
+    this.st=previous.st;this.log.length=previous.logLength;this.history.length=previous.historyLength;this.lastGas=previous.lastGas;return true;
+  }
+
+  _add(recipe, amount) {
     const st = this.st;
     const prevEq = st.eq;
     const nominal = { species: {}, solids: {} };
@@ -502,6 +551,12 @@ export class Beaker {
       const p = PHASES[PHI.get(pn)];
       for (const [c, v] of Object.entries(p.c)) st.totals[c] = (st.totals[c] ?? 0) + v * n;
     }
+    const unsupported = message => { const e=new Error(message);e.code='UNSUPPORTED_CHEMISTRY';throw e; };
+    if((st.totals['Cu+2']??0)>1e-10 && (st.totals['I-']??0)>1e-10)
+      unsupported('Cu/ioduro richiede anche I₂ e la sua redox, assente dal database: combinazione non calcolabile.');
+    const hasMetal=[...Object.keys(nominal.solids),...Object.keys(prevEq?.solids??{})].some(n=>/metal/.test(n));
+    if(hasMetal && (st.totals['NO3-']??0)>1e-10 && (st.totals['H+']??0)>1e-7)
+      unsupported('Metallo in nitrato acido: riduzione a NOₓ non modellata. Combinazione non calcolabile.');
     if (REDOX_BASIS && Object.keys(st.totals).some(c => REDOX_BASIS.has(c))) st.totals['e-'] = st.totals['e-'] ?? 0;
     // entalpia prima della reazione: contenuto precedente + ciò che si aggiunge (a 25 °C)
     let Hnom = dsolHeat;
@@ -577,19 +632,13 @@ export class Beaker {
     const kept = items.filter(x => Math.abs(x.v) > 0.08 * vmax);
     const reac = kept.filter(x => x.v < 0), prod = kept.filter(x => x.v > 0);
     if (!reac.length || !prod.length) return null;
-    const unit = Math.min(...kept.map(x => Math.abs(x.v)));
-    const coef = (v) => {
-      const r = Math.abs(v) / unit;
-      if (Math.abs(r - Math.round(r)) < 0.12) return Math.round(r) === 1 ? '' : `${Math.round(r)} `;
-      return `${(Math.round(r * 2) / 2).toLocaleString('it-IT')} `;
-    };
-    const side = (arr) => arr.sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).map(x => `${coef(x.v)}${x.label}`).join(' + ');
-    return { text: `${side(reac)} → ${side(prod)}` };
+    const text=kept.sort((a,b)=>Math.abs(b.v)-Math.abs(a.v)).map(x=>`${x.label}: ${x.v>0?'+':''}${(x.v*1000).toLocaleString('it-IT',{maximumSignificantDigits:4})} mmol`).join('; ');
+    return {text,changes:items.map(x=>({label:x.label,mol:x.v}))};
   }
 
   summary() {
     const st = this.st, eq = st.eq;
-    const species = eq ? Object.entries(eq.species).map(([n, c]) => ({ n, label: prettyName(n), c, a: c * (eq.gamma[n] ?? 1), src: speciesMap.get(n)?.src })).sort((a, b) => b.c - a.c) : [];
+    const species = eq ? Object.entries(eq.species).map(([n, c]) => ({ n, label: prettyName(n), c, z: speciesMap.get(n)?.z ?? 0, a: c * (eq.gamma[n] ?? 1), src: speciesMap.get(n)?.src })).sort((a, b) => b.c - a.c) : [];
     const solids = eq ? Object.entries(eq.solids).map(([n, amt]) => {
       const p = PHASES[PHI.get(n)];
       return { n, label: phaseLabel(n), name: phaseName(n), amt, mass: amt * (molarMassOfPhase(p) ?? 0), color: phaseColor(n), logKsp: logKAt(p.lk, p.dh, st.T), src: p.src, metal: /metal$/.test(n) };
@@ -599,7 +648,7 @@ export class Beaker {
       Eh: eq?.poised ? 0.05916 * (st.T / T0) * eq.pe : null,
       gasH2: st.gasH2, gasCO2: st.gasCO2, species, solids, SI: eq?.SI ?? {},
       color: eq ? solutionColor(eq.species) : [235, 240, 245], converged: eq?.converged ?? true,
-      thermostat: st.thermostat,
+      thermostat: st.thermostat, diagnostics: eq ? {converged:eq.converged,residual:eq.maxRelativeResidual,charge:eq.chargeResidual,warnings:eq.warnings}:null,
     };
   }
 }

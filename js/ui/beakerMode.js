@@ -6,6 +6,9 @@ import { Beaker, absorbance, prettyName, phaseLabel, phaseName } from '../chem/a
 import {
   CATIONS, ANIONS, SPECIAL, WATER, saltRecipe, solutionOf, solidOf, specialRecipe, quickShelf, beakerPresets,
 } from '../chem/beakerReagents.js';
+import { MALACHITE, malachiteCrystal } from '../chem/crystals.js';
+import { sampleSpecies } from '../chem/particleSample.js';
+import { drawAtoms, bindRotation } from './atomicCanvas.js';
 import { drawXY } from './chemCharts.js';
 
 const $ = (id) => document.getElementById(id);
@@ -24,10 +27,13 @@ const CAPACITY = 250; // mL
 
 let active = false;
 let raf = 0;
+let unbindRotation = null;
+let crystal = malachiteCrystal([1,1,2]);
 const PRESETS = beakerPresets();
 const SHELF = quickShelf();
 const B = {
   beaker: new Beaker(),
+  view: 'macro', yaw: .5, pitch: .35, repeats: 2, slice: false, labels: false, projected: [],
   preset: PRESETS[0],
   recipe: null,
   amount: 1,
@@ -45,9 +51,17 @@ export function activateBeaker() {
   $('busy').hidden = true;
   if (!B.started) { B.started = true; loadPreset(B.preset); }
   renderAll();
+  unbindRotation = bindRotation($('lab-plot'), B, () => {}, (x,y) => {
+    if(B.view === 'macro') return;
+    const hits = B.projected.filter(p => Math.hypot(p.x-x,p.y-y)<Math.max(10,p.screenRadius)).sort((a,b)=>b.z-a.z);
+    const p = hits[0];
+    if(p && $('bk-pick')) $('bk-pick').textContent = B.view === 'crystal'
+      ? `${p.element} · coordinate cartesiane ${p.position.map(v=>nf(v,3)).join(', ')} Å · sito frazionario ${p.fractional.map(v=>nf(v,5)).join(', ')}`
+      : `${p.label} · ${sci(p.c)} mol/L · carica ${p.zCharge > 0 ? '+' : ''}${p.zCharge}`;
+  });
   loop();
 }
-export function deactivateBeaker() { active = false; cancelAnimationFrame(raf); stopDrip(); }
+export function deactivateBeaker() { active = false; cancelAnimationFrame(raf); stopDrip(); unbindRotation?.(); unbindRotation=null; }
 export function beakerRedraw() { if (active) drawCharts(); }
 
 function loadPreset(p) {
@@ -56,6 +70,7 @@ function loadPreset(p) {
   B.beaker = new Beaker();
   B.particles = []; B.bubbles = [];
   B.message = '';
+  if(p.thermostat) B.beaker.setThermostat(true,298.15);
   for (const [r, v] of p.steps) pour(r, v, false);
   if (p.next) { B.recipe = p.next; B.amount = p.amount ?? 1; }
 }
@@ -76,7 +91,7 @@ function pour(recipe, amount, render = true) {
   }
   const before = B.beaker.summary();
   let entry;
-  try { entry = B.beaker.add(recipe, amount); } catch (e) { B.message = `Errore nel calcolo: ${e.message}`; if (render) renderAll(); return; }
+  try { entry = B.beaker.add(recipe, amount); } catch (e) { stopDrip(); B.message = `Errore nel calcolo: ${e.message}`; if (render) renderAll(); return; }
   if (!entry) return;
   B.message = '';
   const after = B.beaker.summary();
@@ -93,7 +108,7 @@ function pour(recipe, amount, render = true) {
   if (B.particles.length > 1500) B.particles.splice(0, B.particles.length - 1500);
   const gas = (entry.h2 ?? 0) + (entry.co2 ?? 0);
   if (gas > 0) {
-    const n = Math.min(160, 20 + Math.round(gas * 4000));
+    const n = Math.min(160, Math.round(gas * 40000));
     for (let k = 0; k < n; k++) B.bubbles.push({ x: 0.2 + 0.6 * Math.random(), y: 1 + Math.random() * 1.5, r: 1.5 + Math.random() * 3, v: 0.004 + Math.random() * 0.006 });
   }
   if (!after.converged) B.message = 'Attenzione: il calcolo dell\'equilibrio non è arrivato a piena convergenza.';
@@ -108,7 +123,7 @@ function stopDrip() { B.drip = false; clearInterval(B.dripTimer); }
 
 function loop() {
   if (!active) return;
-  drawBeaker();
+  if(B.view==='macro')drawBeaker();else drawMicroscope();
   raf = requestAnimationFrame(loop);
 }
 
@@ -333,6 +348,11 @@ function renderControls() {
   const unit = unitOf(r);
   const st = B.beaker.st;
   $('controls').innerHTML = `
+    <label class="lbl" for="bk-view">Scala di osservazione</label>
+    <select id="bk-view"><option value="macro" ${B.view==='macro'?'selected':''}>Becher</option><option value="species" ${B.view==='species'?'selected':''}>Microscopio · specie disciolte</option><option value="crystal" ${B.view==='crystal'?'selected':''}>Reticolo atomico · malachite</option></select>
+    ${B.view==='crystal'?`<label class="lbl" for="bk-cells">Supercella (a × b × c)</label><select id="bk-cells"><option value="1" ${B.repeats===1?'selected':''}>1 × 1 × 1 · 40 atomi</option><option value="2" ${B.repeats===2?'selected':''}>1 × 1 × 2 · 80 atomi</option><option value="4" ${B.repeats===4?'selected':''}>2 × 2 × 2 · 320 atomi</option></select><label class="lbl"><input type="checkbox" id="bk-slice" ${B.slice?'checked':''}> Sezione del reticolo</label>`:''}
+    ${B.view!=='macro'?`<label class="lbl"><input type="checkbox" id="bk-labels" ${B.labels?'checked':''}> Etichette</label><p class="hint" id="bk-pick">Trascina per ruotare; seleziona una particella per ispezionarla.</p>`:''}
+    <div class="btn-row"><button class="btn" id="bk-undo" ${B.beaker.log.length?'':'disabled'}>Annulla aggiunta</button><button class="btn" id="bk-export">Esporta stato JSON</button></div>
     <div class="ctl"><span class="lbl">Da versare: ${esc(r.label)}${r.name ? ` · ${esc(r.name)}` : ''}</span>
       <div class="range-row"><input id="bk-amt" type="number" min="0.01" step="any" value="${B.amount}" style="width:90px"> <span>${unit}</span>
       <button type="button" class="btn" id="bk-add">Versa</button>
@@ -348,6 +368,12 @@ function renderControls() {
       <div class="range-row"><input type="range" id="bk-T" min="0" max="95" step="1" value="${Math.round(st.Tset - 273.15)}" ${st.thermostat ? '' : 'disabled'}><output id="bk-T-out">${Math.round(st.Tset - 273.15)} °C</output></div>
       <p class="hint">Le costanti di equilibrio cambiano con T secondo van 't Hoff, con le entalpie di reazione del database.</p>
     </div>`;
+  $('bk-view').onchange = e => { B.view=e.target.value; renderControls(); renderPanelBody(); };
+  $('bk-cells')?.addEventListener('change',e=>{B.repeats=+e.target.value;crystal=malachiteCrystal(B.repeats===4?[2,2,2]:[1,1,B.repeats]);});
+  $('bk-slice')?.addEventListener('change',e=>B.slice=e.target.checked);
+  $('bk-labels')?.addEventListener('change',e=>B.labels=e.target.checked);
+  $('bk-undo').onclick=()=>{stopDrip();B.beaker.undo();B.particles=[];B.bubbles=[];B.message='';renderAll();};
+  $('bk-export').onclick=()=>{const data={model:'MINTEQ v4; extended Debye-Huckel/Davies; van t Hoff; no kinetics',summary:B.beaker.summary(),totals:B.beaker.st.totals,additions:B.beaker.log.map(e=>({recipe:e.recipe,amount:e.amount,unit:unitOf(e.recipe),changes:e.equation?.changes??[]})),sources:['https://www.phreeplot.org/ppihtml/minteq.v4.dat.html',MALACHITE.source]};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='becher-equilibrio.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
   $('bk-amt').addEventListener('change', (e) => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (v > 0) B.amount = v; });
   $('bk-add').addEventListener('click', () => { const v = parseFloat(String($('bk-amt').value).replace(',', '.')); if (v > 0) { B.amount = v; pour(r, v); } });
   $('bk-water').addEventListener('click', () => pour(WATER, 10));
@@ -362,10 +388,10 @@ function renderControls() {
     renderControls();
   });
   $('bk-thermo').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-    B.beaker.setThermostat(b.dataset.v === '1');
+    try { B.beaker.setThermostat(b.dataset.v === '1'); B.message=''; } catch(e){B.message=e.message;}
     renderAll();
   }));
-  $('bk-T').addEventListener('change', (e) => { B.beaker.setThermostat(true, 273.15 + +e.target.value); renderAll(); });
+  $('bk-T').addEventListener('change', (e) => { try{B.beaker.setThermostat(true,273.15 + +e.target.value);B.message='';}catch(error){B.message=error.message;} renderAll(); });
   $('bk-T').addEventListener('input', (e) => { $('bk-T-out').textContent = `${e.target.value} °C`; });
 }
 
@@ -374,18 +400,23 @@ function renderPanelBody() {
   const top = s.species.filter(x => x.c > 1e-10).slice(0, 16);
   $('viewport-title').innerHTML = `${esc(B.preset.name)}<small>${nf(s.V, 1)} mL · ${nf(s.T - 273.15, 1)} °C</small>`;
   $('viewport-legend').innerHTML = '';
-  $('viewport-note').innerHTML = 'Equilibrio completo con il database termodinamico MINTEQ v4 (EPA/USGS). Il colore è calcolato dallo spettro: luce bianca attraverso 1,5 cm di soluzione, legge di Lambert–Beer, funzioni colorimetriche CIE 1931.';
+  $('viewport-note').innerHTML = 'Equilibrio nelle specie ammesse dal database termodinamico MINTEQ v4 (EPA/USGS). Il colore è calcolato dallo spettro: luce bianca attraverso 1,5 cm di soluzione, legge di Lambert–Beer, funzioni colorimetriche CIE 1931.';
+  if(B.view==='species') $('viewport-note').textContent = 'Campione statistico di 120 specie disciolte, proporzionale alle concentrazioni (acqua esclusa). Un simbolo rappresenta una specie, non un singolo atomo. Posizioni illustrative, nessuna traiettoria o meccanismo di reazione.';
+  if(B.view==='crystal') $('viewport-note').textContent = 'Coordinate sperimentali della malachite, Zigan et al. (1977), AMCSD 0010795. Reticolo statico: non è una simulazione della velocità di nucleazione o crescita. Cu rame · O rosso · C grigio · H bianco.';
   $('panel-body').innerHTML = `
+    ${B.view==='crystal'?`<div><h3>${MALACHITE.name}</h3><p class="hint">${s.solids.some(x=>x.n==='Malachite')?'Fase presente nell’equilibrio: '+nf(s.solids.find(x=>x.n==='Malachite').mass*1000,3)+' mg.':'Struttura di riferimento: questa fase non è presente nella miscela corrente.'}</p><p class="hint">P2₁/a · a = 9,502 Å · b = 11,974 Å · c = 3,240 Å · β = 98,75° · Z = 4</p><a href="${MALACHITE.source}" target="_blank" rel="noopener">Dati sperimentali e struttura</a></div>`:''}
+    ${s.diagnostics?.warnings.length?`<p class="hint warn">${s.diagnostics.warnings.join(' ')}</p>`:''}
+    ${B.preset.id==='cu-carbonate'?'<p class="hint">Bilancio limite: 2 Cu²⁺ + 4 HCO₃⁻ → Cu₂CO₃(OH)₂(s) + 3 CO₂ + H₂O. La ripartizione CO₂ disciolta/gas e le quantità effettive sono calcolate dall’equilibrio.</p>':''}
     <div><h3>Misure</h3>
     <dl class="info-list">
       <dt>pH = −log a(H⁺)</dt><dd>${s.V > 0 ? nf(s.pH, 2) : '—'}</dd>
       ${s.Eh !== null ? `<dt>Potenziale redox Eh</dt><dd>${s.Eh >= 0 ? '+' : '−'}${nf(Math.abs(s.Eh), 3)} V</dd><dt>pe = −log a(e⁻)</dt><dd>${nf(s.pe, 2)}</dd>` : '<dt>Potenziale redox Eh</dt><dd title="Nessuna coppia redox con entrambe le forme presenti (≥ 1 µmol/L): un elettrodo di platino non misurerebbe un potenziale stabile.">non definito</dd>'}
       <dt>Temperatura</dt><dd>${nf(s.T - 273.15, 2)} °C</dd>
       <dt>Volume</dt><dd>${nf(s.V, 2)} mL</dd>
-      <dt>Forza ionica I</dt><dd>${nf(s.I, 4)} mol/kg</dd>
+      <dt>Forza ionica I</dt><dd>${nf(s.I, 4)} mol/L (appross.)</dd>
       <dt>Calore ceduto (totale)</dt><dd>${nf(s.heat, 3)} kJ</dd>
     </dl></div>
-    ${s.solids.length ? `<div><h3>Solidi nel becher</h3><dl class="info-list">${s.solids.map(x => `<dt><i class="swatch" style="background:${x.color}"></i> ${x.label} <span class="desc-muted">${esc(x.name)}${x.metal ? '' : `, log K<sub>sp</sub> = ${nf(x.logKsp, 2)}`}</span></dt><dd>${nf(x.mass * 1000, 2)} mg</dd>`).join('')}</dl></div>` : ''}
+    ${s.solids.length ? `<div><h3>Solidi nel becher</h3><dl class="info-list">${s.solids.map(x => `<dt><i class="swatch" style="background:${x.color}"></i> ${x.label} <span class="desc-muted">${esc(x.name)}${x.metal ? '' : `, log K dissoluzione = ${nf(x.logKsp, 2)}`}</span></dt><dd>${nf(x.mass * 1000, 2)} mg</dd>`).join('')}</dl></div>` : ''}
     <div><h3>Specie in soluzione</h3>
     <table class="data-table"><thead><tr><th>Specie</th><th class="num">c (mol/L)</th><th class="num">γ</th></tr></thead><tbody>
       ${top.map(x => `<tr title="${x.src ? `fonte dei dati: ${esc(x.src)}` : ''}"><td>${x.label}</td><td class="num">${sci(x.c)}</td><td class="num">${nf(x.c > 0 ? x.a / x.c : 1, 3)}</td></tr>`).join('')}
@@ -468,10 +499,10 @@ function renderAnalysis() {
     <h2>Che cosa è successo nel becher</h2>
     <div class="analysis-grid">
       <div class="wide"><h3>Registro delle aggiunte</h3>
-      ${log.length ? `<table class="data-table"><thead><tr><th>Aggiunta</th><th>Equazione netta osservata</th><th class="num">pH</th><th class="num">calore (J)</th></tr></thead><tbody>
-      ${log.map(e => `<tr><td>${nf(e.amount, e.amount < 1 ? 2 : 1)} ${unitOf(e.recipe)} ${esc(e.recipe.label)}</td><td class="eqn">${e.equation?.text ?? '<span class="desc-muted">nessuna trasformazione apprezzabile</span>'}</td><td class="num">${nf(e.pH, 2)}</td><td class="num">${e.q >= 0 ? '+' : '−'}${nf(Math.abs(e.q * 1000), 0)}${e.heatKnown ? '' : '*'}</td></tr>`).join('')}
+      ${log.length ? `<table class="data-table"><thead><tr><th>Aggiunta</th><th>Variazioni di quantità (mmol)</th><th class="num">pH</th><th class="num">calore (J)</th></tr></thead><tbody>
+      ${log.map(e => `<tr><td>${nf(e.amount, e.amount < 1 ? 2 : 1)} ${unitOf(e.recipe)} ${esc(e.recipe.label)}</td><td class="eqn">${e.equation?.text ?? '<span class="desc-muted">nessuna trasformazione apprezzabile</span>'}</td><td class="num">${nf(e.pH, 2)}</td><td class="num">${e.heatKnown ? (e.q >= 0 ? '+' : '−')+nf(Math.abs(e.q * 1000),0) : 'n.d.'}</td></tr>`).join('')}
       </tbody></table>` : '<p class="desc-muted">Il becher è vuoto.</p>'}
-      <p class="desc-muted">L'equazione netta confronta le quantità prima e dopo l'aggiunta (ioni spettatori esclusi): quando avvengono più equilibri insieme compare la loro somma. Calore positivo = reazione esotermica. * = per qualche specie coinvolta il database non riporta ΔrH e il suo contributo è trascurato.</p></div>
+      <p class="desc-muted">Il registro mostra variazioni in mmol, non coefficienti stechiometrici. Le variazioni piccole sono omesse dal riepilogo; quelle disponibili sono esportate nel JSON. Calore positivo = reazione esotermica. n.d. = per qualche specie coinvolta il database non riporta ΔrH e il suo contributo è trascurato.</p></div>
       ${near.length ? `<div><h3>Vicino alla precipitazione</h3><p class="desc">Indice di saturazione SI = log(Q/K<sub>sp</sub>): un solido precipita quando SI > 0.</p>
         <dl class="info-list">${near.map(([n, v]) => `<dt>${phaseLabel(n)} ${phaseName(n) !== n ? `<span class="desc-muted">${esc(phaseName(n))}</span>` : ''}</dt><dd>${nf(v, 2)}</dd>`).join('')}</dl></div>` : ''}
       <article><h3>Come viene calcolato</h3>
@@ -481,8 +512,21 @@ function renderAnalysis() {
         <p class="eq">log K(T) = log K(298) − ΔrH/(R ln10)·(1/T − 1/298,15),&nbsp; q = −Σ Δn ΔrH,&nbsp; ΔT = q/(m c<sub>p</sub>)</p>
       </article>
       <article><h3>Fonti e limiti</h3>
-        <p class="desc-muted">Costanti ed entalpie: MINTEQ v4 (U.S. EPA), distribuito con PHREEQC (USGS); ammino-complessi mancanti dal database LLNL; FeSCN²⁺ da Inorg. Chim. Acta 2018; indicatori da Harris, Quantitative Chemical Analysis. Solidi ammessi: solo quelli che precipitano davvero in laboratorio (idrossidi amorfi, calcite, gesso…), non i minerali che si formano in tempi geologici. L'ossidazione e la riduzione dell'acqua sono escluse (sono lente): solo i metalli sviluppano H₂, con una sovratensione di 0,40 V. Nessuna cinetica: ogni aggiunta arriva subito all'equilibrio. La capacità termica è quella dell'acqua pura.</p>
+        <p class="desc-muted">Costanti ed entalpie: MINTEQ v4 (U.S. EPA), distribuito con PHREEQC (USGS); ammino-complessi mancanti dal database LLNL; FeSCN²⁺ da Inorg. Chim. Acta 2018; indicatori da Harris, Quantitative Chemical Analysis. Solidi ammessi: una selezione di fasi di interesse didattico (idrossidi amorfi, calcite, gesso…), non i minerali che si formano in tempi geologici. L'ossidazione e la riduzione dell'acqua sono escluse (sono lente): solo i metalli sviluppano H₂, all’equilibrio formale con fugacità H₂ unitaria, senza sovratensione empirica. Nessuna cinetica: ogni aggiunta arriva subito all'equilibrio. La capacità termica è quella dell'acqua pura.</p>
       </article>
     </div>`;
 }
 
+
+function drawMicroscope() {
+  const canvas=$('lab-plot');
+  if(B.view==='crystal') {B.projected=drawAtoms(canvas,crystal.atoms,{...B,bonds:crystal.bonds});return;}
+  const rows=sampleSpecies(B.beaker.summary().species);
+  const colors=['#7cc0c5','#a990d9','#e6b476','#e6838c','#a3c483','#8aa9dc'];
+  const atoms=[];let i=0;
+  for(const [j,row] of rows.entries())for(let k=0;k<row.count;k++){
+    const index=i++;
+    atoms.push({element:'ion',label:row.label,c:row.c,zCharge:row.z,color:colors[j%colors.length],radius:.22,position:[(index%6)-2.5,(Math.floor(index/6)%5)-2,Math.floor(index/30)-1.5]});
+  }
+  B.projected=drawAtoms(canvas,atoms,{...B,unit:'unità grafiche'});
+}

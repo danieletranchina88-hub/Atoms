@@ -571,7 +571,7 @@ function renderSide() {
     return `<button type="button" class="mol-chip ${SB.add.kind === 'mol' && SB.add.id === m.id ? 'active' : ''}" data-mol="${m.id}" title="${m.name}">${f}</button>`;
   }).join('');
   const elBtns = SANDBOX_ELEMENTS.map(Z => `<button type="button" class="mol-chip ${SB.add.kind === 'atom' && SB.add.symbol === sym(Z) ? 'active' : ''}" data-el="${sym(Z)}" title="${ELEMENTS[Z - 1].name}">${sym(Z)}</button>`).join('');
-  $('element-card').innerHTML = `
+  $('element-card').innerHTML = `<div class="btn-row"><a class="btn" href="#fasi">Fasi · dinamica MD</a><a class="btn" href="#becher">Soluzioni · cristalli</a></div>
     <h3 class="side-h">Sandbox chimica</h3>
     <label class="lbl" for="sb-preset">Esperimento</label>
     <select id="sb-preset">
