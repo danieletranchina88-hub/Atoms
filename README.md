@@ -4,7 +4,7 @@ Un simulatore didattico di chimica nel browser. Calcola orbitali, molecole e gra
 
 La vista dà priorità a esperimenti, misure e grafici. Le spiegazioni estese sono richiudibili; ogni modalità mostra il modello impiegato. Vedi [SCIENTIFIC_MODEL.md](SCIENTIFIC_MODEL.md) per dominio di validità, fonti e verifiche.
 
-Novità: la sandbox classica parte da sola e mostra reazioni, legami appena nati e una lettura di fase (gas, liquido, condensato, misto) sopra la scatola. Il giro delle fasi raffredda l’argon. I preset quantistici restano in pausa finché non si preme Avvia. Reattore ideale, Nernst, sonda radiale, controllo Δt, deriva energetica e arresto su instabilità restano.
+Novità: fedeltà automatica. I gas nobili usano Lennard–Jones con σ e ε pubblicati e la fase è letta in unità ridotte (triplo e critico LJ). Fino a 36 atomi di H, C, N, O… la sandbox passa a MINDO/3; fino a 6 atomi può usare Hartree–Fock. Si può versare H₂/O₂, acqua, argon o Na/Cl₂ nella stessa scatola senza cancellarla. Il passo Δt si accorcia se le forze renderebbero il moto instabile.
 
 ## Le modalità
 

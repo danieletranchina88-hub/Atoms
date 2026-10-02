@@ -26,7 +26,8 @@ let callback = null;
 let openInMolecule = null;
 
 const SB = {
-  preset: PRESETS.find(p => p.id === 'h2-o2') ?? PRESETS[0],
+  preset: PRESETS.find(p => p.id === 'empty') ?? PRESETS[0],
+  fidelity: 'auto',
   orbital: 'homo',
   cloudNote: '',
   frame: null,
@@ -96,7 +97,9 @@ function startWorker() {
       renderSide();
     } else if (m.type === 'forcefield') {
       SB.forceField = m.kind;
-      if (active) renderControls();
+      SB.fidelity = m.fidelity ?? SB.fidelity;
+      if (m.why) SB.info = m.why;
+      if (active) { renderControls(); renderSide(); }
     } else if (m.type === 'wave') {
       onWave(m);
     } else if (m.type === 'snapshot') {
@@ -284,8 +287,10 @@ function loadPreset(p) {
   if (p.light) SB.lambda = p.light.lambda;
   post({ type: 'preset', preset: p });
   const quantum = p.forceField === 'hf' || p.forceField === 'mindo3' || p.quantum;
-  post({ type: 'set', paused: quantum || !((p.add && p.add.length) || p.atoms), T: p.T });
-  SB.userPaused = quantum || !((p.add && p.add.length) || p.atoms);
+  const empty = !((p.add && p.add.length) || p.atoms);
+  post({ type: 'set', paused: quantum, T: p.T });
+  SB.userPaused = quantum;
+  if (empty) SB.info = 'Scatola libera. Versa molecole o clicca nella scena: il modello si sceglie dalla composizione.';
   SB.pulses = [];
   SB.bondBorn = new Map();
   SB.phase = null;
@@ -733,6 +738,13 @@ function renderSide() {
     <details><summary>Obiettivo e istruzioni</summary><p class="mol-note">${p.text}</p>
     ${p.tips?.length ? `<ul class="sb-tips">${p.tips.map(t => `<li>${t}</li>`).join('')}</ul>` : ''}</details>
     <div class="btn-row"><button type="button" class="btn" id="sb-restart">Ricomincia</button><button type="button" class="btn" id="sb-clear">Svuota la scatola</button></div>
+    <label class="lbl">Versa nella scatola, senza cancellare</label>
+    <div class="btn-row">
+      <button type="button" class="btn" id="sb-pour-fire">H₂ + O₂</button>
+      <button type="button" class="btn" id="sb-pour-water">acqua</button>
+      <button type="button" class="btn" id="sb-pour-ar">argon</button>
+      <button type="button" class="btn" id="sb-pour-salt">Na + Cl₂</button>
+    </div>
     <label class="lbl">Aggiungi molecole</label>
     <div class="mol-list">${molBtns}</div>
     <label class="lbl">Aggiungi atomi (radicali, gas nobili)</label>
@@ -767,7 +779,11 @@ function renderSide() {
   }));
   $('sb-preset').addEventListener('change', (e) => loadPreset(PRESETS.find(x => x.id === e.target.value)));
   $('sb-restart').addEventListener('click', () => loadPreset(SB.preset));
-  $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.userPaused = true; renderAnalysis(); });
+  $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.userPaused = false; post({ type: 'set', paused: false, forceField: 'auto' }); renderAnalysis(); });
+  $('sb-pour-fire').addEventListener('click', () => pour([['[H][H]', 6], ['O=O', 3]]));
+  $('sb-pour-water').addEventListener('click', () => pour([['O', 8]]));
+  $('sb-pour-ar').addEventListener('click', () => pour([['[Ar]', 40]]));
+  $('sb-pour-salt').addEventListener('click', () => pour([['[Na]', 8], ['ClCl', 4]]));
   $('element-card').querySelectorAll('[data-mol]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'mol', id: b.dataset.mol }; renderSide(); }));
   $('element-card').querySelectorAll('[data-el]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'atom', symbol: b.dataset.el }; renderSide(); }));
   $('sb-smiles-ok').addEventListener('click', () => {
@@ -814,6 +830,12 @@ function saveSnapshot(name, data) {
   renderSide();
 }
 
+function pour(items) {
+  SB.userPaused = false;
+  post({ type: 'set', paused: false });
+  for (const [smiles, count] of items) post({ type: 'add', smiles, count });
+}
+
 function addLabel() {
   if (SB.add.kind === 'atom') return SB.add.symbol;
   if (SB.add.kind === 'smiles') return SB.add.smiles;
@@ -858,12 +880,15 @@ function renderControls() {
     <div class="ctl"><label class="lbl" for="sb-dt">Passo Δt (fs)</label>
       <input id="sb-dt" type="number" min="0.001" max="2" step="0.001" value="${st?.dt ?? SB.preset.dt ?? 0.2}"></div>
     <div class="btn-row"><button class="btn" id="sb-zero">Azzera misure</button><button class="btn" id="sb-export">Esporta CSV</button></div>
-    <div class="ctl"><span class="lbl">Forze sugli atomi</span></div>
+    <div class="ctl"><span class="lbl">Modello delle forze</span></div>
     <div class="seg" id="sb-ff">
-      <button type="button" data-v="reactive" aria-pressed="${(st?.forceField ?? SB.forceField ?? 'reactive') === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico qualitativo</button>
-      <button type="button" data-v="mindo3" aria-pressed="${(st?.forceField ?? SB.forceField) === 'mindo3'}" title="MINDO/3 a ogni passo: gli elettroni di valenza sono trattati con la meccanica quantistica (SCF), fino a 90 atomi di H, C, N, O, F, P, S, Cl">quantistico MINDO/3</button>
-      <button type="button" data-v="hf" aria-pressed="${(st?.forceField ?? SB.forceField) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo: forze dalla meccanica quantistica, fino a 8 atomi">Hartree–Fock ab initio</button>
+      <button type="button" data-v="auto" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'auto'}" title="Sceglie il modello più fedele che può ancora girare: LJ pubblicato per i nobili, MINDO/3 fino a 36 atomi, Hartree–Fock fino a 6, altrimenti classico">fedeltà automatica</button>
+      <button type="button" data-v="reactive" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico</button>
+      <button type="button" data-v="lj" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'lj'}" title="Lennard–Jones con σ e ε pubblicati. Solo He, Ne, Ar, Kr, Xe">LJ nobili</button>
+      <button type="button" data-v="mindo3" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'mindo3'}" title="MINDO/3 a ogni passo, fino a 90 atomi di H, B, C, N, O, F, P, S, Cl">MINDO/3</button>
+      <button type="button" data-v="hf" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo, fino a 8 atomi">Hartree–Fock</button>
     </div>
+    <p class="hint">${escapeHtml(st?.modelWhy ?? SB.info ?? '')}</p>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
       <button type="button" data-v="1" aria-pressed="${thermo}" title="Termostato di Bussi: scambia calore con un bagno a temperatura costante (insieme canonico NVT)">Termostato</button>

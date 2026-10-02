@@ -38,6 +38,10 @@ La reazione scritta ossida la semicella sinistra e riduce la destra. Il potenzia
 
 Fino a 8 atomi e 40 funzioni di base, UHF/STO-3G, forze da gradiente analitico. All'inizio vengono confrontate le due molteplicità più basse consentite, poi si mantiene quella selezionata: non è una ricerca completa dello stato fondamentale. SCF non convergente o forze non finite arrestano il moto. Cambi di soluzione UHF possono introdurre discontinuità: la deriva energetica va controllata.
 
+### Scelta automatica del modello
+
+In modalità fedeltà automatica la scatola non usa un solo potenziale. He, Ne, Ar, Kr e Xe usano Lennard–Jones con σ e ε pubblicati, mixing di Lorentz–Berthelot e taglio a 2,5σ con correzione lineare della forza. La fase è confrontata con T* = kT/ε e ρ* = Nσ³/V, usando come riferimento il punto triplo LJ ≈ 0,68 e il critico ≈ 1,31: non sono le temperature sperimentali del gas reale, perché il taglio e le pareti morbide spostano la transizione. Fino a 36 atomi coperti da MINDO/3 le forze vengono dalla SCF semiempirica. Fino a 6 atomi trattabili, Hartree–Fock/STO-3G. Oltre, resta il campo classico qualitativo. L’utente può bloccare un modello.
+
 ### Potenziale classico qualitativo
 
 Il vecchio potenziale è mantenuto per esplorazione, con etichetta esplicita. È un assemblaggio specifico del progetto ispirato a forme Abell–Tersoff–Brenner, UFF, QEq e DREIDING, **non** un'implementazione parametrizzata e validata di REBO/ReaxFF. Include costanti empiriche, medie di legame e stime di Pauling. Non predice quantitativamente meccanismi, barriere, fasi o costanti cinetiche. Le cariche parziali e i frammenti neutri non simulano la redox in soluzione. La formula di un frammento non distingue isomeri; gli ordini frazionari non assegnano numeri di ossidazione o ibridazione.
