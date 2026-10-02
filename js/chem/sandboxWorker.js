@@ -238,6 +238,37 @@ function speedHistogram() {
   return { species, M, vmax, bins: Array.from(mbHist.bins), samples: mbHist.samples, count: frags.length, T: referenceT };
 }
 
+
+/** Indicazione strutturale, non un diagramma di fase sperimentale: vicini entro 4,2 Å. */
+function classifyPhase() {
+  const N = sim.N;
+  if (!N) return { label: 'vuota', title: 'Scatola vuota', frac: 0, clusters: 0, T: 0, note: 'Aggiungi atomi o molecole.' };
+  const pos = sim.pos;
+  const heavy = [];
+  for (let i = 0; i < N; i++) if (sim.Z[i] !== 1) heavy.push(i);
+  const use = heavy.length ? heavy : Array.from({ length: N }, (_, i) => i);
+  const c2 = 4.2 * 4.2;
+  const neigh = new Int16Array(N);
+  for (let a = 0; a < use.length; a++) {
+    const i = use[a];
+    for (let b = a + 1; b < use.length; b++) {
+      const j = use[b];
+      const dx = pos[3 * i] - pos[3 * j], dy = pos[3 * i + 1] - pos[3 * j + 1], dz = pos[3 * i + 2] - pos[3 * j + 2];
+      if (dx * dx + dy * dy + dz * dz < c2) { neigh[i]++; neigh[j]++; }
+    }
+  }
+  let coordinated = 0;
+  for (const i of use) if (neigh[i] >= 4) coordinated++;
+  const frac = coordinated / use.length;
+  const big = (sim.frags ?? []).filter(f => f.atoms.some(i => sim.Z[i] !== 1) && f.atoms.length >= 4).length;
+  const T = sim.temperature();
+  let label = 'gas', title = 'Gas';
+  if (frac >= 0.55 && T < 180) { label = 'solido'; title = 'Condensato freddo'; }
+  else if (frac >= 0.38) { label = 'liquido'; title = 'Liquido o aggregato'; }
+  else if (frac >= 0.12 || big >= 2) { label = 'misto'; title = 'Fase mista'; }
+  return { label, title, frac, clusters: big, T, note: 'Vicini entro 4,2 Å nel modello. Non è la fase sperimentale.' };
+}
+
 function frame() {
   if (!sim.res) sim.forces();
   const N = sim.N;
@@ -260,7 +291,7 @@ function frame() {
       Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Egrab: sim.Egrab, Etot: sim.totalEnergy(),
       heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
-      forceField, hf: sim.provider?.info ?? null,
+      forceField, hf: sim.provider?.info ?? null, phase: classifyPhase(),
     },
     mb: speedHistogram(),
   };

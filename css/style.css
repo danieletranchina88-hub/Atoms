@@ -786,3 +786,42 @@ body[data-mode="beaker"] #analysis .data-table th:nth-child(4) { width: 15%; }
   body[data-mode="beaker"] .info-list { grid-template-columns: minmax(0, 1fr) auto; }
   body[data-mode="beaker"] .info-list dt { overflow-wrap:anywhere; }
 }
+
+
+/* sandbox: reazioni e fasi in vista */
+.sb-hud {
+  position: absolute; left: 14px; right: 14px; top: 58px;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none; z-index: 3; max-width: 420px;
+}
+.sb-phase {
+  display: flex; flex-direction: column; gap: 2px;
+  width: fit-content; max-width: 100%;
+  padding: 8px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+}
+.sb-phase b { font: 650 15px/1.2 var(--font-display); }
+.sb-phase span { font-size: 11px; color: var(--muted); }
+.sb-phase[data-phase="gas"] b { color: #7ec8ff; }
+.sb-phase[data-phase="liquido"] b { color: #f0b429; }
+.sb-phase[data-phase="solido"] b { color: #8b93ff; }
+.sb-phase[data-phase="misto"] b { color: #e07a9a; }
+.sb-species { display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-species span {
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 8px; font: 12px var(--font-mono);
+}
+.sb-reactions { display: flex; flex-direction: column; gap: 4px; }
+.sb-rx {
+  display: flex; justify-content: space-between; gap: 10px;
+  background: color-mix(in srgb, #122033 78%, transparent);
+  border-left: 3px solid #3dde7a;
+  border-radius: 8px; padding: 5px 8px;
+  font-size: 12px; color: #eef3f8;
+}
+.sb-rx.dim { border-left-color: var(--line); color: var(--muted); }
+.sb-rx span { color: #9ab; font-variant-numeric: tabular-nums; }
+body[data-mode="sandbox"] .viewport-title { z-index: 4; }
