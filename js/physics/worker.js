@@ -2,9 +2,9 @@
 import { computeAtom } from './atom.js';
 
 self.onmessage = (ev) => {
-  const { id, Z } = ev.data;
+  const { id, Z, relativistic } = ev.data;
   try {
-    const atom = computeAtom(Z);
+    const atom = computeAtom(Z, { relativistic });
     self.postMessage({ id, atom });
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err) });

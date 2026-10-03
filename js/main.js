@@ -38,6 +38,7 @@ const state = {
   Z: 6,
   atom: null,
   mode: 'atom',
+  relativistic: true,       // equazione di Koelling–Harmon (ScRLDA del NIST); false: Schrödinger (LDA)
   atomView: 'density',      // 'density' | 'orbitals' — la densità totale è |ψ|², non un colore di sottolivello
   render: 'both',            // 'cloud' | 'surface' | 'both'
   enclosed: 0.9,
@@ -141,7 +142,7 @@ $('pt-color').addEventListener('change', (e) => {
   const range = table.heatmap(values);
   const stops = [0, 0.25, 0.5, 0.75, 1].map(t => `rgb(${ramp(t).join(',')}) ${t * 100}%`).join(', ');
   const fmtv = (v) => v.toLocaleString('it-IT', { maximumFractionDigits: 2 });
-  box.innerHTML = `<span>${fmtv(range.min)} ${prop.unit}</span><i class="heat-bar" style="background: linear-gradient(90deg, ${stops})"></i><span>${fmtv(range.max)} ${prop.unit}</span><span class="pt-color-label">${key === 'radius' ? 'raggio di massima probabilità, calcolato' : ''}${key === 'iecalc' ? 'calcolo DFT-LDA non relativistico' : ''} · caselle grigie: dato non disponibile</span>`;
+  box.innerHTML = `<span>${fmtv(range.min)} ${prop.unit}</span><i class="heat-bar" style="background: linear-gradient(90deg, ${stops})"></i><span>${fmtv(range.max)} ${prop.unit}</span><span class="pt-color-label">${key === 'radius' ? 'raggio di massima probabilità, calcolato' : ''}${key === 'iecalc' ? 'calcolo DFT-LDA relativistico scalare' : ''} · caselle grigie: dato non disponibile</span>`;
 });
 
 $('radial-log').addEventListener('change', (e) => { state.radialLog = e.target.checked; drawCharts(); });
@@ -221,9 +222,9 @@ async function selectElement(Z) {
   const el = element(Z);
   if (!isChemMode() && location.hash.slice(1) !== el.symbol) history.replaceState(null, '', `#${el.symbol}`);
   $('busy').hidden = false;
-  $('busy-text').textContent = `Calcolo autoconsistente di ${el.name} (${Z} elettroni)…`;
+  $('busy-text').textContent = `Calcolo autoconsistente ${state.relativistic ? 'relativistico ' : ''}di ${el.name} (${Z} elettroni)…`;
   try {
-    const atom = await loadAtom(Z);
+    const atom = await loadAtom(Z, state.relativistic);
     if (token !== state.token) return;
     state.atom = atom;
     state.hidden.clear();
@@ -246,7 +247,7 @@ function setMode(mode) {
   const prev = state.mode;
   state.mode = mode;
   const models = {
-    atom: 'Densità elettronica |ψ|² dal DFT-LDA · regola di Born · nucleo non in scala',
+    atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
     bond: 'LCAO: σ e π come combinazione degli orbitali calcolati · il bastoncino non è il legame',
     molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
@@ -351,9 +352,41 @@ function renderElementCard() {
       <dt>Orbitale esterno</dt><dd>${valence.label}, ${eV(valence.e)}</dd>
       <dt>Raggio (90% e⁻)</dt><dd>${pm(atom.r90)}</dd>
       <dt>Energia totale</dt><dd>${nfp(atom.energy.total, 7)} Ha</dd>
+      <dt>Teoria</dt><dd>${atom.relativistic ? 'DFT-LDA relativistica scalare' : 'DFT-LDA non relativistica'}</dd>
       <dt>Convergenza SCF</dt><dd>${atom.converged ? 'raggiunta' : 'NON raggiunta: risultato non validato'}</dd>
       <dt>Iterazioni SCF</dt><dd>${atom.iterations} · ${atom.elapsed} ms</dd>
-    </dl>`;
+    </dl>
+    <div id="rel-effect" class="rel-effect"></div>`;
+  relativisticEffect(atom);
+}
+
+/**
+ * Effetto relativistico: confronto con il calcolo dell'altra teoria (calcolato in secondo piano e in cache).
+ * Negli atomi pesanti gli elettroni s vicini al nucleo hanno velocità ≈ Zα·c: la massa relativistica li contrae
+ * e abbassa di energia gli orbitali s e p₁/₂ esterni, mentre d e f, più schermati, si espandono.
+ */
+async function relativisticEffect(atom) {
+  const box = $('rel-effect');
+  if (!box) return;
+  const token = state.token;
+  box.innerHTML = '<p class="desc-muted">Calcolo il confronto relativistico…</p>';
+  const other = await loadAtom(atom.Z, !atom.relativistic).catch(() => null);
+  if (token !== state.token || !other || !$('rel-effect')) return;
+  const [sr, nr] = atom.relativistic ? [atom, other] : [other, atom];
+  const pick = (a, n, l) => a.orbitals.find(o => o.n === n && o.l === l);
+  const outer = sr.orbitals.filter(o => o.l <= 2).sort((a, b) => b.e - a.e).slice(0, 2);
+  const rows = outer.map(o => {
+    const q = pick(nr, o.n, o.l);
+    if (!q) return '';
+    const dr = (o.rAvg / q.rAvg - 1) * 100;
+    return `<tr><td>${o.label}</td><td class="num">${nfp(q.e * HARTREE_EV, 4)} → ${nfp(o.e * HARTREE_EV, 4)}</td><td class="num">${dr >= 0 ? '+' : '−'}${nf(Math.abs(dr), 1)}%</td></tr>`;
+  }).join('');
+  const dIE = sr.ionization.eV - nr.ionization.eV;
+  $('rel-effect').innerHTML = `
+    <h3 class="side-h">Effetto relativistico</h3>
+    <table class="orb-table"><thead><tr><th>Orbitale</th><th class="num">ε senza → con (eV)</th><th class="num">⟨r⟩</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="desc-muted">Ionizzazione: ${nf(nr.ionization.eV)} eV senza relatività, ${nf(sr.ionization.eV)} eV con (${dIE >= 0 ? '+' : '−'}${nf(Math.abs(dIE))} eV). Energia totale: ${nfp((sr.energy.total - nr.energy.total) * HARTREE_EV, 4)} eV.
+    ${atom.Z >= 55 ? 'Negli atomi pesanti gli s interni si muovono a una frazione importante della velocità della luce: la contrazione degli s esterni spiega il colore dell\'oro e il mercurio liquido.' : 'Per gli atomi leggeri l\'effetto è piccolo.'} Senza spin–orbita (p₁/₂ e p₃/₂ mediati).</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,8 +424,11 @@ function renderControls() {
       ${segHTML('quality', [{ v: 48, label: 'Bassa' }, { v: 72, label: 'Media' }, { v: 100, label: 'Alta' }], state.quality)}
     </div>`;
 
+  const theoryCtl = `<div class="ctl"><span class="lbl">Teoria</span>
+      ${segHTML('theory', [{ v: 'sr', label: 'Relativistica', title: 'Equazione di Koelling–Harmon + scambio di MacDonald–Vosko (NIST ScRLDA)' }, { v: 'nr', label: 'Non relativistica', title: 'Equazione di Schrödinger, LDA (NIST LDA)' }], state.relativistic ? 'sr' : 'nr')}</div>`;
   if (mode === 'atom') {
     c.innerHTML = `
+      ${theoryCtl}
       <div class="ctl"><span class="lbl">Rappresentazione dell'atomo</span>
         ${segHTML('atom-view', [{ v: 'orbitals', label: 'Orbitali occupati' }, { v: 'density', label: 'Densità totale' }], state.atomView)}
       </div>
@@ -407,6 +443,7 @@ function renderControls() {
     const lOpts = [0, 1, 2, 3, 4, 5, 6].map(v => ({ v, label: L_LETTERS[v], disabled: v >= n }));
     const mOpts = mOrder(l).map(v => ({ v, label: orbitalHTML('', l, v) }));
     c.innerHTML = `
+      ${theoryCtl}
       <div class="ctl"><span class="lbl">Numero quantico principale n</span>${segHTML('q-n', nOpts, n, 'qn')}</div>
       <div class="ctl"><span class="lbl">Numero quantico secondario l</span>${segHTML('q-l', lOpts, l, 'qn')}</div>
       <div class="ctl"><span class="lbl">Orbitale reale (m<sub>l</sub>)</span>${segHTML('q-m', mOpts, m)}</div>
@@ -467,6 +504,11 @@ function renderControls() {
     }
   }
 
+  bindSeg('theory', v => {
+    state.relativistic = v === 'sr';
+    const keep = { ...state.orbital };
+    selectElement(state.Z).then(() => { if (state.atom?.orbitals.some(o => o.n === keep.n && o.l === keep.l) || state.mode === 'orbital') { state.orbital = keep; if (!isChemMode()) renderAll(); } });
+  });
   const pts = $('points');
   if (pts) {
     pts.addEventListener('input', () => { $('points-out').textContent = (+pts.value).toLocaleString('it-IT'); });
@@ -524,7 +566,7 @@ function renderPanelBody() {
           <tbody>${rows}</tbody>
         </table>
         </div>
-        <p class="desc-muted" style="margin-top:8px">ε: energia dell'orbitale calcolata. Z<sub>eff</sub>: regole di Slater. Clicca una riga per vedere l'orbitale.</p>
+        <p class="desc-muted" style="margin-top:8px">ε: energia dell'orbitale calcolata${atom.relativistic ? ' con l\'equazione relativistica scalare (p e d: media sullo spin–orbita)' : ''}. Z<sub>eff</sub>: regole di Slater. Clicca una riga per vedere l'orbitale.</p>
       </div>`;
     body.querySelectorAll('tr.clickable').forEach(tr => tr.addEventListener('click', (ev) => {
       if (ev.target.classList.contains('vis-toggle')) return;

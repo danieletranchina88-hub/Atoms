@@ -1,6 +1,6 @@
 // Gestione dei calcoli: esecuzione nel Web Worker (con ripiego sul thread principale) e cache per Z.
 
-import { makeGrid, solveRadial, radialStats, enclosingRadius } from './scf.js';
+import { makeGrid, solveRadial, radialStats, enclosingRadius, potentialDerivatives, C_AU } from './scf.js';
 import { RadialFunction } from './wavefunction.js';
 
 const cache = new Map();
@@ -31,15 +31,15 @@ function getWorker() {
   return worker;
 }
 
-async function computeInMainThread(Z) {
+async function computeInMainThread(Z, relativistic) {
   const { computeAtom } = await import('./atom.js');
   // lascia il tempo al browser di mostrare l'indicatore di calcolo
   await new Promise(r => setTimeout(r, 30));
-  return computeAtom(Z);
+  return computeAtom(Z, { relativistic });
 }
 
 function decorate(raw) {
-  const grid = makeGrid(raw.Z);
+  const grid = makeGrid(raw.Z, { xmin: raw.grid.xmin, h: raw.grid.h });
   const atom = { ...raw, fullGrid: grid, virtual: new Map() };
   for (const o of atom.orbitals) {
     o.radial = new RadialFunction(grid, o.u, o.l);
@@ -53,19 +53,20 @@ function decorate(raw) {
   return atom;
 }
 
-/** Restituisce (con cache) l'atomo calcolato per Z. */
-export function loadAtom(Z) {
-  if (cache.has(Z)) return cache.get(Z);
+/** Restituisce (con cache) l'atomo calcolato per Z, relativistico (predefinito) o no. */
+export function loadAtom(Z, relativistic = true) {
+  const key = `${Z}|${relativistic ? 'sr' : 'nr'}`;
+  if (cache.has(key)) return cache.get(key);
   const promise = new Promise((resolve, reject) => {
     const w = getWorker();
-    const fallback = () => computeInMainThread(Z).then(resolve, reject);
+    const fallback = () => computeInMainThread(Z, relativistic).then(resolve, reject);
     if (!w) { fallback(); return; }
     const id = nextId++;
     pending.set(id, { resolve, reject, fallback });
-    w.postMessage({ id, Z });
+    w.postMessage({ id, Z, relativistic });
   }).then(decorate);
-  cache.set(Z, promise);
-  promise.catch(() => cache.delete(Z));
+  cache.set(key, promise);
+  promise.catch(() => cache.delete(key));
   return promise;
 }
 
@@ -79,7 +80,8 @@ export function getOrbital(atom, n, l) {
   const key = `${n},${l}`;
   if (atom.virtual.has(key)) return atom.virtual.get(key);
   const grid = atom.fullGrid;
-  const res = solveRadial(grid, atom.latter, n, l, undefined, atom.Z);
+  const rel = atom.relativistic ? { c: C_AU, ...potentialDerivatives(grid, atom.latter) } : null;
+  const res = solveRadial(grid, atom.latter, n, l, undefined, atom.Z, rel);
   const stats = radialStats(grid, res.u);
   const orb = {
     n, l, occ: 0, e: res.e, u: res.u,

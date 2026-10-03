@@ -13,5 +13,5 @@ for (let Z = 1; Z <= 118; Z++) {
   if (Z % 20 === 0) console.log(Z);
 }
 fs.writeFileSync(new URL('../js/physics/atomSummary.js', import.meta.url),
-  `// Generato da tools/atomSummary.mjs: grandezze calcolate (DFT-LDA) per i 118 elementi.\n// ie: energia di ionizzazione ΔSCF (eV); r90: raggio che contiene il 90% degli elettroni (pm);\n// homo: energia dell'orbitale occupato più alto (eV); rmax: suo raggio di massima probabilità (pm).\nexport const ATOM_SUMMARY = ${JSON.stringify(out)};\n`);
+  `// Generato da tools/atomSummary.mjs: grandezze calcolate (DFT-LDA relativistica scalare, Koelling–Harmon) per i 118 elementi.\n// ie: energia di ionizzazione ΔSCF (eV); r90: raggio che contiene il 90% degli elettroni (pm);\n// homo: energia dell'orbitale occupato più alto (eV); rmax: suo raggio di massima probabilità (pm).\nexport const ATOM_SUMMARY = ${JSON.stringify(out)};\n`);
 console.log('fatto');
