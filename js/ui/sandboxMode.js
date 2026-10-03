@@ -75,6 +75,7 @@ function startWorker() {
       SB.userPaused = m.stats.paused;
       if (active && (oldMode !== m.stats.forceField || oldPaused !== SB.userPaused)) renderControls();
       SB.fresh = true;
+      if (SB.tour) advanceTour(m.stats);
       if (m.stats?.phase) notePhase(m.stats.phase);
       if (m.phys) {
         const key = (p) => `${p?.elements?.join(',')}|${p?.rdf?.pair?.join('-')}|${p?.barostat?.on}|${p?.barostat?.P0}`;
@@ -215,17 +216,32 @@ function renderHud() {
   rxEl.innerHTML = recent.map(e => `<div class="sb-rx"><b>${formulaText(e.reactants)} → ${formulaText(e.products)}</b><span>${nf(e.t / 1000, 2)} ps</span></div>`).join('') || '<div class="sb-rx dim">In attesa di una trasformazione…</div>';
 }
 
+// Giro delle fasi dell'argon (Lennard–Jones, ε/k = 119,8 K): le soglie sono in tempo simulato, non in secondi
+// dell'orologio, così il sistema ha lo stesso tempo per equilibrarsi su qualunque computer.
+// 300 K è sopra il punto critico dell'argon (150,7 K): fluido; 90 K: goccia di liquido col suo vapore; 40 K: solido.
+const TOUR = [[300, 0], [90, 15], [40, 45]];   // [T in K, da t in ps]
+
 function startPhaseTour() {
   const p = PRESETS.find(x => x.id === 'argon-liquid');
   if (!p) return;
   loadPreset(p);
   SB.userPaused = false;
-  post({ type: 'set', paused: false, thermostat: true, T: 700 });
-  const steps = [[700, 0], [280, 3500], [55, 8000]];
-  for (const [T, wait] of steps) setTimeout(() => { if (SB.preset.id === 'argon-liquid') post({ type: 'set', T, thermostat: true, paused: false }); }, wait);
-  SB.info = 'Giro delle fasi: argon caldo (gas), poi 280 K (aggregazione), poi 55 K (condensato). Indicazione del modello, non la curva di argon reale.';
+  SB.tour = { step: 0 };
+  post({ type: 'set', paused: false, thermostat: true, T: TOUR[0][0] });
+  SB.info = 'Giro delle fasi: argon a 300 K (fluido sopra il punto critico di 151 K), da 15 ps a 90 K (goccia di liquido e vapore), da 45 ps a 40 K (solido). La fase è letta dalla struttura (q₆), le temperature del modello LJ non coincidono esattamente con quelle dell\'argon reale.';
   renderSide();
   renderControls();
+}
+
+function advanceTour(stats) {
+  const tour = SB.tour;
+  if (!tour || SB.preset.id !== 'argon-liquid') { SB.tour = null; return; }
+  const next = TOUR[tour.step + 1];
+  if (next && stats.t / 1000 >= next[1]) {
+    tour.step++;
+    post({ type: 'set', T: next[0], thermostat: true });
+    if (tour.step === TOUR.length - 1) SB.tour = null;
+  }
 }
 
 function phaseColor(i, pos, Z, N, out) {
@@ -275,6 +291,7 @@ function pulseUpdate() {
 
 function loadPreset(p) {
   SB.preset = p;
+  SB.tour = null;
   SB.frame = null;
   SB.events = [];
   SB.history = [];
@@ -1017,8 +1034,10 @@ function renderPanelBody() {
   const kj = (e) => nf(e * KJ_PER_EV, 1);
   const ph = s.phase;
   $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole${ph ? ` · ${ph.title}` : ''}</small>`;
-  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
-  $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : 'classico qualitativo'}</b></span>`;
+  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : s.forceField === 'lj' ? 'Lennard–Jones dei gas nobili' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
+  $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : s.forceField === 'lj' ? 'Lennard–Jones' : 'classico qualitativo'}</b></span>`;
+  const dtIn = $('sb-dt');
+  if (dtIn && document.activeElement !== dtIn && Math.abs(+dtIn.value - s.dt) > 1e-9) dtIn.value = +s.dt.toPrecision(4);
   $('panel-body').innerHTML = `
     <div><h3>Stato termodinamico</h3>
     <dl class="info-list">

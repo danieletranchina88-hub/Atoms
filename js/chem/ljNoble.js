@@ -29,10 +29,6 @@ export function pairLJ(za, zb) {
   return { sigma, epsilon };
 }
 
-/** Punto triplo e critico del LJ troncato sono vicini a questi valori ridotti (NIST, non questo taglio esatto). */
-export const LJ_TRIPLE_T = 0.68;
-export const LJ_CRITICAL_T = 1.31;
-
 function shifted(r, sigma, epsilon) {
   const rc = RC_OVER_SIGMA * sigma;
   if (!(r > 0) || r >= rc) return { u: 0, f: 0 };

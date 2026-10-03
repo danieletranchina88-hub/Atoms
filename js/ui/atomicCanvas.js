@@ -26,7 +26,8 @@ export function drawAtoms(canvas, atoms, {bonds=[],yaw=.5,pitch=.35,labels=false
     if(labels){g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--text');g.font='11px sans-serif';g.textAlign='center';g.fillText(p.label??p.element,p.x,p.y-r-3);}
   }
   const bar=extent>15?5:1;g.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--text');g.fillStyle=g.strokeStyle;g.lineWidth=2;
-  g.beginPath();g.moveTo(20,h-24);g.lineTo(20+bar*scale,h-24);g.stroke();g.font='12px monospace';g.textAlign='left';g.fillText(`${bar} ${unit}`,20,h-32);
+  // barra di scala in alto a destra: in basso la copre la legenda della vista
+  const x1=w-20,x0=x1-bar*scale;g.beginPath();g.moveTo(x0,40);g.lineTo(x1,40);g.stroke();g.font='12px monospace';g.textAlign='right';g.fillText(`${bar} ${unit}`,x1,32);
   return pts.filter(p=>!p.hidden);
 }
 export function bindRotation(canvas,state,redraw,onPick=()=>{}) {

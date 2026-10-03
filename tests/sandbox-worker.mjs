@@ -17,5 +17,9 @@ try {
   assert.equal(frame.stats.Etot,0);assert.equal(frame.stats.nMol,0);assert.equal(frame.stats.P,0);assert.equal(frame.stats.forceField,'reactive');
   next=wait(m=>m.type==='frame'&&m.N===2);worker.postMessage({type:'add',smiles:'[H][H]',count:1});frame=await next;
   assert.ok(frame.bonds.length>0);assert.equal(frame.stats.nMol,1);
-  console.log('Sandbox worker: UHF step, clear and immediate molecular census passed.');
+  // il passo scelto non viene aumentato da solo: con idrogeno e Δt ≥ 0,5 fs l'energia non si conserva
+  next=wait(m=>m.type==='frame'&&m.N===120&&m.stats.t>300);
+  worker.postMessage({type:'preset',preset:PRESETS.find(p=>p.id==='water')});worker.postMessage({type:'set',paused:false,thermostat:false});
+  frame=await next;assert.ok(frame.stats.dt<=0.2+1e-12,`dt ${frame.stats.dt}`);assert.ok(Math.abs(frame.stats.diagnostics.drift)<0.1,`drift ${frame.stats.diagnostics.drift}`);
+  console.log('Sandbox worker: UHF step, clear, immediate molecular census and fixed time step passed.');
 } finally {await worker.terminate();}
