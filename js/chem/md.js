@@ -481,12 +481,16 @@ export class Simulation {
           }
         }
         const ev = new Map();
-        for (const f of gone) { const r = fnd('o' + f.id); if (!ev.has(r)) ev.set(r, { reactants: [], products: [] }); ev.get(r).reactants.push(f.formula); }
-        for (const f of born) { const r = fnd('n' + f.id); if (!ev.has(r)) ev.set(r, { reactants: [], products: [] }); ev.get(r).products.push(f.formula); }
+        const slot = (r) => { if (!ev.has(r)) ev.set(r, { reactants: [], products: [], atoms: [] }); return ev.get(r); };
+        for (const f of gone) { const s = slot(fnd('o' + f.id)); s.reactants.push(f.formula); for (const i of f.atoms) if (!s.atoms.includes(i)) s.atoms.push(i); }
+        for (const f of born) { const s = slot(fnd('n' + f.id)); s.products.push(f.formula); for (const i of f.atoms) if (!s.atoms.includes(i)) s.atoms.push(i); }
         for (const e of ev.values()) {
           e.reactants.sort(); e.products.sort();
           const same = e.reactants.join('+') === e.products.join('+');
-          this.events.push({ serial: ++this.eventSerial, t: this.time, reactants: e.reactants, products: e.products, exchange: same });
+          let x = 0, y = 0, z = 0;
+          for (const i of e.atoms) { x += this.pos[3 * i]; y += this.pos[3 * i + 1]; z += this.pos[3 * i + 2]; }
+          const n = e.atoms.length || 1;
+          this.events.push({ serial: ++this.eventSerial, t: this.time, reactants: e.reactants, products: e.products, exchange: same, at: [x / n, y / n, z / n], atoms: e.atoms.slice() });
         }
         if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
       }

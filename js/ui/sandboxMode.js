@@ -26,7 +26,8 @@ let callback = null;
 let openInMolecule = null;
 
 const SB = {
-  preset: PRESETS.find(p => p.id === 'q-h2-o2') ?? PRESETS[0],
+  preset: PRESETS.find(p => p.id === 'empty') ?? PRESETS[0],
+  fidelity: 'auto',
   orbital: 'homo',
   cloudNote: '',
   frame: null,
@@ -34,6 +35,10 @@ const SB = {
   census: null,
   history: [],
   events: [],
+  pulses: [],
+  phase: null,
+  phaseSince: 0,
+  bondBorn: new Map(),
   selected: -1,
   tool: 'select',
   add: { kind: 'mol', id: 'H2O', symbol: 'C' },
@@ -70,6 +75,7 @@ function startWorker() {
       SB.userPaused = m.stats.paused;
       if (active && (oldMode !== m.stats.forceField || oldPaused !== SB.userPaused)) renderControls();
       SB.fresh = true;
+      if (m.stats?.phase) notePhase(m.stats.phase);
       if (m.phys) {
         const key = (p) => `${p?.elements?.join(',')}|${p?.rdf?.pair?.join('-')}|${p?.barostat?.on}|${p?.barostat?.P0}`;
         const changed = key(m.phys) !== key(SB.phys);
@@ -79,9 +85,11 @@ function startWorker() {
       if (m.census) {
         SB.census = m.census;
         SB.history = m.census.history;
+        renderHud();
         if (m.census.events.length) {
           SB.events.push(...m.census.events);
           if (SB.events.length > 500) SB.events.splice(0, SB.events.length - 500);
+          spawnReactions(m.census.events);
         }
       }
     } else if (m.type === 'info') {
@@ -89,7 +97,9 @@ function startWorker() {
       renderSide();
     } else if (m.type === 'forcefield') {
       SB.forceField = m.kind;
-      if (active) renderControls();
+      SB.fidelity = m.fidelity ?? SB.fidelity;
+      if (m.why) SB.info = m.why;
+      if (active) { renderControls(); renderSide(); }
     } else if (m.type === 'wave') {
       onWave(m);
     } else if (m.type === 'snapshot') {
@@ -147,6 +157,122 @@ export function sandboxRedraw() {
   drawCharts();
 }
 
+
+const PHASE_HEX = { gas: '#7ec8ff', liquido: '#f0b429', solido: '#8b93ff', misto: '#e07a9a', vuota: '#9aa3b2' };
+
+function ensureHud() {
+  const vp = $('viewport');
+  if (!vp || $('sb-hud')) return;
+  const hud = document.createElement('div');
+  hud.id = 'sb-hud';
+  hud.className = 'sb-hud';
+  hud.innerHTML = '<div id="sb-phase" class="sb-phase"></div><div id="sb-species" class="sb-species"></div><div id="sb-reactions" class="sb-reactions"></div>';
+  vp.appendChild(hud);
+}
+
+function notePhase(phase) {
+  if (!phase) return;
+  if (!SB.phase || SB.phase.label !== phase.label) SB.phaseSince = performance.now();
+  SB.phase = phase;
+  renderHud();
+}
+
+function formulaText(list) {
+  return (list && list.length ? list.join(' + ') : '—').replace(/(\d+)/g, '<sub>$1</sub>');
+}
+
+function spawnReactions(events) {
+  const now = performance.now();
+  for (const e of events) {
+    if (e.exchange) continue;
+    const born = (e.products?.length ?? 0) > (e.reactants?.length ?? 0);
+    SB.pulses.push({
+      at: e.at ?? [0, 0, 0],
+      t0: now,
+      color: born ? '#3dde7a' : '#ff6b57',
+      text: `${(e.reactants ?? []).join(' + ') || '·'} → ${(e.products ?? []).join(' + ') || '·'}`,
+    });
+  }
+  if (SB.pulses.length > 24) SB.pulses.splice(0, SB.pulses.length - 24);
+  renderHud();
+}
+
+function renderHud() {
+  ensureHud();
+  const phaseEl = $('sb-phase');
+  const specEl = $('sb-species');
+  const rxEl = $('sb-reactions');
+  if (!phaseEl) return;
+  const ph = SB.frame?.stats?.phase ?? SB.phase;
+  if (ph) {
+    phaseEl.hidden = false;
+    phaseEl.dataset.phase = ph.label;
+    phaseEl.innerHTML = `<b>${ph.title}</b><span>${Math.round((ph.frac ?? 0) * 100)}% coordinati · ${ph.note ?? ''}</span>`;
+  } else phaseEl.hidden = true;
+  const species = SB.census?.species ?? [];
+  specEl.innerHTML = species.slice(0, 6).map(([f, n]) => `<span>${f} <b>${n}</b></span>`).join('') || '<span>nessuna specie</span>';
+  const recent = SB.events.filter(e => !e.exchange).slice(-4).reverse();
+  rxEl.innerHTML = recent.map(e => `<div class="sb-rx"><b>${formulaText(e.reactants)} → ${formulaText(e.products)}</b><span>${nf(e.t / 1000, 2)} ps</span></div>`).join('') || '<div class="sb-rx dim">In attesa di una trasformazione…</div>';
+}
+
+function startPhaseTour() {
+  const p = PRESETS.find(x => x.id === 'argon-liquid');
+  if (!p) return;
+  loadPreset(p);
+  SB.userPaused = false;
+  post({ type: 'set', paused: false, thermostat: true, T: 700 });
+  const steps = [[700, 0], [280, 3500], [55, 8000]];
+  for (const [T, wait] of steps) setTimeout(() => { if (SB.preset.id === 'argon-liquid') post({ type: 'set', T, thermostat: true, paused: false }); }, wait);
+  SB.info = 'Giro delle fasi: argon caldo (gas), poi 280 K (aggregazione), poi 55 K (condensato). Indicazione del modello, non la curva di argon reale.';
+  renderSide();
+  renderControls();
+}
+
+function phaseColor(i, pos, Z, N, out) {
+  const cutoff = Z[i] === 1 ? 1.7 : 4.0;
+  const c2 = cutoff * cutoff;
+  let n = 0;
+  const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2];
+  const step = N > 180 ? 2 : 1;
+  for (let j = 0; j < N; j += step) {
+    if (j === i) continue;
+    const dx = x - pos[3 * j], dy = y - pos[3 * j + 1], dz = z - pos[3 * j + 2];
+    if (dx * dx + dy * dy + dz * dz < c2) n++;
+  }
+  if (n >= 5) out.set('#7d8cff');
+  else if (n >= 2) out.set('#f0b429');
+  else out.set('#9fd7ff');
+  return out;
+}
+
+function pruneBonds(bonds, NB) {
+  const live = new Set();
+  for (let k = 0; k < NB; k++) {
+    const i = bonds[4 * k], j = bonds[4 * k + 1];
+    live.add(i < j ? i + '-' + j : j + '-' + i);
+  }
+  if (SB.bondBorn.size > live.size + 40) {
+    for (const key of SB.bondBorn.keys()) if (!live.has(key)) SB.bondBorn.delete(key);
+  }
+}
+
+function pulseUpdate() {
+  if (!scene.pulses) return;
+  const now = performance.now();
+  SB.pulses = SB.pulses.filter(p => now - p.t0 < 1400);
+  scene.pulses.forEach((mesh, i) => {
+    const p = SB.pulses[i];
+    if (!p) { mesh.visible = false; return; }
+    const u = (now - p.t0) / 1400;
+    mesh.visible = true;
+    mesh.position.set(p.at[0], p.at[1], p.at[2]);
+    const s = 0.35 + u * 1.8;
+    mesh.scale.setScalar(s);
+    mesh.material.color.set(p.color);
+    mesh.material.opacity = 0.55 * (1 - u);
+  });
+}
+
 function loadPreset(p) {
   SB.preset = p;
   SB.frame = null;
@@ -160,9 +286,16 @@ function loadPreset(p) {
   clearCloud();
   if (p.light) SB.lambda = p.light.lambda;
   post({ type: 'preset', preset: p });
-  post({ type: 'set', paused: true, T: p.T });
-  SB.userPaused = true;
+  const quantum = p.forceField === 'hf' || p.forceField === 'mindo3' || p.quantum;
+  const empty = !((p.add && p.add.length) || p.atoms);
+  post({ type: 'set', paused: quantum, T: p.T });
+  SB.userPaused = quantum;
+  if (empty) SB.info = 'Scatola libera. Versa molecole o clicca nella scena: il modello si sceglie dalla composizione.';
+  SB.pulses = [];
+  SB.bondBorn = new Map();
+  SB.phase = null;
   scene.framed = false;
+  renderHud();
   if (active) { renderSide(); renderControls(); renderAnalysis(); }
 }
 
@@ -195,6 +328,14 @@ function buildScene() {
   scene.flash = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6, depthWrite: false }));
   scene.flash.visible = false;
   scene.group.add(scene.flash);
+  scene.pulses = [];
+  for (let i = 0; i < 16; i++) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), new THREE.MeshBasicMaterial({ color: '#3dde7a', transparent: true, opacity: 0.45, depthWrite: false }));
+    mesh.visible = false;
+    scene.group.add(mesh);
+    scene.pulses.push(mesh);
+  }
+  ensureHud();
   scene.framed = false;
   callback = () => updateScene();
   viewer.frameCallbacks.add(callback);
@@ -213,7 +354,8 @@ function ensureCapacity(N, NB) {
     if (scene.bonds) { scene.group.remove(scene.bonds); scene.bonds.geometry.dispose(); scene.bonds.material.dispose(); }
     scene.bcap = Math.max(512, 2 * NB);
     const light = cssVar('--scene-mode') === 'light';
-    scene.bonds = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 10, 1, false), new THREE.MeshStandardMaterial({ color: light ? '#8a93a3' : '#b7bfcc', roughness: 0.5 }), scene.bcap);
+    scene.bonds = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 10, 1, false), new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.04 }), scene.bcap);
+    scene.bonds.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * scene.bcap), 3);
     scene.bonds.frustumCulled = false;
     scene.group.add(scene.bonds);
   }
@@ -264,6 +406,7 @@ function updateScene() {
     renderControls();
   }
   flashUpdate();
+  pulseUpdate();
   if (!SB.fresh) return;
   SB.fresh = false;
   const { N, Z, pos, q, ke, bonds } = f;
@@ -276,6 +419,7 @@ function updateScene() {
     scene.atoms.setMatrixAt(i, tmpM);
     if (SB.color === 'charge') chargeRGB(q[i], tmpC);
     else if (SB.color === 'ke') heatColor(ke[i] / (3 * KB_EV * Tref), tmpC);
+    else if (SB.color === 'phase') phaseColor(i, pos, Z, N, tmpC);
     else tmpC.set(cpkColor(Z[i]));
     scene.atoms.setColorAt(i, tmpC);
   }
@@ -311,11 +455,23 @@ function updateScene() {
       tmpV.copy(a).addScaledVector(d, len / 2).addScaledVector(perp, offs[c]);
       tmpS.set(rad, len, rad);
       tmpM.compose(tmpV, tmpQ, tmpS);
-      scene.bonds.setMatrixAt(nb++, tmpM);
+      scene.bonds.setMatrixAt(nb, tmpM);
+      const key = i < j ? i + '-' + j : j + '-' + i;
+      if (!SB.bondBorn.has(key)) SB.bondBorn.set(key, performance.now());
+      const age = performance.now() - SB.bondBorn.get(key);
+      if (scene.bonds.instanceColor) {
+        if (age < 700) tmpC.set('#3dde7a');
+        else if (strength < 0.55) tmpC.set('#f0b429');
+        else tmpC.set(cssVar('--scene-mode') === 'light' ? '#8a93a3' : '#d5dbe6');
+        scene.bonds.setColorAt(nb, tmpC);
+      }
+      nb++;
     }
   }
+  pruneBonds(bonds, NB);
   scene.bonds.count = nb;
   scene.bonds.instanceMatrix.needsUpdate = true;
+  if (scene.bonds.instanceColor) scene.bonds.instanceColor.needsUpdate = true;
   // legami a idrogeno: linee tratteggiate H···A
   const hb = f.hbonds ?? [];
   const hpos = scene.hb.geometry.attributes.position;
@@ -571,7 +727,7 @@ function renderSide() {
     return `<button type="button" class="mol-chip ${SB.add.kind === 'mol' && SB.add.id === m.id ? 'active' : ''}" data-mol="${m.id}" title="${m.name}">${f}</button>`;
   }).join('');
   const elBtns = SANDBOX_ELEMENTS.map(Z => `<button type="button" class="mol-chip ${SB.add.kind === 'atom' && SB.add.symbol === sym(Z) ? 'active' : ''}" data-el="${sym(Z)}" title="${ELEMENTS[Z - 1].name}">${sym(Z)}</button>`).join('');
-  $('element-card').innerHTML = `
+  $('element-card').innerHTML = `<div class="btn-row"><a class="btn" href="#fasi">Fasi · dinamica MD</a><a class="btn" href="#becher">Soluzioni · cristalli</a></div>
     <h3 class="side-h">Sandbox chimica</h3>
     <label class="lbl" for="sb-preset">Esperimento</label>
     <select id="sb-preset">
@@ -582,6 +738,13 @@ function renderSide() {
     <details><summary>Obiettivo e istruzioni</summary><p class="mol-note">${p.text}</p>
     ${p.tips?.length ? `<ul class="sb-tips">${p.tips.map(t => `<li>${t}</li>`).join('')}</ul>` : ''}</details>
     <div class="btn-row"><button type="button" class="btn" id="sb-restart">Ricomincia</button><button type="button" class="btn" id="sb-clear">Svuota la scatola</button></div>
+    <label class="lbl">Versa nella scatola, senza cancellare</label>
+    <div class="btn-row">
+      <button type="button" class="btn" id="sb-pour-fire">H₂ + O₂</button>
+      <button type="button" class="btn" id="sb-pour-water">acqua</button>
+      <button type="button" class="btn" id="sb-pour-ar">argon</button>
+      <button type="button" class="btn" id="sb-pour-salt">Na + Cl₂</button>
+    </div>
     <label class="lbl">Aggiungi molecole</label>
     <div class="mol-list">${molBtns}</div>
     <label class="lbl">Aggiungi atomi (radicali, gas nobili)</label>
@@ -616,7 +779,11 @@ function renderSide() {
   }));
   $('sb-preset').addEventListener('change', (e) => loadPreset(PRESETS.find(x => x.id === e.target.value)));
   $('sb-restart').addEventListener('click', () => loadPreset(SB.preset));
-  $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.userPaused = true; renderAnalysis(); });
+  $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.userPaused = false; post({ type: 'set', paused: false, forceField: 'auto' }); renderAnalysis(); });
+  $('sb-pour-fire').addEventListener('click', () => pour([['[H][H]', 6], ['O=O', 3]]));
+  $('sb-pour-water').addEventListener('click', () => pour([['O', 8]]));
+  $('sb-pour-ar').addEventListener('click', () => pour([['[Ar]', 40]]));
+  $('sb-pour-salt').addEventListener('click', () => pour([['[Na]', 8], ['ClCl', 4]]));
   $('element-card').querySelectorAll('[data-mol]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'mol', id: b.dataset.mol }; renderSide(); }));
   $('element-card').querySelectorAll('[data-el]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'atom', symbol: b.dataset.el }; renderSide(); }));
   $('sb-smiles-ok').addEventListener('click', () => {
@@ -663,6 +830,12 @@ function saveSnapshot(name, data) {
   renderSide();
 }
 
+function pour(items) {
+  SB.userPaused = false;
+  post({ type: 'set', paused: false });
+  for (const [smiles, count] of items) post({ type: 'add', smiles, count });
+}
+
 function addLabel() {
   if (SB.add.kind === 'atom') return SB.add.symbol;
   if (SB.add.kind === 'smiles') return SB.add.smiles;
@@ -702,16 +875,20 @@ function renderControls() {
       <div class="btn-row" style="margin-top:0">
         <button type="button" class="btn" id="sb-play">${SB.userPaused ? '▶ Avvia' : '❚❚ Pausa'}</button>
         <button type="button" class="btn" id="sb-step" ${SB.userPaused ? '' : 'disabled'}>1 passo</button>
+        <button type="button" class="btn" id="sb-phases" title="Argon denso: caldo, poi ambiente, poi freddo">Giro delle fasi</button>
       </div></div>
     <div class="ctl"><label class="lbl" for="sb-dt">Passo Δt (fs)</label>
       <input id="sb-dt" type="number" min="0.001" max="2" step="0.001" value="${st?.dt ?? SB.preset.dt ?? 0.2}"></div>
     <div class="btn-row"><button class="btn" id="sb-zero">Azzera misure</button><button class="btn" id="sb-export">Esporta CSV</button></div>
-    <div class="ctl"><span class="lbl">Forze sugli atomi</span></div>
+    <div class="ctl"><span class="lbl">Modello delle forze</span></div>
     <div class="seg" id="sb-ff">
-      <button type="button" data-v="reactive" aria-pressed="${(st?.forceField ?? SB.forceField ?? 'reactive') === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico qualitativo</button>
-      <button type="button" data-v="mindo3" aria-pressed="${(st?.forceField ?? SB.forceField) === 'mindo3'}" title="MINDO/3 a ogni passo: gli elettroni di valenza sono trattati con la meccanica quantistica (SCF), fino a 90 atomi di H, C, N, O, F, P, S, Cl">quantistico MINDO/3</button>
-      <button type="button" data-v="hf" aria-pressed="${(st?.forceField ?? SB.forceField) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo: forze dalla meccanica quantistica, fino a 8 atomi">Hartree–Fock ab initio</button>
+      <button type="button" data-v="auto" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'auto'}" title="Sceglie il modello più fedele che può ancora girare: LJ pubblicato per i nobili, MINDO/3 fino a 36 atomi, Hartree–Fock fino a 6, altrimenti classico">fedeltà automatica</button>
+      <button type="button" data-v="reactive" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico</button>
+      <button type="button" data-v="lj" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'lj'}" title="Lennard–Jones con σ e ε pubblicati. Solo He, Ne, Ar, Kr, Xe">LJ nobili</button>
+      <button type="button" data-v="mindo3" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'mindo3'}" title="MINDO/3 a ogni passo, fino a 90 atomi di H, B, C, N, O, F, P, S, Cl">MINDO/3</button>
+      <button type="button" data-v="hf" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo, fino a 8 atomi">Hartree–Fock</button>
     </div>
+    <p class="hint">${escapeHtml(st?.modelWhy ?? SB.info ?? '')}</p>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
       <button type="button" data-v="1" aria-pressed="${thermo}" title="Termostato di Bussi: scambia calore con un bagno a temperatura costante (insieme canonico NVT)">Termostato</button>
@@ -743,6 +920,7 @@ function renderControls() {
       <button type="button" data-v="element" aria-pressed="${SB.color === 'element'}">elemento</button>
       <button type="button" data-v="charge" aria-pressed="${SB.color === 'charge'}">carica parziale</button>
       <button type="button" data-v="ke" aria-pressed="${SB.color === 'ke'}">energia cinetica</button>
+      <button type="button" data-v="phase" aria-pressed="${SB.color === 'phase'}">fase locale</button>
     </div>
     <div class="seg" id="sb-style" style="margin-top:4px">
       <button type="button" data-v="ball" aria-pressed="${SB.style === 'ball'}">sfere e bastoncini</button>
@@ -769,6 +947,7 @@ function renderControls() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   $('sb-play').addEventListener('click', () => { SB.userPaused = !SB.userPaused; post({ type: 'set', paused: SB.userPaused }); renderControls(); });
+  $('sb-phases').addEventListener('click', startPhaseTour);
   $('sb-step').addEventListener('click', () => post({ type: 'step', n: 1 }));
   $('sb-T').addEventListener('input', (e) => { const v = Math.pow(10, +e.target.value); $('sb-T-out').textContent = `${nf(v, 0)} K`; post({ type: 'set', T: v }); });
   seg('sb-thermo', (v) => post({ type: 'set', thermostat: v === '1' }));
@@ -823,7 +1002,8 @@ function renderLegend() {
   if (SB.style === 'orbital') { leg.innerHTML = `<span><i class="swatch" style="background:${cssVar('--phase-pos')}"></i>ψ > 0</span> <span><i class="swatch" style="background:${cssVar('--phase-neg')}"></i>ψ < 0</span> · punti = nuclei`; return; }
   if (SB.color === 'charge') leg.innerHTML = '<span><i class="swatch" style="background:#e0402a"></i>δ− (negativa)</span> <span><i class="swatch" style="background:#dcdce0"></i>neutra</span> <span><i class="swatch" style="background:#3f7fe8"></i>δ+ (positiva)</span>';
   else if (SB.color === 'ke') leg.innerHTML = '<span><i class="swatch" style="background:#4070ff"></i>lento</span> <span><i class="swatch" style="background:#ffffff"></i>≈ 3/2 kT</span> <span><i class="swatch" style="background:#ff3020"></i>veloce</span>';
-  else leg.innerHTML = 'Colori CPK · legami: 1, 2 o 3 cilindri secondo l\'ordine di legame; sottili = legami che si formano o si rompono; tratteggio = legame a idrogeno';
+  else if (SB.color === 'phase') leg.innerHTML = '<span><i class="swatch" style="background:#9fd7ff"></i>isolato · gas</span> <span><i class="swatch" style="background:#f0b429"></i>aggregato</span> <span><i class="swatch" style="background:#7d8cff"></i>coordinato</span>';
+  else leg.innerHTML = 'Colori CPK · verde = legame appena nato · ambra = legame che si forma · tratteggio = legame a idrogeno';
 }
 
 function renderPanelBody() {
@@ -835,7 +1015,8 @@ function renderPanelBody() {
   const Pid = nMol * KB_EV * s.T / V * 1.602176634e6;     // bar
   const Z = Pid > 0 ? s.P / Pid : NaN;
   const kj = (e) => nf(e * KJ_PER_EV, 1);
-  $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole</small>`;
+  const ph = s.phase;
+  $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole${ph ? ` · ${ph.title}` : ''}</small>`;
   $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
   $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : 'classico qualitativo'}</b></span>`;
   $('panel-body').innerHTML = `

@@ -1,7 +1,7 @@
 // Worker della sandbox: fa girare la dinamica molecolare e invia al disegno 3D un fotogramma
 // alla volta (posizioni, legami, cariche, grandezze termodinamiche, specie e reazioni).
 
-import { Simulation, MV2 } from './md.js';
+import { Simulation, MV2, ACC } from './md.js';
 import { ReactiveFF } from './reactive.js';
 import { parseSmiles } from './smiles.js';
 import { embedMolecule } from './embed.js';
@@ -10,6 +10,7 @@ import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
 import { makeHFProvider, aimdFeasible } from './aimd.js';
 import { makeMindo3Provider, mindo3Supports } from './mindo3.js';
 import { RDF, MSD, HeatCapacity } from './mdAnalysis.js';
+import { makeNobleLJProvider, nobleOnly, NOBLE_LJ, LJ_TRIPLE_T, LJ_CRITICAL_T } from './ljNoble.js';
 
 const BOHR_ANG = 0.52917721090;
 let sim = new Simulation({ box: 20, T: 300 });
@@ -131,7 +132,9 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
 }
 
 let forceField = 'reactive';
+let fidelity = 'auto';
 let hfBasis = 'STO-3G';
+let modelWhy = 'Scatola vuota: aggiungi atomi o molecole.';
 
 /** Sceglie il modello delle forze; con Hartree–Fock verifica che il sistema sia abbastanza piccolo. */
 const MINDO3_MAX_ATOMS = 90;
@@ -148,22 +151,66 @@ function mindo3Check(Z) {
   if (Z.length > MINDO3_MAX_ATOMS) throw new Error(`Il calcolo quantistico MINDO/3 è limitato a ${MINDO3_MAX_ATOMS} atomi (ce ne sarebbero ${Z.length}): ogni passo richiede la diagonalizzazione dell'hamiltoniana.`);
 }
 
-function setForceField(kind, basis = hfBasis) {
+function bestModel(Z) {
+  if (!Z.length) return { kind: 'reactive', why: 'Scatola vuota. Versa atomi o molecole: il modello si sceglie da solo.' };
+  if (nobleOnly(Z)) {
+    const names = [...new Set(Z)].map(z => NOBLE_LJ[z].symbol).join(', ');
+    return { kind: 'lj', why: `${names}: Lennard–Jones con σ e ε pubblicati, taglio 2,5σ. Nessun legame chimico.` };
+  }
+  const mindo = mindo3Supports(Z);
+  if (mindo.ok && Z.length <= 36) return { kind: 'mindo3', why: 'MINDO/3 a ogni passo: elettroni di valenza, legami e spin dalla funzione d’onda.' };
+  const hf = aimdFeasible(Z, hfBasis);
+  if (hf.ok && Z.length <= 6) return { kind: 'hf', why: 'Hartree–Fock/STO-3G: il sistema è abbastanza piccolo per le forze ab initio.' };
+  return { kind: 'reactive', why: mindo.ok ? 'Campo classico: sopra 36 atomi MINDO/3 non sta nel fotogramma. Puoi forzarlo a mano fino a 90.' : 'Campo classico qualitativo: composizione fuori da MINDO/3 e Hartree–Fock.' };
+}
+
+function applyModel(kind, basis = hfBasis) {
   hfBasis = basis;
   if (kind === 'hf') {
     const f = aimdFeasible(sim.Z, basis);
     if (!f.ok) throw new Error(f.reason);
   }
   if (kind === 'mindo3') mindo3Check(sim.Z);
-  if (!['hf', 'reactive', 'mindo3'].includes(kind)) throw new Error('Modello non valido.');
-  const same = kind === forceField && sim.provider && kind !== 'reactive';
+  if (kind === 'lj' && sim.Z.length && !nobleOnly(sim.Z)) throw new Error('Il Lennard–Jones pubblicato vale solo per He, Ne, Ar, Kr e Xe.');
+  if (!['hf', 'reactive', 'mindo3', 'lj'].includes(kind)) throw new Error('Modello non valido.');
+  const same = kind === forceField && (kind === 'reactive' || sim.provider);
   forceField = kind;
-  if (!same) sim.provider = kind === 'hf' ? makeHFProvider({ basis }) : kind === 'mindo3' ? makeMindo3Provider() : null;
+  if (!same) {
+    sim.provider = kind === 'hf' ? makeHFProvider({ basis })
+      : kind === 'mindo3' ? makeMindo3Provider()
+      : kind === 'lj' ? makeNobleLJProvider()
+      : null;
+  }
   sim.res = null;
   if (kind === 'hf') sim.dt = Math.min(sim.dt, 0.25);
   if (kind === 'mindo3') sim.dt = Math.min(sim.dt, 0.4);
+  if (kind === 'lj') sim.dt = Math.min(Math.max(sim.dt, 0.5), 2);
   sim.resetMeasurements(); censusSent = -1; lastEventSent = 0; mbHist = null;
-  postMessage({ type: 'forcefield', kind });
+  postMessage({ type: 'forcefield', kind, fidelity, why: modelWhy });
+}
+
+function setForceField(kind, basis = hfBasis) {
+  if (kind === 'auto') {
+    fidelity = 'auto';
+    const pick = bestModel(sim.Z);
+    modelWhy = pick.why;
+    applyModel(pick.kind, basis);
+    return;
+  }
+  fidelity = kind;
+  modelWhy = kind === 'lj' ? 'Lennard–Jones pubblicato, scelto a mano.'
+    : kind === 'mindo3' ? 'MINDO/3 scelto a mano.'
+    : kind === 'hf' ? 'Hartree–Fock scelto a mano.'
+    : 'Campo classico scelto a mano: utile per scatole grandi, non quantitativo sulle barriere.';
+  applyModel(kind, basis);
+}
+
+function refreshFidelity() {
+  if (fidelity !== 'auto') return;
+  const pick = bestModel(sim.Z);
+  modelWhy = pick.why;
+  if (pick.kind !== forceField) applyModel(pick.kind);
+  else postMessage({ type: 'forcefield', kind: forceField, fidelity, why: modelWhy });
 }
 
 function loadPreset(p) {
@@ -174,7 +221,8 @@ function loadPreset(p) {
     sim.addAtoms(p.atoms);
     if (p.thermalize) for (let i = 0; i < sim.N; i++) sim.thermalize(i, p.thermalize);
     sim.thermostat = p.thermostat ?? false;
-    setForceField(p.forceField ?? 'reactive');
+    if (p.forceField) setForceField(p.forceField);
+    else refreshFidelity();
     sim.forces();
     sim.resetMeasurements();
     light = { ...light, on: false };
@@ -183,7 +231,8 @@ function loadPreset(p) {
     resetAnalysis();
     return { placed: p.atoms.length, wanted: p.atoms.length };
   }
-  setForceField('reactive');
+  if (p.forceField) setForceField(p.forceField);
+  else refreshFidelity();
   let placed = 0, wanted = 0;
   for (const [s, n] of p.add) {
     wanted += n;
@@ -202,6 +251,7 @@ function loadPreset(p) {
   mbHist = null;
   sim.resetMeasurements();
   resetAnalysis();
+  refreshFidelity();
   return { placed, wanted };
 }
 
@@ -238,6 +288,48 @@ function speedHistogram() {
   return { species, M, vmax, bins: Array.from(mbHist.bins), samples: mbHist.samples, count: frags.length, T: referenceT };
 }
 
+
+/** Indicazione strutturale, non un diagramma di fase sperimentale: vicini entro 4,2 Å. */
+function classifyPhase() {
+  const N = sim.N;
+  if (!N) return { label: 'vuota', title: 'Scatola vuota', frac: 0, clusters: 0, T: 0, note: 'Aggiungi atomi o molecole.' };
+  if (forceField === 'lj' && nobleOnly(sim.Z)) {
+    const eps = sim.Z.reduce((s, z) => s + NOBLE_LJ[z].epsilonK, 0) / N;
+    const sig = sim.Z.reduce((s, z) => s + NOBLE_LJ[z].sigma, 0) / N;
+    const Tstar = sim.temperature() / eps;
+    const rho = N * sig ** 3 / sim.box ** 3;
+    let label = 'gas', title = 'Gas';
+    if (Tstar < LJ_TRIPLE_T && rho > 0.75) { label = 'solido'; title = 'Solido LJ'; }
+    else if (Tstar < LJ_CRITICAL_T && rho > 0.45) { label = 'liquido'; title = 'Liquido LJ'; }
+    else if (rho > 0.25 && Tstar < LJ_CRITICAL_T + 0.3) { label = 'misto'; title = 'Fluido denso'; }
+    return { label, title, frac: Math.min(1, rho), clusters: 0, T: sim.temperature(), note: `T* = kT/ε = ${Tstar.toFixed(2)}, ρ* = ${rho.toFixed(2)}. Triplo LJ ≈ ${LJ_TRIPLE_T}, critico ≈ ${LJ_CRITICAL_T}.` };
+  }
+  const pos = sim.pos;
+  const heavy = [];
+  for (let i = 0; i < N; i++) if (sim.Z[i] !== 1) heavy.push(i);
+  const use = heavy.length ? heavy : Array.from({ length: N }, (_, i) => i);
+  const c2 = 4.2 * 4.2;
+  const neigh = new Int16Array(N);
+  for (let a = 0; a < use.length; a++) {
+    const i = use[a];
+    for (let b = a + 1; b < use.length; b++) {
+      const j = use[b];
+      const dx = pos[3 * i] - pos[3 * j], dy = pos[3 * i + 1] - pos[3 * j + 1], dz = pos[3 * i + 2] - pos[3 * j + 2];
+      if (dx * dx + dy * dy + dz * dz < c2) { neigh[i]++; neigh[j]++; }
+    }
+  }
+  let coordinated = 0;
+  for (const i of use) if (neigh[i] >= 4) coordinated++;
+  const frac = coordinated / use.length;
+  const big = (sim.frags ?? []).filter(f => f.atoms.some(i => sim.Z[i] !== 1) && f.atoms.length >= 4).length;
+  const T = sim.temperature();
+  let label = 'gas', title = 'Gas';
+  if (frac >= 0.55 && T < 180) { label = 'solido'; title = 'Condensato freddo'; }
+  else if (frac >= 0.38) { label = 'liquido'; title = 'Liquido o aggregato'; }
+  else if (frac >= 0.12 || big >= 2) { label = 'misto'; title = 'Fase mista'; }
+  return { label, title, frac, clusters: big, T, note: 'Vicini entro 4,2 Å nel modello. Non è la fase sperimentale.' };
+}
+
 function frame() {
   if (!sim.res) sim.forces();
   const N = sim.N;
@@ -260,7 +352,7 @@ function frame() {
       Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Egrab: sim.Egrab, Etot: sim.totalEnergy(),
       heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
-      forceField, hf: sim.provider?.info ?? null,
+      forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null, phase: classifyPhase(),
     },
     mb: speedHistogram(),
   };
@@ -279,12 +371,29 @@ function frame() {
   postMessage(msg, [pos.buffer, q.buffer, ke.buffer]);
 }
 
+function guardTimestep() {
+  if (!sim.res) sim.forces();
+  let aMax = 0, vMax = 0;
+  for (let i = 0; i < sim.N; i++) {
+    const ax = ACC * Math.hypot(sim.F[3 * i], sim.F[3 * i + 1], sim.F[3 * i + 2]) / sim.mass[i];
+    const v = Math.hypot(sim.vel[3 * i], sim.vel[3 * i + 1], sim.vel[3 * i + 2]);
+    aMax = Math.max(aMax, ax);
+    vMax = Math.max(vMax, v);
+  }
+  const dtForce = aMax > 1e-8 ? Math.sqrt(0.08 / aMax) : 2;
+  const dtVel = vMax > 1e-6 ? 0.12 / vMax : 2;
+  const safe = Math.max(0.02, Math.min(forceField === 'hf' ? 0.25 : forceField === 'mindo3' ? 0.4 : 2, dtForce, dtVel));
+  if (sim.dt > safe) sim.dt = safe;
+  else if (sim.dt < safe * 0.5) sim.dt = Math.min(safe, sim.dt * 1.05);
+}
+
 function loop() {
   const t0 = performance.now();
   try {
     if (!paused && sim.N) {
     let n = 0;
     while (n < stepsPerFrame && performance.now() - t0 < msTarget) {
+      guardTimestep();
       sim.step();
       n++;
       if (sim.stepCount % sim.censusEvery === 0) analysisSample();
@@ -317,11 +426,12 @@ onmessage = (ev) => {
       }
       case 'add': {
         const placed = add(m);
-        postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero.` : '' });
+        refreshFidelity();
+        postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero. ${modelWhy}` : modelWhy });
         break;
       }
-      case 'clear': sim.clear(); forceField = 'reactive'; light.on = false; paused = true; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); postMessage({ type: 'forcefield', kind: forceField }); break;
-      case 'remove': sim.editInventory(() => sim.remove(m.indices)); lastEventSent = sim.eventSerial; break;
+      case 'clear': sim.clear(); light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
+      case 'remove': sim.editInventory(() => sim.remove(m.indices)); lastEventSent = sim.eventSerial; refreshFidelity(); break;
       case 'set':
         if (m.T !== undefined) { if (!Number.isFinite(m.T) || m.T < 0) throw new Error('Temperatura non valida.'); sim.T = m.T; }
         if (m.thermostat !== undefined) sim.thermostat = m.thermostat;

@@ -1,0 +1,89 @@
+import { PhaseMD, ARGON } from '../chem/phaseMD.js';
+import { drawAtoms, bindRotation } from './atomicCanvas.js';
+import { drawXY } from './chemCharts.js';
+const $=id=>document.getElementById(id);
+const fmt=(v,n=3)=>Number(v).toLocaleString('it-IT',{maximumFractionDigits:n});
+let active=false,raf=0,model=null,running=false,unbind=null,frames=0,history=[],error='';
+const view={yaw:.55,pitch:.3};
+const presets={solid:{name:'Cristallo FCC',density:.95,temperature:.35},melt:{name:'Fusione: FCC riscaldato',density:.85,temperature:1.5},gas:{name:'Gas diluito',density:.04,temperature:2},cool:{name:'Raffreddamento del liquido',density:.95,temperature:1.6}};
+let preset='solid';
+export function activatePhase(){
+  active=true;document.body.dataset.mode='phase';$('busy').hidden=true;
+  if(!model)reset();else render();
+  unbind=bindRotation($('lab-plot'),view,draw);
+  loop();
+}
+export function deactivatePhase(){active=false;running=false;cancelAnimationFrame(raf);unbind?.();unbind=null;}
+export function phaseRedraw(){if(active){draw();charts();}}
+function reset(){model=new PhaseMD(presets[preset]);running=false;error='';history=[];record();render();draw();charts();}
+function record(){history.push(model.stats());if(history.length>800)history.shift();}
+function loop(){if(!active)return;if(running){try{model.step(8);if(++frames%6===0){record();metrics();}if(frames%30===0)charts();}catch(e){running=false;error=e.message;render();}}draw();raf=requestAnimationFrame(loop);}
+function localPhase(){
+  const s=model.stats();
+  const rho=s.density, order=s.order, msd=s.msd;
+  if(rho<0.15) return {id:'gas', name:'Gas', why:'densità bassa: atomi quasi isolati'};
+  if(order>0.28 && msd<0.35) return {id:'solido', name:'Cristallo', why:'picchi di Bragg e poca mobilità'};
+  if(rho>0.45 && order<0.2) return {id:'liquido', name:'Liquido', why:'denso ma senza ordine del reticolo iniziale'};
+  if(order>0.12) return {id:'misto', name:'In transizione', why:'ordine che si perde o si riforma'};
+  return {id:'misto', name:'Fluido', why:'né cristallo né gas diluito'};
+}
+function neighborCount(){
+  const n=model.n, L=model.L, x=model.x, c2=1.6*1.6, out=new Int16Array(n);
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
+    let r2=0;
+    for(let a=0;a<3;a++){let v=x[3*i+a]-x[3*j+a]; v-=L*Math.round(v/L); r2+=v*v;}
+    if(r2<c2){out[i]++; out[j]++;}
+  }
+  return out;
+}
+function draw(){
+  if(!model) return;
+  const neigh=neighborCount();
+  const phase=localPhase();
+  const atoms=Array.from({length:model.n},(_,i)=>{
+    const c=neigh[i];
+    const color=c>=8?'#8b93ff':c>=4?'#f0b429':'#9fd7ff';
+    return {element:'Ar', radius:c>=6?.3:.24, color, position:Array.from(model.x.slice(i*3,i*3+3),v=>((v%model.L)+model.L)%model.L)};
+  });
+  drawAtoms($('lab-plot'), atoms, {...view, span:model.L*1.15, unit:'σ'});
+  paintPhaseBanner(phase);
+}
+function paintPhaseBanner(phase){
+  const canvas=$('lab-plot');
+  const g=canvas.getContext('2d');
+  const dpr=Math.min(devicePixelRatio||1, 2);
+  g.setTransform(dpr,0,0,dpr,0,0);
+  const colors={gas:'#7ec8ff', liquido:'#f0b429', solido:'#8b93ff', misto:'#e07a9a'};
+  g.font='600 22px sans-serif';
+  const label=phase.name;
+  const w=g.measureText(label).width+28;
+  g.fillStyle='rgba(10,16,24,.72)';
+  g.beginPath(); g.roundRect(14, 52, w, 36, 10); g.fill();
+  g.fillStyle=colors[phase.id]||'#fff';
+  g.fillText(label, 28, 76);
+  g.font='12px sans-serif'; g.fillStyle='#d5dbe6';
+  g.fillText(phase.why, 16, 104);
+}
+function render(){
+  $('element-card').innerHTML=`<h3 class="side-h">Sandbox · stati della materia</h3><p class="hint">256 atomi · forze Lennard–Jones · condizioni periodiche</p><label class="lbl" for="ph-preset">Preparazione iniziale</label><select id="ph-preset">${Object.entries(presets).map(([id,p])=>`<option value="${id}" ${preset===id?'selected':''}>${p.name}</option>`).join('')}</select><p class="hint">${preset==='cool'?'Avvia a T* = 1,6 finché il reticolo perde ordine; poi raffredda. La nucleazione può richiedere tempo e può non avvenire in questa piccola cella.':'La fase emerge dalle forze. I nomi indicano la preparazione, non impongono lo stato finale.'}</p><div class="btn-row"><a class="btn" href="#sandbox">Reazioni molecolari</a><a class="btn" href="#becher">Soluzioni e precipitati</a></div><h3 class="side-h">Esperimenti</h3><p class="hint">Riscalda il reticolo e osserva g(r), ordine e spostamento. Raffredda il liquido e cerca l’eventuale recupero dell’ordine. Riduci la densità per esplorare il gas. Spegni il termostato per verificare la conservazione dell’energia.</p>`;
+  $('ph-preset').onchange=e=>{preset=e.target.value;reset();};
+  $('controls').innerHTML=`<div class="btn-row"><button class="btn" id="ph-play">${running?'Pausa':'Avvia'}</button><button class="btn" id="ph-step">10 passi</button><button class="btn" id="ph-reset">Ripristina</button></div><label class="lbl" for="ph-T">Temperatura del bagno T* = kBT/ε</label><input id="ph-T" type="number" min="0.05" max="3" step="0.05" value="${model.target}"><div class="btn-row"><button class="btn" id="ph-cool">Raffredda · 0,35</button><button class="btn" id="ph-heat">Riscalda · 1,6</button></div><label class="lbl"><input type="checkbox" id="ph-bath" ${model.thermostat?'checked':''}> Termostato Langevin (NVT)</label><label class="lbl" for="ph-rho">Densità ρ* = Nσ³/V</label><input type="number" id="ph-rho" min="0.02" max="1.1" step="0.01" value="${model.stats().density.toFixed(3)}"><button class="btn" id="ph-volume">Applica volume</button><p class="hint">Δt* = 0,002 · seed 2026. Il lavoro di compressione è contabilizzato; il riferimento MSD riparte al cambio di volume.</p><button class="btn" id="ph-csv">Esporta misure CSV</button><p class="hint warn" id="ph-error">${error}</p>`;
+  $('ph-play').onclick=()=>{running=!running;$('ph-play').textContent=running?'Pausa':'Avvia';};
+  $('ph-step').onclick=()=>{running=false;try{model.step(10);record();error='';}catch(e){error=e.message;}render();charts();};
+  $('ph-reset').onclick=reset;
+  $('ph-T').onchange=e=>{const t=+e.target.value;if(Number.isFinite(t)&&t>=.05&&t<=3)model.target=t;else e.target.value=model.target;};
+  $('ph-bath').onchange=e=>model.thermostat=e.target.checked;
+  $('ph-cool').onclick=()=>{model.target=.35;model.thermostat=true;render();};
+  $('ph-heat').onclick=()=>{model.target=1.6;model.thermostat=true;render();};
+  $('ph-volume').onclick=()=>{try{model.setDensity(+$('ph-rho').value);history=[];record();error='';}catch(e){error=e.message;}render();charts();};
+  $('ph-csv').onclick=()=>{const keys=['time','T','density','pressure','K','U','E','heat','work','drift','order','msd'];const blob=new Blob(['# LJ force-shift rc=2.5; reduced units; dt=0.002; N=256; seed=2026\n'+keys.join(',')+'\n'+history.map(s=>keys.map(k=>s[k]).join(',')).join('\n')],{type:'text/csv'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='fasi-md.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+  $('viewport-title').innerHTML='Dinamica delle fasi<small>Trascina per ruotare · il colore è il vicinato locale</small>';$('viewport-legend').innerHTML='<span><i class="swatch" style="background:#9fd7ff"></i>isolato</span><span><i class="swatch" style="background:#f0b429"></i>aggregato</span><span><i class="swatch" style="background:#8b93ff"></i>coordinato</span>';
+  $('viewport-note').textContent='LJ con forza traslata, rc = 2,5σ. Gas nobile modello; nessun legame chimico. Le particelle attraversano facce periodiche della scatola.';
+  $('analysis').innerHTML=`<h2>Modello e misure</h2><div class="analysis-grid"><article><h3>Forze e traiettorie</h3><p class="desc">U = 4ε[(σ/r)¹² − (σ/r)⁶]. Energia e forza sono portate a zero a 2,5σ con una correzione lineare. In NVE si usa velocity Verlet; in NVT Langevin BAOAB. Il calore del bagno e il lavoro di variazione del volume sono misurati separatamente.</p></article><article><h3>Che cosa indica una fase</h3><p class="desc">Picchi persistenti in g(r), bassa mobilità e ordine FCC sostengono un comportamento cristallino. L’ordine mostrato è la coerenza di Bragg (200) rispetto al reticolo iniziale: non riconosce tutti i possibili cristalli. MSD misura lo spostamento quadratico, senza salti alle frontiere.</p></article><article><h3>Unità e dominio</h3><p class="desc">T*, ρ*, P*, E* e tempo t* sono unità ridotte. Mappatura approssimata all’argon: σ = 3,405 Å, ε/kB = 119,8 K, τ ≈ 2,156 ps. Il troncamento e il numero finito di atomi modificano le transizioni: non sono temperature di fusione sperimentali. Nessuna estrapolazione a rame, acqua o sali.</p><a href="https://www.nist.gov/mml/csd/chemical-informatics-group/lennard-jones-fluid-properties" target="_blank" rel="noopener">Riferimenti NIST per il fluido LJ</a></article></div>`;
+  metrics();
+}
+function metrics(){const s=model.stats();const phase=localPhase();$('panel-body').innerHTML=`<h3>Fase letta dal modello: ${phase.name}</h3><p class="hint">${phase.why}. Soglie qualitative su densità, Bragg e MSD: non sono temperature di fusione sperimentali.</p><h3>Misure istantanee</h3><dl class="info-list">${[['Tempo t*',s.time],['Temperatura T*',s.T],['Pressione P*',s.pressure],['Densità ρ*',s.density],['Energia per atomo E*/N',s.E/model.n],['Calore dal bagno Q*/N',s.heat/model.n],['Lavoro sul sistema W*/N',s.work/model.n],['Errore (E−E₀−Q−W)/N',s.drift/model.n],['Ordine FCC (200)',s.order],['MSD / σ²',s.msd]].map(([label,v])=>`<dt>${label}</dt><dd>${fmt(v,6)}</dd>`).join('')}</dl><p class="hint">Equivalente Ar approssimato: ${fmt(s.T*ARGON.epsilonK,1)} K · ${fmt(s.time*ARGON.tauPs,2)} ps. Le misure istantanee fluttuano.</p>`;}
+function chart(id,series,xlabel,ylabel){const vals=series.flatMap(s=>s.ys),xs=series[0].xs;const lo=Math.min(...vals),hi=Math.max(...vals),pad=Math.max(.001,(hi-lo)*.1);drawXY($(id),{series,xmin:Math.min(...xs),xmax:Math.max(.01,...xs),ymin:lo-pad,ymax:hi+pad,xlabel,ylabel});}
+function charts(){if(!model||!active)return;const x=history.map(s=>s.time);$('radial-title').textContent='Conservazione dell’energia';chart('chart-radial',[{xs:x,ys:history.map(s=>s.drift/model.n),color:'#ce8850',label:'(E−E₀−Q−W)/N'}],'t*','errore / ε');$('radial-note').textContent='Deve restare piccolo rispetto all’energia per atomo. Non viene azzerato quando cambia il bagno.';
+$('levels-title').textContent='Ordine e mobilità';chart('chart-levels',[{xs:x,ys:history.map(s=>s.order),color:'#67b7b0',label:'Bragg FCC'},{xs:x,ys:history.map(s=>s.msd),color:'#be8ed9',label:'MSD / σ²'}],'t*','ordine / MSD');$('levels-note').textContent='Ordine riferito al reticolo iniziale e spostamento quadratico medio; nessuna fase assegnata per soglia arbitraria.';
+const r=model.rdf();$('slice-title').textContent='Distribuzione radiale g(r)';chart('chart-slice',[{xs:r.r,ys:r.g,color:'#67b7b0',label:'g(r) istantanea'}],'r / σ','g(r)');$('slice-note').textContent='Distribuzione delle distanze a coppie, normalizzata con il volume dei gusci e N(N−1).';}

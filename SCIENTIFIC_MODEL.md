@@ -38,6 +38,10 @@ La reazione scritta ossida la semicella sinistra e riduce la destra. Il potenzia
 
 Fino a 8 atomi e 40 funzioni di base, UHF/STO-3G, forze da gradiente analitico. All'inizio vengono confrontate le due molteplicità più basse consentite, poi si mantiene quella selezionata: non è una ricerca completa dello stato fondamentale. SCF non convergente o forze non finite arrestano il moto. Cambi di soluzione UHF possono introdurre discontinuità: la deriva energetica va controllata.
 
+### Scelta automatica del modello
+
+In modalità fedeltà automatica la scatola non usa un solo potenziale. He, Ne, Ar, Kr e Xe usano Lennard–Jones con σ e ε pubblicati, mixing di Lorentz–Berthelot e taglio a 2,5σ con correzione lineare della forza. La fase è confrontata con T* = kT/ε e ρ* = Nσ³/V, usando come riferimento il punto triplo LJ ≈ 0,68 e il critico ≈ 1,31: non sono le temperature sperimentali del gas reale, perché il taglio e le pareti morbide spostano la transizione. Fino a 36 atomi coperti da MINDO/3 le forze vengono dalla SCF semiempirica. Fino a 6 atomi trattabili, Hartree–Fock/STO-3G. Oltre, resta il campo classico qualitativo. L’utente può bloccare un modello.
+
 ### Potenziale classico qualitativo
 
 Il vecchio potenziale è mantenuto per esplorazione, con etichetta esplicita. È un assemblaggio specifico del progetto ispirato a forme Abell–Tersoff–Brenner, UFF, QEq e DREIDING, **non** un'implementazione parametrizzata e validata di REBO/ReaxFF. Include costanti empiriche, medie di legame e stime di Pauling. Non predice quantitativamente meccanismi, barriere, fasi o costanti cinetiche. Le cariche parziali e i frammenti neutri non simulano la redox in soluzione. La formula di un frammento non distingue isomeri; gli ordini frazionari non assegnano numeri di ossidazione o ibridazione.
@@ -67,3 +71,39 @@ Pressione: media della forza sulle pareti morbide / 6L². Il volume geometrico d
 - protocollo Worker reale: avvio UHF in pausa, passi, svuotamento, aggiunta molecolare e censimento immediato.
 
 Questi controlli verificano casi specifici e invarianti. Non certificano tutte le reazioni o tutti i parametri esistenti nel repository.
+
+## Soluzioni, precipitati e reticoli atomici
+
+Il becher calcola equilibri nel database MINTEQ v4, non traiettorie di reazione. Newton nei logaritmi delle concentrazioni, attività Debye–Hückel estese / Davies e insieme attivo delle fasi solide. Le costanti cambiano con T secondo van ’t Hoff dove ΔrH è disponibile. Il modello usa concentrazioni molari come approssimazione delle molalità nel limite diluito. Prima di accettare un'aggiunta si verificano bilanci delle componenti, consistenza della forza ionica e complementarità: SI ≤ 0 per le fasi assenti, SI = 0 per quelle presenti. Se un insieme attivo degenera si provano altri insiemi iniziali; nessun risultato non convergente viene accettato. Il precedente stato e il registro vengono ripristinati in caso di errore. Per I > 0,5 M compare un avviso: convergenza numerica non implica accuratezza fisica.
+
+Le costanti provengono dal database **MINTEQ v4**, distribuito con PHREEQC, consultabile nel [mirror di PhreePlot](https://www.phreeplot.org/ppihtml/minteq.v4.dat.html). Le specie rame–cloruro e rame–carbonato riportano le costanti cumulative, non quelle successive. Le costanti dei solidi seguono le reazioni di dissoluzione sotto indicate; non vanno interpretate tutte come Ksp nel solo anione:
+
+| Fase | Reazione che definisce K (acqua pura: attività 1) | log₁₀K a 25 °C |
+|---|---|---:|
+| Malachite | Cu₂CO₃(OH)₂ + 2 H⁺ ⇌ 2 Cu²⁺ + CO₃²⁻ + 2 H₂O | −5,306 |
+| Azzurrite | Cu₃(CO₃)₂(OH)₂ + 2 H⁺ ⇌ 3 Cu²⁺ + 2 CO₃²⁻ + 2 H₂O | −16,906 |
+| Atacamite | Cu₂(OH)₃Cl + 3 H⁺ ⇌ 2 Cu²⁺ + Cl⁻ + 3 H₂O | 7,391 |
+| Smithsonite | ZnCO₃ ⇌ Zn²⁺ + CO₃²⁻ | −10 |
+| Siderite | FeCO₃ ⇌ Fe²⁺ + CO₃²⁻ | −10,24 |
+
+Il rame metallico non viene trasformato automaticamente in CuCl₂ da HCl diluito privo di ossidanti. La corrosione con O₂ atmosferico, la passivazione e i potenziali misti non sono implementati. Cu(I) e i suoi complessi sono inclusi: l’equilibrio formale può dare piccole quantità di Cu(I) stabilizzato dal cloruro, senza prevedere una velocità o formazione macroscopica di Cu(II). Il becher rifiuta esplicitamente Cu(II)/ioduro e metalli in nitrato acido, che richiedono specie redox mancanti; questa lista non certifica tutte le altre combinazioni. Il dataset è finito: mancano altri equilibri e fasi, inclusi precursori amorfi. Il risultato è l'equilibrio **entro le specie ammesse**, non una previsione universale dei prodotti reali.
+
+La soglia empirica di 0,40 V per H₂ è stata rimossa: il calcolo redox usa Nernst con fugacità H₂ unitaria e nessuna previsione della velocità. La fuga di CO₂ conserva il criterio precedente di Henry con pCO₂ = 1 atm: rappresenta l'uscita di bolle, **non** un equilibrio con l'atmosfera terrestre né un recipiente sigillato con headspace finito. La stima calorimetrica adiabatica viene accoppiata all’equilibrio variando T, mentre la piastra impone T. Le ΔrH mancanti sono trascurate nel calcolo: il registro mostra n.d. quando mancano dati per le specie principali. Temperatura adiabatica e calore totale restano approssimazioni; usare la piastra per confronti a T nota. Le bande ottiche disponibili non coprono tutte le specie: i colori di alcune miscele sono incompleti.
+
+Il registro mostra variazioni in mmol, senza costruire equazioni stechiometriche arrotondate e potenzialmente sbilanciate. Il JSON contiene composizione, totali, diagnostica e variazioni disponibili. Le bolle e i grani del becher sono illustrazioni. Il microscopio campiona le **specie** con il metodo dei maggiori resti (120 simboli, acqua esclusa); non pretende che tali simboli siano atomi individuali o che le posizioni siano traiettorie.
+
+La malachite ha invece una vista atomica da coordinate sperimentali: [Zigan, Joswig, Schuster e Mason (1977), Z. Kristallogr. 145, 412–426](https://rruff.info/uploads/ZK145_421.pdf), **AMCSD 0010795**, coordinate depositate anche nel [catalogo Larixite](https://larixite.seescience.org/cifs/10795). Cella monoclinica a = 9,502 Å, b = 11,974 Å, c = 3,240 Å, β = 98,75°, P2₁/a, Z = 4. Le quattro operazioni di simmetria producono 40 atomi per cella: Cu₈C₄O₂₀H₈. Supercelle e sezione sono disponibili. I segmenti sono contatti geometrici (C–O < 1,55 Å, O–H < 1,15 Å, Cu–O < 2,55 Å), non ordini di legame calcolati. Il reticolo è statico e non simula nucleazione, crescita o forma del precipitato. Quando la fase non è presente nel becher, viene indicata come struttura di riferimento.
+
+## Fasi · dinamica molecolare
+
+Nuovo motore indipendente dal vecchio potenziale reattivo: Lennard–Jones monocomponente 12–6, con **forza traslata linearmente a rc = 2,5σ**, senza correzioni di coda. U_FS(r) = U_LJ(r) − U_LJ(rc) + (r − rc)F_LJ(rc), F_FS(r) = F_LJ(r) − F_LJ(rc); entrambi nulli oltre rc. Questa scelta è una specifica variante del potenziale, documentata nei [riferimenti di simulazione NIST](https://www.nist.gov/mml/csd/chemical-informatics-group/lennard-jones-fluid-properties); non si trasferiscono automaticamente i punti di transizione del LJ non troncato.
+
+256 atomi, condizioni periodiche cubiche, convenzione della minima immagine con L > 2rc. Coordinate non avvolte per MSD; avvolte solo per la vista. Velocity Verlet NVE; splitting Langevin **BAOAB** NVT, propagazione esatta del passo Ornstein–Uhlenbeck e proiezione del moto del centro di massa, 3N−3 gradi di libertà. Riferimento per lo splitting: [Leimkuhler e Matthews, 2013](https://doi.org/10.1093/amrx/abs010). γ* = 1, Δt* = 0,002. Un passo instabile viene annullato, mai corretto tagliando le forze.
+
+Il termostato registra ΔK come calore Q; il ridimensionamento affine della scatola registra ΔU come lavoro W. Diagnostica E−E₀−Q−W, pressione viriale P = (2K + Σrᵢⱼ·Fᵢⱼ)/(3V), g(r) con normalizzazione N(N−1), MSD e intensità di Bragg (200) rispetto all'FCC iniziale. Quest'ultima **non riconosce tutti i cristalli**, né distingue da sola vetro, liquido e gas. Nessuna etichetta di fase viene imposta da una soglia di temperatura. Il raffreddamento può produrre un liquido sovraraffreddato o un vetro nel tempo accessibile; non si forza la cristallizzazione.
+
+Unità ridotte; mappatura **approssimata** all'argon con σ = 3,405 Å, ε/kB = 119,8 K, m = 39,948 u, τ ≈ 2,156 ps. Questi parametri sono comuni ma non un potenziale universale o di precisione: [Méndez-Bermúdez et al., Argon force field revisited](https://arxiv.org/abs/2201.08155). Non applicare questo modello a sali, acqua, metalli o reazioni chimiche. Il volume fissato può portare a pressione negativa in un cristallo in tensione; non è un errore di segno.
+
+`tests/materials.mjs` verifica il gradiente del potenziale, continuità al cutoff, conservazione NVE, bilancio NVT e lavoro del volume, fusione emergente, simmetria/stechiometria/volume della cella sperimentale, precipitazione e dissoluzione della malachite, controllo Cu/HCl, rollback e 99 miscele diluite tra reagenti. La suite controlla implementazione e invarianti; non costituisce validazione sperimentale di tutti i prodotti e di tutte le condizioni.
+
+La suite MINTEQ esamina inoltre le 588 ricette catione × anione: 587 convergono; rame/ioduro viene rifiutato esplicitamente perché manca la redox di I₂. Questi numeri descrivono copertura numerica, non certificazione sperimentale di tutte le ricette. Sono preservate le modalità MINDO/3, cinetica e analisi MD introdotte separatamente su main.

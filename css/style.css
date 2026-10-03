@@ -753,3 +753,75 @@ body[data-mode="sandbox"] #live-metrics span { flex: 1; background: var(--panel)
   body[data-mode="sandbox"] #live-metrics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   body[data-mode="sandbox"] #live-metrics b { font-size: 14px; overflow-wrap: anywhere; }
 }
+
+/* Molecular phase simulation shares the laboratory canvas layout. */
+body[data-mode="phase"] #lab-plot { display: block; background: var(--panel); inset: 52px 0 0 0; height: calc(100% - 52px); }
+body[data-mode="phase"] .viewport { background: var(--panel); }
+body[data-mode="phase"] .viewport > canvas:not(#lab-plot) { visibility: hidden; }
+body[data-mode="phase"] .viewport-tools { display: none; }
+body[data-mode="phase"] .table-band { display: none; }
+body[data-mode="phase"] .atom-only { display: none; }
+body[data-mode="phase"] .workspace { grid-template-columns: 330px minmax(0, 1fr) 380px; }
+body[data-mode="phase"] .viewport-title { text-shadow: none; }
+@media (max-width: 1280px) { body[data-mode="phase"] .workspace { grid-template-columns: 320px minmax(0, 1fr); } }
+@media (max-width: 820px) { body[data-mode="phase"] .workspace { grid-template-columns: minmax(0, 1fr); } }
+
+body[data-mode="phase"] #lab-plot, body[data-mode="beaker"] #lab-plot {touch-action:none;}
+body[data-mode="phase"] input[type="number"] { width:100%; box-sizing:border-box; }
+
+/* Compact scientific controls and wrapping for reaction inventories. */
+body[data-mode="phase"] input[type="number"] {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel-2); color: var(--text); font: inherit;
+}
+a.btn { color: inherit; text-decoration: none; }
+body[data-mode="beaker"] #analysis .data-table { table-layout: fixed; }
+body[data-mode="beaker"] #analysis .data-table th,
+body[data-mode="beaker"] #analysis .data-table td { white-space: normal; overflow-wrap: anywhere; }
+body[data-mode="beaker"] #analysis .data-table th:nth-child(1) { width: 22%; }
+body[data-mode="beaker"] #analysis .data-table th:nth-child(2) { width: 48%; }
+body[data-mode="beaker"] #analysis .data-table th:nth-child(3),
+body[data-mode="beaker"] #analysis .data-table th:nth-child(4) { width: 15%; }
+@media(max-width: 600px) {
+  body[data-mode="beaker"] .info-list { grid-template-columns: minmax(0, 1fr) auto; }
+  body[data-mode="beaker"] .info-list dt { overflow-wrap:anywhere; }
+}
+
+
+/* sandbox: reazioni e fasi in vista */
+.sb-hud {
+  position: absolute; left: 14px; right: 14px; top: 58px;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none; z-index: 3; max-width: 420px;
+}
+.sb-phase {
+  display: flex; flex-direction: column; gap: 2px;
+  width: fit-content; max-width: 100%;
+  padding: 8px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+}
+.sb-phase b { font: 650 15px/1.2 var(--font-display); }
+.sb-phase span { font-size: 11px; color: var(--muted); }
+.sb-phase[data-phase="gas"] b { color: #7ec8ff; }
+.sb-phase[data-phase="liquido"] b { color: #f0b429; }
+.sb-phase[data-phase="solido"] b { color: #8b93ff; }
+.sb-phase[data-phase="misto"] b { color: #e07a9a; }
+.sb-species { display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-species span {
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 8px; font: 12px var(--font-mono);
+}
+.sb-reactions { display: flex; flex-direction: column; gap: 4px; }
+.sb-rx {
+  display: flex; justify-content: space-between; gap: 10px;
+  background: color-mix(in srgb, #122033 78%, transparent);
+  border-left: 3px solid #3dde7a;
+  border-radius: 8px; padding: 5px 8px;
+  font-size: 12px; color: #eef3f8;
+}
+.sb-rx.dim { border-left-color: var(--line); color: var(--muted); }
+.sb-rx span { color: #9ab; font-variant-numeric: tabular-nums; }
+body[data-mode="sandbox"] .viewport-title { z-index: 4; }
