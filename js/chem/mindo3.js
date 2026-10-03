@@ -189,15 +189,54 @@ export class Mindo3 {
     this.nalpha = opts.nalpha ?? null; // se dati, occupazioni fisse per spin (spin vincolato)
     this.nbeta = opts.nbeta ?? null;
     this.spinGuess = opts.spinGuess ?? null; // polarizzazione di spin iniziale per atomo (−0,5 … 0,5)
+    this.field = opts.field ?? null;          // campo elettrico esterno uniforme [Ex, Ey, Ez] in V/Å
     this.key = '';
     this.Pa = null; this.Pb = null;
     this.seed = 12345;
     this.last = null;
   }
 
-  reset() { this.key = ''; this.Pa = null; this.Pb = null; this.Pa1 = null; this.Pb1 = null; }
+  reset() { this.key = ''; this.Pa = null; this.Pb = null; this.Pa1 = null; this.Pb1 = null; this.good = null; }
 
   rand() { this.seed = (this.seed * 1103515245 + 12345) % 2147483648; return this.seed / 2147483648; }
+
+  /**
+   * Gruppi di atomi connessi da sovrapposizioni (entro RCUT) e loro numero di elettroni, oppure null se c'è un solo
+   * gruppo o la molteplicità è fissata globalmente. Elettroni per gruppo: popolazioni del passo precedente
+   * arrotondate; all'inizio Σ(Z_core − carica formale) se le cariche formali sono note (this.formal).
+   */
+  coupledBlocks(Z, N, first, zc, nel, overlaps, fresh) {
+    if (this.nalpha !== null && this.nbeta !== null) return null;
+    const parent = Int32Array.from({ length: N }, (_, i) => i);
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    for (const o of overlaps) parent[find(o.A)] = find(o.B);
+    const groups = new Map();
+    for (let A = 0; A < N; A++) { const r = find(A); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(A); }
+    if (groups.size < 2) return null;
+    const n = first[N];
+    let pop = null;
+    if (!fresh && this.Pa && this.Pa.length === n * n) {
+      pop = new Float64Array(N);
+      for (let A = 0; A < N; A++) for (let m = first[A]; m < first[A + 1]; m++) pop[A] += this.Pa[m * n + m] + this.Pb[m * n + m];
+    } else if (this.formal && this.formal.length === N) {
+      pop = Float64Array.from(zc, (z, A) => z - this.formal[A]);
+    } else return null;   // primo calcolo senza cariche formali: livello di Fermi comune, poi gruppi dal passo dopo
+    const list = [...groups.values()].map(atoms => {
+      const exact = atoms.reduce((s, A) => s + pop[A], 0);
+      const idx = [];
+      for (const A of atoms) for (let m = first[A]; m < first[A + 1]; m++) idx.push(m);
+      return { atoms, idx, exact, nel: Math.round(exact) };
+    });
+    // l'arrotondamento deve conservare il numero totale di elettroni
+    let diff = nel - list.reduce((s, b) => s + b.nel, 0);
+    const byResidual = [...list].sort((a, b) => (b.exact - b.nel) - (a.exact - a.nel));
+    for (let k = 0; diff !== 0 && k < 4 * list.length; k++) {
+      const b = diff > 0 ? byResidual[k % list.length] : byResidual[list.length - 1 - (k % list.length)];
+      if (diff > 0 && b.nel < 2 * b.idx.length) { b.nel++; diff--; } else if (diff < 0 && b.nel > 0) { b.nel--; diff++; }
+    }
+    if (diff !== 0 || list.some(b => b.nel < 0 || b.nel > 2 * b.idx.length)) return null;
+    return list;
+  }
 
   /**
    * Energia (eV), forze (eV/Å, in F) e analisi della funzione d'onda.
@@ -254,6 +293,27 @@ export class Mindo3 {
       }
     }
 
+    // --- blocchi di atomi accoppiati -------------------------------------------------------------
+    // La Fock fra atomi senza sovrapposizione (oltre RCUT) è nulla: un elettrone non può passare da un gruppo
+    // di molecole a un altro lontano. Ogni gruppo connesso conserva il suo numero di elettroni (preso dal passo
+    // precedente o, all'inizio, dalle cariche formali delle specie inserite); il livello di Fermi è per gruppo.
+    const blocks = this.coupledBlocks(Z, N, first, zc, nel, overlaps, fresh);
+
+    // --- campo elettrico esterno uniforme -------------------------------------------------------
+    // energia di un elettrone (carica −e) nel potenziale φ = −E·r: +E·r. In V/Å e Å il risultato è in eV.
+    // Elementi di matrice nella base di valenza: ⟨μ|r|μ⟩ = R_A e il dipolo atomico ⟨s|r_c|p_c⟩ = D_A.
+    const field = this.field && this.field.some(v => v) ? this.field : null;
+    if (field) {
+      for (let A = 0; A < N; A++) {
+        const dot = field[0] * pos[3 * A] + field[1] * pos[3 * A + 1] + field[2] * pos[3 * A + 2];
+        for (let m = first[A]; m < first[A + 1]; m++) H[m * n + m] += dot;
+        if (nBasis(Z[A]) === 4) {
+          const D = spDipole(Z[A]), sIdx = first[A];
+          for (let c = 0; c < 3; c++) { const k = sIdx * n + sIdx + 1 + c; H[k] += field[c] * D; H[(sIdx + 1 + c) * n + sIdx] += field[c] * D; }
+        }
+      }
+    }
+
     // --- densità di partenza ------------------------------------------------------------------
     let Pa, Pb;
     if (fresh) {
@@ -276,43 +336,55 @@ export class Mindo3 {
     } else { Pa = Float64Array.from(this.Pa); Pb = Float64Array.from(this.Pb); }
 
     // --- ciclo SCF con DIIS ---------------------------------------------------------------------
+    // Se non converge si riprova dall'ultima densità convergente (senza estrapolazione) con uno smorzamento
+    // forte: forze da una SCF non convergente non sono il gradiente di nessuna energia.
     const oneC = Z.map(z => oneCenter(z));
     const Fa = new Float64Array(n * n), Fb = new Float64Array(n * n);
-    const diis = [];
-    let E = 0, Eold = Infinity, converged = false, it = 0, res = null;
+    let E = 0, converged = false, it = 0, res = null;
     const kT = KB_EV * this.Tel;
-    for (it = 0; it < this.maxIter; it++) {
-      buildFock(Z, first, N, n, H, gam, oneC, Pa, Pb, Fa, Fb);
-      // energia elettronica: ½ Σ_σ Pσ (H + Fσ)
-      let Eel = 0;
-      for (let k = 0; k < n * n; k++) Eel += 0.5 * (Pa[k] * (H[k] + Fa[k]) + Pb[k] * (H[k] + Fb[k]));
-      // errore DIIS: FP − PF per ogni spin (a guscio chiuso i due spin coincidono)
-      let closed = true;
-      for (let k = 0; k < n * n; k++) if (Math.abs(Pa[k] - Pb[k]) > 1e-9) { closed = false; break; }
-      const err = new Float64Array(2 * n * n);
-      let emax = 0;
-      commutator(Fa, Pa, n, err, 0);
-      if (closed) err.copyWithin(n * n, 0, n * n); else commutator(Fb, Pb, n, err, n * n);
-      for (let k = 0; k < err.length; k++) emax = Math.max(emax, Math.abs(err[k]));
-      E = Eel - (res ? kT * res.entropy : 0);
-      if (it > 0 && Math.abs(E - Eold) < this.conv && emax < Math.sqrt(this.conv) * 10) { converged = true; break; }
-      Eold = E;
-      const Fcat = new Float64Array(2 * n * n);
-      Fcat.set(Fa); Fcat.set(Fb, n * n);
-      diis.push({ F: Fcat, e: err });
-      if (diis.length > 8) diis.shift();
-      let Fx = null;
-      if (diis.length >= 2) Fx = diisExtrapolate(diis);
-      const Fua = Fx ? Fx.subarray(0, n * n) : Fa, Fub = Fx ? Fx.subarray(n * n) : Fb;
-      res = occupy(Fua, Fub, n, nel, kT, this.nalpha, this.nbeta, closed);
-      // miscelazione leggera nelle prime iterazioni da densità atomica (evita oscillazioni)
-      const mix = fresh && it < 4 ? 0.5 : 0;
-      for (let k = 0; k < n * n; k++) {
-        Pa[k] = mix * Pa[k] + (1 - mix) * res.Pa[k];
-        Pb[k] = mix * Pb[k] + (1 - mix) * res.Pb[k];
+    for (let attempt = 0; attempt < 2 && !converged; attempt++) {
+      const damp = attempt === 0 ? (fresh ? 4 : 0) : 40;
+      if (attempt === 1) {
+        if (this.good && this.good.key === key && this.good.Pa.length === n * n) { Pa = Float64Array.from(this.good.Pa); Pb = Float64Array.from(this.good.Pb); }
+        res = null;
+      }
+      const diis = [];
+      let Eold = Infinity;
+      const maxIt = attempt === 0 ? this.maxIter : 2 * this.maxIter;
+      for (it = 0; it < maxIt; it++) {
+        buildFock(Z, first, N, n, H, gam, oneC, Pa, Pb, Fa, Fb);
+        // energia elettronica: ½ Σ_σ Pσ (H + Fσ)
+        let Eel = 0;
+        for (let k = 0; k < n * n; k++) Eel += 0.5 * (Pa[k] * (H[k] + Fa[k]) + Pb[k] * (H[k] + Fb[k]));
+        // errore DIIS: FP − PF per ogni spin (a guscio chiuso i due spin coincidono)
+        let closed = true;
+        for (let k = 0; k < n * n; k++) if (Math.abs(Pa[k] - Pb[k]) > 1e-9) { closed = false; break; }
+        const err = new Float64Array(2 * n * n);
+        let emax = 0;
+        commutator(Fa, Pa, n, err, 0);
+        if (closed) err.copyWithin(n * n, 0, n * n); else commutator(Fb, Pb, n, err, n * n);
+        for (let k = 0; k < err.length; k++) emax = Math.max(emax, Math.abs(err[k]));
+        E = Eel - (res ? kT * res.entropy : 0);
+        if (it > 0 && Math.abs(E - Eold) < this.conv && emax < Math.sqrt(this.conv) * 10) { converged = true; break; }
+        Eold = E;
+        const Fcat = new Float64Array(2 * n * n);
+        Fcat.set(Fa); Fcat.set(Fb, n * n);
+        diis.push({ F: Fcat, e: err });
+        if (diis.length > 8) diis.shift();
+        let Fx = null;
+        if (diis.length >= 2 && it >= damp / 2) Fx = diisExtrapolate(diis);
+        const Fua = Fx ? Fx.subarray(0, n * n) : Fa, Fub = Fx ? Fx.subarray(n * n) : Fb;
+        res = blocks ? occupyBlocks(Fua, Fub, n, blocks, kT, closed) : occupy(Fua, Fub, n, nel, kT, this.nalpha, this.nbeta, closed);
+        // miscelazione con la densità precedente nelle prime iterazioni (evita oscillazioni)
+        const mix = it < damp ? 0.5 : 0;
+        for (let k = 0; k < n * n; k++) {
+          Pa[k] = mix * Pa[k] + (1 - mix) * res.Pa[k];
+          Pb[k] = mix * Pb[k] + (1 - mix) * res.Pb[k];
+        }
       }
     }
-    if (!res) res = occupy(Fa, Fb, n, nel, kT, this.nalpha, this.nbeta);
+    if (converged) this.good = { key, Pa: Float64Array.from(Pa), Pb: Float64Array.from(Pb) };
+    if (!res) res = blocks ? occupyBlocks(Fa, Fb, n, blocks, kT) : occupy(Fa, Fb, n, nel, kT, this.nalpha, this.nbeta);
     this.Pa1 = fresh ? null : this.Pa; this.Pb1 = fresh ? null : this.Pb;
     this.Pa = Float64Array.from(Pa); this.Pb = Float64Array.from(Pb);
 
@@ -322,7 +394,10 @@ export class Mindo3 {
       const R = Rm[A * N + B], g = gam[A * N + B];
       Enuc += zc[A] * zc[B] * (g + (E2 / R - g) * coreScale(Z[A], Z[B], R).f);
     }
-    const Etot = E + Enuc;
+    // energia dei core nel campo: carica +Z_core nel potenziale φ = −E·R
+    let Efield = 0;
+    if (field) for (let A = 0; A < N; A++) Efield -= zc[A] * (field[0] * pos[3 * A] + field[1] * pos[3 * A + 1] + field[2] * pos[3 * A + 2]);
+    const Etot = E + Enuc + Efield;
     let Hf = Etot * EV2KCAL;
     for (const z of Z) Hf += P[z][13] - P[z][14] * EV2KCAL;
 
@@ -347,6 +422,8 @@ export class Mindo3 {
           F[3 * B + c] += dEdR * u;
         }
       }
+      // campo uniforme: forza q_A·E su ogni atomo (Z_core meno la popolazione elettronica)
+      if (field) for (let A = 0; A < N; A++) for (let c = 0; c < 3; c++) F[3 * A + c] += (zc[A] - popA[A]) * field[c];
       for (const o of overlaps) {
         const { A, B, na, nb, dS, beta } = o;
         const gx = [0, 0, 0];
@@ -374,16 +451,34 @@ export class Mindo3 {
       for (let m = first[A]; m < first[A + 1]; m++) for (let q2 = first[B]; q2 < first[B + 1]; q2++) s += 2 * (Pa[m * n + q2] ** 2 + Pb[m * n + q2] ** 2);
       if (s > 0.05) bonds.push({ i: A, j: B, n: s, w: 1 });
     }
+    // momento di dipolo (e·Å): Σ q_A R_A − 2 Σ D_A P(s, p_c). Per uno ione dipende dall'origine.
+    const dipole = [0, 0, 0];
+    for (let A = 0; A < N; A++) {
+      for (let c = 0; c < 3; c++) dipole[c] += q[A] * pos[3 * A + c];
+      if (nBasis(Z[A]) === 4) {
+        const D = spDipole(Z[A]), sIdx = first[A];
+        for (let c = 0; c < 3; c++) dipole[c] -= 2 * D * (Pa[sIdx * n + sIdx + 1 + c] + Pb[sIdx * n + sIdx + 1 + c]);
+      }
+    }
     const Sz = 0.5 * (res.na - res.nb);
     this.last = {
       Z: Array.from(Z), first: Array.from(first), n, pos: Float64Array.from(pos), Pa: Float64Array.from(Pa), Pb: Float64Array.from(Pb),
       Ca: res.Ca, Cb: res.Cb, ea: res.ea, eb: res.eb, fa: res.fa, fb: res.fb,
     };
     return {
-      E: Etot, Eel: E, Enuc, Hf, converged, iterations: it + 1, q, spin, bonds,
+      E: Etot, Eel: E, Enuc, Efield, Hf, converged, iterations: it + 1, q, spin, bonds, dipole,
       nalpha: res.na, nbeta: res.nb, Sz, gap: res.gap, homo: res.homo, lumo: res.lumo, nbf: n,
     };
   }
+}
+
+/**
+ * Integrale di dipolo atomico ⟨ns|x|np_x⟩ fra orbitali di Slater con lo stesso n (in Å):
+ * D = (2n+1)/√3 · (4ζ_s ζ_p)^(n+½) / (ζ_s+ζ_p)^(2n+2) a₀.
+ */
+function spDipole(z) {
+  const n = z <= 10 ? 2 : 3, zs = P[z][11], zp = P[z][12];
+  return (2 * n + 1) / Math.sqrt(3) * Math.pow(4 * zs * zp, n + 0.5) / Math.pow(zs + zp, 2 * n + 2) * 0.52917721090;
 }
 
 /** Fattore della repulsione dei core: e^(−αR), oppure α e^(−R) per le coppie N–H e O–H. Con la derivata in R. */
@@ -554,23 +649,66 @@ function occupy(Fa, Fb, n, nel, kT, fixA, fixB, closed = false) {
     fa, fb, na, nb, entropy, homo, lumo, gap: lumo - homo,
   };
 }
+/** Occupazione separata per gruppi di orbitali senza accoppiamento: ogni gruppo ha il suo numero di elettroni. */
+function occupyBlocks(Fa, Fb, n, blocks, kT, closed = false) {
+  const Pa = new Float64Array(n * n), Pb = new Float64Array(n * n);
+  const Ca = new Float64Array(n * n), Cb = new Float64Array(n * n);
+  const ea = new Float64Array(n), eb = new Float64Array(n), fa = new Float64Array(n), fb = new Float64Array(n);
+  let col = 0, entropy = 0, na = 0, nb = 0, homo = -Infinity, lumo = Infinity;
+  for (const b of blocks) {
+    const m = b.idx.length;
+    const sa = new Float64Array(m * m), sb = new Float64Array(m * m);
+    for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) { sa[i * m + j] = Fa[b.idx[i] * n + b.idx[j]]; sb[i * m + j] = Fb[b.idx[i] * n + b.idx[j]]; }
+    const r = occupy(sa, sb, m, b.nel, kT, null, null, closed);
+    for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) {
+      Pa[b.idx[i] * n + b.idx[j]] = r.Pa[i * m + j];
+      Pb[b.idx[i] * n + b.idx[j]] = r.Pb[i * m + j];
+    }
+    for (let k = 0; k < m; k++) {
+      for (let i = 0; i < m; i++) { Ca[b.idx[i] * n + col + k] = r.Ca[i * m + k]; Cb[b.idx[i] * n + col + k] = r.Cb[i * m + k]; }
+      ea[col + k] = r.ea[k]; eb[col + k] = r.eb[k]; fa[col + k] = r.fa[k]; fb[col + k] = r.fb[k];
+    }
+    col += m; entropy += r.entropy; na += r.na; nb += r.nb;
+    homo = Math.max(homo, r.homo); lumo = Math.min(lumo, r.lumo);
+  }
+  return { Pa, Pb, Ca, Cb, ea, eb, fa, fb, na, nb, entropy, homo, lumo, gap: lumo - homo };
+}
 const fermi = (e, mu, kT) => { const x = (e - mu) / kT; return x > 40 ? 0 : x < -40 ? 1 : 1 / (1 + Math.exp(x)); };
 
 /**
  * Fornitore di forze per la dinamica molecolare della sandbox (stessa interfaccia del campo reattivo):
  * a ogni passo una SCF MINDO/3 completa. Espone l'ultima funzione d'onda per disegnare densità e orbitali.
  */
-export function makeMindo3Provider({ Tel = 300, conv = 1e-5, spinGuess = null } = {}) {
+/** Elettroni di valenza (carica dei core) di MINDO/3 per una lista di numeri atomici. */
+export const valenceElectrons = (Z) => Z.reduce((s, z) => s + (CORE[z] ?? 0), 0);
+
+/**
+ * Forze MINDO/3 per la dinamica. La carica totale arriva dalla simulazione (ctx.charge, ioni inseriti);
+ * multiplicity: null = spin libero (livello di Fermi comune), altrimenti 2S+1 fissato;
+ * field: campo elettrico uniforme [Ex, Ey, Ez] in V/Å.
+ */
+export function makeMindo3Provider({ Tel = 300, conv = 1e-5, spinGuess = null, multiplicity = null, field = null } = {}) {
   // tolleranza SCF di 10⁻⁵ eV: in NVE l'energia totale deriva di circa 0,5 meV per atomo e per ps
-  const m = new Mindo3({ Tel, conv, spinGuess });
+  const m = new Mindo3({ Tel, conv, spinGuess, field });
   const provider = {
     kind: 'mindo3',
     info: {},
+    multiplicity,
     reset() { m.reset(); },
-    compute(Z, pos, F) {
+    setField(f) { m.field = f && f.some(v => v) ? f.slice() : null; },
+    get field() { return m.field; },
+    compute(Z, pos, F, ctx = {}) {
+      const charge = ctx.charge ?? 0;
+      if (charge !== m.charge) { m.charge = charge; m.reset(); }
+      m.formal = ctx.formal ?? null;
+      if (provider.multiplicity) {
+        const nel = valenceElectrons(Z) - charge, unp = provider.multiplicity - 1;
+        if (nel < 0 || (nel - unp) % 2 !== 0 || unp > nel) throw new Error(`Molteplicità ${provider.multiplicity} impossibile con ${nel} elettroni di valenza: scegli ${nel % 2 ? 'doppietto, quartetto…' : 'singoletto, tripletto…'}`);
+        m.nalpha = (nel + unp) / 2; m.nbeta = (nel - unp) / 2;
+      } else { m.nalpha = null; m.nbeta = null; }
       const r = m.compute(Z, pos, F);
-      provider.info = { method: 'MINDO/3', nbf: r.nbf, Sz: r.Sz, gap: r.gap, homo: r.homo, lumo: r.lumo, iterations: r.iterations, converged: r.converged, Hf: r.Hf, Tel };
-      return { E: r.E, parts: { mindo3: r.E, Hf: r.Hf }, q: r.q, bonds: r.bonds, hbonds: [], spin: r.spin };
+      provider.info = { method: 'MINDO/3', nbf: r.nbf, Sz: r.Sz, gap: r.gap, homo: r.homo, lumo: r.lumo, iterations: r.iterations, converged: r.converged, Hf: r.Hf, Tel, charge, multiplicity: provider.multiplicity, dipole: r.dipole, field: m.field };
+      return { E: r.E, parts: { mindo3: r.E, Hf: r.Hf, field: r.Efield }, q: r.q, bonds: r.bonds, hbonds: [], spin: r.spin };
     },
     /** Funzione d'onda corrente: densità totale e orbitali di frontiera (per il disegno). */
     wavefunction() {

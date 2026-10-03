@@ -3,7 +3,7 @@
 // rompono, specie chimiche, reazioni, pressione e distribuzione di Maxwell–Boltzmann.
 
 import * as THREE from 'three';
-import { PRESETS, SANDBOX_MOLECULES, SANDBOX_ELEMENTS, SPECIES_NAMES } from '../chem/sandboxData.js';
+import { PRESETS, SANDBOX_MOLECULES, SANDBOX_IONS, SANDBOX_ELEMENTS, SPECIES_NAMES } from '../chem/sandboxData.js';
 import { ATOM_PARAMS, KB_EV } from '../chem/reactiveData.js';
 import { cpkColor, covalentRadius, PAULING, valenceElectrons } from '../chem/elementData.js';
 import { parseSmiles, hillFormula, writeSmiles } from '../chem/smiles.js';
@@ -71,9 +71,11 @@ function startWorker() {
     if (m.type === 'frame') {
       const oldMode = SB.frame?.stats.forceField;
       const oldPaused = SB.userPaused;
+      const elec = (st) => st ? `${st.charge}|${st.field}|${st.multiplicity}|${st.fidelity}` : '';
+      const oldElec = elec(SB.frame?.stats);
       SB.frame = m;
       SB.userPaused = m.stats.paused;
-      if (active && (oldMode !== m.stats.forceField || oldPaused !== SB.userPaused)) renderControls();
+      if (active && (oldMode !== m.stats.forceField || oldPaused !== SB.userPaused || oldElec !== elec(m.stats))) renderControls();
       SB.fresh = true;
       if (SB.tour) advanceTour(m.stats);
       if (m.stats?.phase) notePhase(m.stats.phase);
@@ -178,6 +180,11 @@ function notePhase(phase) {
   renderHud();
 }
 
+function chargeText(q) {
+  if (!q) return '0';
+  return `${q > 0 ? '+' : '−'}${Math.abs(q)}`;
+}
+
 function formulaText(list) {
   return (list && list.length ? list.join(' + ') : '—').replace(/(\d+)/g, '<sub>$1</sub>');
 }
@@ -208,7 +215,7 @@ function renderHud() {
   if (ph) {
     phaseEl.hidden = false;
     phaseEl.dataset.phase = ph.label;
-    phaseEl.innerHTML = `<b>${ph.title}</b><span>${Math.round((ph.frac ?? 0) * 100)}% coordinati · ${ph.note ?? ''}</span>`;
+    phaseEl.innerHTML = `<b>${ph.title}</b><span>${ph.label === 'pochi' ? '' : `${Math.round((ph.frac ?? 0) * 100)}% coordinati · `}${ph.note ?? ''}</span>`;
   } else phaseEl.hidden = true;
   const species = SB.census?.species ?? [];
   specEl.innerHTML = species.slice(0, 6).map(([f, n]) => `<span>${f} <b>${n}</b></span>`).join('') || '<span>nessuna specie</span>';
@@ -728,7 +735,7 @@ function onPointerUp(e) {
 function addPayload(count) {
   if (SB.add.kind === 'atom') return { symbol: SB.add.symbol, count };
   if (SB.add.kind === 'smiles') return { smiles: SB.add.smiles, count };
-  const m = SANDBOX_MOLECULES.find(x => x.id === SB.add.id);
+  const m = [...SANDBOX_MOLECULES, ...SANDBOX_IONS].find(x => x.id === SB.add.id);
   return { smiles: m.smiles, count };
 }
 
@@ -741,6 +748,11 @@ function renderSide() {
   const p = SB.preset;
   const molBtns = SANDBOX_MOLECULES.map(m => {
     const f = hillFormula(parseSmiles(m.smiles).atoms);
+    return `<button type="button" class="mol-chip ${SB.add.kind === 'mol' && SB.add.id === m.id ? 'active' : ''}" data-mol="${m.id}" title="${m.name}">${f}</button>`;
+  }).join('');
+  const ionBtns = SANDBOX_IONS.map(m => {
+    const g = parseSmiles(m.smiles);
+    const f = hillFormula(g.atoms, g.atoms.reduce((a, b) => a + b.charge, 0));
     return `<button type="button" class="mol-chip ${SB.add.kind === 'mol' && SB.add.id === m.id ? 'active' : ''}" data-mol="${m.id}" title="${m.name}">${f}</button>`;
   }).join('');
   const elBtns = SANDBOX_ELEMENTS.map(Z => `<button type="button" class="mol-chip ${SB.add.kind === 'atom' && SB.add.symbol === sym(Z) ? 'active' : ''}" data-el="${sym(Z)}" title="${ELEMENTS[Z - 1].name}">${sym(Z)}</button>`).join('');
@@ -764,10 +776,12 @@ function renderSide() {
     </div>
     <label class="lbl">Aggiungi molecole</label>
     <div class="mol-list">${molBtns}</div>
+    <label class="lbl">Aggiungi ioni (calcolati con MINDO/3 o Hartree–Fock)</label>
+    <div class="mol-list">${ionBtns}</div>
     <label class="lbl">Aggiungi atomi (radicali, gas nobili)</label>
     <div class="mol-list">${elBtns}</div>
     <label class="lbl" for="sb-smiles">Oppure una molecola da SMILES</label>
-    <div class="smiles-row"><input id="sb-smiles" placeholder="es. CC(=O)O" value="${SB.add.kind === 'smiles' ? escapeHtml(SB.add.smiles) : ''}" spellcheck="false"><button type="button" class="btn" id="sb-smiles-ok">Usa</button></div>
+    <div class="smiles-row"><input id="sb-smiles" placeholder="es. CC(=O)O oppure [NH4+]" value="${SB.add.kind === 'smiles' ? escapeHtml(SB.add.smiles) : ''}" spellcheck="false"><button type="button" class="btn" id="sb-smiles-ok">Usa</button></div>
     <div class="ctl" style="margin-top:8px"><label class="lbl" for="sb-count">Quantità: <span id="sb-count-out">${SB.count}</span></label>
       <div class="range-row"><input type="range" id="sb-count" min="1" max="40" step="1" value="${SB.count}"><button type="button" class="btn" id="sb-add">Aggiungi ${escapeHtml(addLabel())}</button></div></div>
     <p class="hint">Con lo strumento <b>Aggiungi</b> (a destra) puoi anche cliccare nella scatola per mettere una molecola dove vuoi.</p>
@@ -808,7 +822,6 @@ function renderSide() {
     try {
       const g = parseSmiles(s);
       if (g.atoms.some(a => !ATOM_PARAMS[a.Z])) throw new Error('elemento non disponibile nella sandbox');
-      if (g.atoms.some(a => a.charge)) throw new Error('la sandbox contiene solo specie neutre');
       SB.add = { kind: 'smiles', smiles: s };
       SB.info = '';
     } catch (e) { SB.info = `SMILES non valido: ${e.message}`; }
@@ -856,7 +869,7 @@ function pour(items) {
 function addLabel() {
   if (SB.add.kind === 'atom') return SB.add.symbol;
   if (SB.add.kind === 'smiles') return SB.add.smiles;
-  const m = SANDBOX_MOLECULES.find(x => x.id === SB.add.id);
+  const m = [...SANDBOX_MOLECULES, ...SANDBOX_IONS].find(x => x.id === SB.add.id);
   return hillFormula(parseSmiles(m.smiles).atoms);
 }
 
@@ -906,6 +919,13 @@ function renderControls() {
       <button type="button" data-v="hf" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo, fino a 8 atomi">Hartree–Fock</button>
     </div>
     <p class="hint">${escapeHtml(st?.modelWhy ?? SB.info ?? '')}</p>
+    <div class="ctl"><span class="lbl">Carica e spin · carica totale ${chargeText(st?.charge ?? 0)}</span>
+      <div class="seg" id="sb-mult">${[[0, 'spin libero'], [1, 'singoletto'], [2, 'doppietto'], [3, 'tripletto'], [4, 'quartetto']].map(([v, t]) => `<button type="button" data-v="${v}" aria-pressed="${(st?.multiplicity ?? 0) === v || (v === 0 && !st?.multiplicity)}" title="${v ? `Molteplicità 2S+1 = ${v} fissata` : 'Lo spin esce dal calcolo (livello di Fermi comune per i due spin)'}">${t}</button>`).join('')}</div>
+      <p class="hint">Le specie cariche si aggiungono dalla lista degli ioni o da SMILES con la carica, per esempio [NH4+] o C[O-]. La carica totale entra nella funzione d'onda; la carica di ogni molecola si legge dal calcolo.</p></div>
+    <div class="ctl"><span class="lbl">Campo elettrico uniforme (V/Å) ${st?.field ? `· acceso, |E| = ${nf(Math.hypot(...st.field), 2)} V/Å` : '· spento'}</span>
+      <div class="range-row field-row">${['x', 'y', 'z'].map((c, k) => `<label for="sb-E${c}">E<sub>${c}</sub></label><input id="sb-E${c}" type="text" inputmode="decimal" value="${nf(st?.field?.[k] ?? 0, 2)}" style="width:58px">`).join('')}</div>
+      <div class="btn-row" style="margin-top:4px"><button type="button" class="btn" id="sb-field-on">Applica il campo</button><button type="button" class="btn" id="sb-field-off" ${st?.field ? '' : 'disabled'}>Spegni</button></div>
+      <p class="hint">Calcolato con MINDO/3 nella funzione d'onda: polarizza le molecole, orienta i dipoli e spinge gli ioni (forza qE). 1 V/Å = 10¹⁰ V/m, come vicino alla punta di un microscopio a effetto di campo. Accendere o cambiare il campo è lavoro sul sistema, contato nel bilancio. Con base minima la ionizzazione per effetto tunnel non è descritta.</p></div>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
       <button type="button" data-v="1" aria-pressed="${thermo}" title="Termostato di Bussi: scambia calore con un bagno a temperatura costante (insieme canonico NVT)">Termostato</button>
@@ -969,6 +989,13 @@ function renderControls() {
   $('sb-T').addEventListener('input', (e) => { const v = Math.pow(10, +e.target.value); $('sb-T-out').textContent = `${nf(v, 0)} K`; post({ type: 'set', T: v }); });
   seg('sb-thermo', (v) => post({ type: 'set', thermostat: v === '1' }));
   seg('sb-ff', (v) => post({ type: 'set', forceField: v }));
+  seg('sb-mult', (v) => post({ type: 'set', multiplicity: +v || null }));
+  $('sb-field-on').addEventListener('click', () => {
+    const f = ['x', 'y', 'z'].map(c => parseFloat(String($(`sb-E${c}`).value).replace(',', '.')) || 0);
+    post({ type: 'set', field: f });
+    setTimeout(renderControls, 150);
+  });
+  $('sb-field-off').addEventListener('click', () => { post({ type: 'set', field: null }); setTimeout(renderControls, 150); });
   $('sb-box').addEventListener('input', (e) => { const v = +e.target.value; $('sb-box-out').textContent = `${nf(v, 1)} Å`; post({ type: 'set', box: v }); });
   seg('sb-baro', (v) => post({ type: 'set', barostat: { on: v === '1' } }));
   $('sb-p0').addEventListener('change', (e) => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (Number.isFinite(v) && v > 0) post({ type: 'set', barostat: { P0: v } }); });
@@ -1056,6 +1083,9 @@ function renderPanelBody() {
       <dt>Spin totale S<sub>z</sub></dt><dd>${nf(Math.abs(s.hf.Sz), 1)}${Math.abs(s.hf.Sz) > 0.25 ? ' (elettroni spaiati)' : ''}</dd>
       <dt>HOMO / LUMO</dt><dd>${nf(s.hf.homo, 2)} / ${nf(s.hf.lumo, 2)} eV</dd>
       <dt>Gap HOMO–LUMO</dt><dd>${nf(s.hf.gap, 2)} eV</dd>
+      <dt>Carica totale</dt><dd>${chargeText(s.charge ?? 0)}</dd>
+      ${s.dipole ? `<dt>Momento di dipolo</dt><dd>${nf(Math.hypot(...s.dipole) * 4.80320, 2)} D${s.charge ? ' (dipende dall\'origine: c\'è una carica netta)' : ''}</dd>` : ''}
+      ${s.field ? `<dt>Campo elettrico</dt><dd>(${s.field.map(v => nf(v, 2)).join('; ')}) V/Å</dd>` : ''}
       <dt>Calore di formazione ΔfH</dt><dd>${nf(s.hf.Hf * 4.184, 0)} kJ/mol</dd>
       <dt>Iterazioni SCF</dt><dd>${s.hf.iterations}${s.hf.converged ? '' : ' (non convergente)'}</dd>
     </dl>
