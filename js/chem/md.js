@@ -55,6 +55,7 @@ export class Simulation {
     this.ff = new ReactiveFF();
     this.rng = makeRng(seed);
     this.Z = [];
+    this.formal = [];        // carica formale di ogni atomo (ioni); la somma è la carica totale della scatola
     this.pos = new Float64Array(0);
     this.vel = new Float64Array(0);
     this.F = new Float64Array(0);
@@ -91,6 +92,9 @@ export class Simulation {
   }
 
   get N() { return this.Z.length; }
+
+  /** Carica totale (somma delle cariche formali delle specie inserite). */
+  get netCharge() { return this.formal.reduce((a, b) => a + b, 0); }
 
   resize(N) {
     const grow = (a) => { const b = new Float64Array(3 * N); b.set(a.subarray(0, Math.min(a.length, 3 * N))); return b; };
@@ -227,6 +231,7 @@ export class Simulation {
         if (!ok) continue;
         const start = this.N;
         this.Z = [...this.Z, ...template.Z];
+        this.formal = [...this.formal, ...(template.formal ?? template.Z.map(() => 0))];
         this.resize(this.Z.length);
         coords.forEach((p, k) => { this.pos.set(p, 3 * (start + k)); });
         // velocità del centro di massa di Maxwell–Boltzmann per l'intera molecola, più moto interno termico
@@ -244,6 +249,7 @@ export class Simulation {
       throw new Error('Atomi non validi (massimo 400, coordinate finite).');
     const start = this.N;
     this.Z = [...this.Z, ...list.map(a => a.Z)];
+    this.formal = [...this.formal, ...list.map(a => a.formal ?? 0)];
     this.resize(this.Z.length);
     list.forEach((a, k) => {
       this.pos.set(a.pos, 3 * (start + k));
@@ -257,6 +263,7 @@ export class Simulation {
     const pos = new Float64Array(3 * keep.length), vel = new Float64Array(3 * keep.length);
     keep.forEach((i, k) => { pos.set(this.pos.subarray(3 * i, 3 * i + 3), 3 * k); vel.set(this.vel.subarray(3 * i, 3 * i + 3), 3 * k); });
     this.Z = keep.map(i => this.Z[i]);
+    this.formal = keep.map(i => this.formal[i] ?? 0);
     this.resize(this.Z.length);
     this.pos = pos; this.vel = vel;
     if (this.grab && drop.has(this.grab.i)) this.grab = null;
@@ -279,7 +286,7 @@ export class Simulation {
   forces() {
     const { N, pos, F } = this;
     if (!N) { this.res = { E: 0, parts: { bond: 0, angle: 0, vdw: 0, es: 0 }, q: new Float64Array(0), bonds: [] }; this.Ewall = 0; this.Egrab = 0; this.wallForce = 0; this.F.fill(0); return; }
-    this.res = this.provider ? this.provider.compute(this.Z, pos, F) : this.ff.compute(this.Z, pos, F);
+    this.res = this.provider ? this.provider.compute(this.Z, pos, F, { charge: this.netCharge, formal: this.formal }) : this.ff.compute(this.Z, pos, F);
     if (!Number.isFinite(this.res.E) || !Array.from(F).every(Number.isFinite))
       throw new Error('Forze o energia non finite: simulazione arrestata.');
     // pareti morbide: E = ½ k d² per ogni atomo oltre il bordo della scatola
@@ -457,7 +464,12 @@ export class Simulation {
     const fragOf = new Array(N);
     const frags = [];
     for (const atoms of groups.values()) {
-      const formula = hillFormula(atoms.map(i => ({ Z: this.Z[i] })));
+      // con un motore quantistico la carica del frammento è la somma delle cariche atomiche calcolate:
+      // un protone che passa da H₃O⁺ a OH⁻ sposta anche la carica, che quindi non è un'etichetta fissa
+      let qf = 0;
+      if (this.provider && this.res?.q?.length === N) for (const i of atoms) qf += this.res.q[i];
+      const zq = Math.round(qf);
+      const formula = hillFormula(atoms.map(i => ({ Z: this.Z[i] })), zq && Math.abs(qf - zq) < 0.35 ? zq : 0);
       const id = atoms.join(',');
       const f = { atoms, formula, id };
       frags.push(f);

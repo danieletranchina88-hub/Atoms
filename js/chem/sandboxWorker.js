@@ -8,7 +8,7 @@ import { embedMolecule } from './embed.js';
 import { analyzeStructure } from './structure.js';
 import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
 import { makeHFProvider, aimdFeasible } from './aimd.js';
-import { makeMindo3Provider, mindo3Supports } from './mindo3.js';
+import { makeMindo3Provider, mindo3Supports, Mindo3 } from './mindo3.js';
 import { RDF, MSD, HeatCapacity } from './mdAnalysis.js';
 import { makeNobleLJProvider, nobleOnly, NOBLE_LJ } from './ljNoble.js';
 import { localOrder, phaseVerdict, Mobility } from './structureOrder.js';
@@ -70,12 +70,13 @@ function physics() {
 }
 
 function snapshot() {
-  return { Z: sim.Z.slice(), pos: Array.from(sim.pos), vel: Array.from(sim.vel), box: sim.box, T: sim.T, thermostat: sim.thermostat, dt: sim.dt, forceField, barostat: { ...sim.barostat } };
+  return { Z: sim.Z.slice(), formal: sim.formal.slice(), pos: Array.from(sim.pos), vel: Array.from(sim.vel), box: sim.box, T: sim.T, thermostat: sim.thermostat, dt: sim.dt, forceField, barostat: { ...sim.barostat }, field: fieldVec, multiplicity: spinMult };
 }
 
 function restore(d) {
   sim = new Simulation({ box: d.box, T: d.T, dt: d.dt ?? 0.4 });
-  sim.addAtoms(d.Z.map((z, i) => ({ Z: z, pos: d.pos.slice(3 * i, 3 * i + 3), vel: d.vel.slice(3 * i, 3 * i + 3) })));
+  sim.addAtoms(d.Z.map((z, i) => ({ Z: z, formal: d.formal?.[i] ?? 0, pos: d.pos.slice(3 * i, 3 * i + 3), vel: d.vel.slice(3 * i, 3 * i + 3) })));
+  fieldVec = d.field ?? null; spinMult = d.multiplicity ?? null;
   sim.thermostat = d.thermostat;
   if (d.barostat) sim.barostat = { ...d.barostat };
   setForceField(d.forceField ?? 'reactive');
@@ -85,32 +86,41 @@ function restore(d) {
   resetAnalysis();
 }
 
-/** Geometria di una molecola dal suo SMILES: modello VSEPR, poi minimizzazione con il campo reattivo. */
+/**
+ * Geometria di una molecola dal suo SMILES: modello VSEPR, poi minimizzazione. Le specie cariche (ioni, zwitterioni)
+ * sono ammesse: la carica formale resta sugli atomi che la portano e la somma è la carica della scatola.
+ * Gli ioni si rilassano con MINDO/3 alla loro carica (il campo classico non descrive cariche nette).
+ */
 function template(smiles) {
   if (templates.has(smiles)) return templates.get(smiles);
   const g = parseSmiles(smiles);
-  if (!g.atoms.length || g.atoms.some(a => !ATOM_PARAMS[a.Z] || a.charge))
-    throw new Error('Sandbox: solo specie neutre con elementi supportati.');
-  const an = analyzeStructure({ atoms: g.atoms, bonds: g.bonds, charge: 0 });
+  if (!g.atoms.length || g.atoms.some(a => !ATOM_PARAMS[a.Z]))
+    throw new Error('Sandbox: elemento non supportato nella stringa SMILES.');
+  const charge = g.atoms.reduce((s, a) => s + a.charge, 0);
+  const an = analyzeStructure({ atoms: g.atoms, bonds: g.bonds, charge });
   const at = embedMolecule(g, an.atoms.map(a => a.lonePairs + a.radical), { seeds: 2, iterations: 1500 });
   const Z = at.map(a => a.Z);
+  const formal = at.map((a, i) => (i < g.atoms.length && g.atoms[i].Z === a.Z ? g.atoms[i].charge : 0));
+  if (formal.reduce((s, q) => s + q, 0) !== charge) { formal.fill(0); formal[0] = charge; }
   const pos = Float64Array.from(at.flatMap(a => a.xyz.map(v => v * BOHR_ANG)));
   if (Z.length > 1) {
-    const ff = new ReactiveFF();
+    const quantum = charge !== 0 && mindo3Supports(Z).ok;
+    const mindo = quantum ? new Mindo3({ Tel: 300, conv: 1e-6, charge }) : null;
+    const ff = quantum ? null : new ReactiveFF();
     const F = new Float64Array(pos.length), v = new Float64Array(pos.length);
     let dt = 0.05, alpha = 0.1, npos = 0;
-    for (let s = 0; s < 2500; s++) {
-      ff.compute(Z, pos, F);
+    for (let s = 0; s < (quantum ? 400 : 2500); s++) {
+      if (quantum) mindo.compute(Z, pos, F); else ff.compute(Z, pos, F);
       let P = 0, vn = 0, fn = 0;
       for (let k = 0; k < pos.length; k++) { P += F[k] * v[k]; vn += v[k] * v[k]; fn += F[k] * F[k]; }
-      if (Math.sqrt(fn) < 1e-4) break;
+      if (Math.sqrt(fn) < (quantum ? 1e-3 : 1e-4)) break;
       vn = Math.sqrt(vn); fn = Math.sqrt(fn);
       for (let k = 0; k < pos.length; k++) v[k] = (1 - alpha) * v[k] + alpha * F[k] / fn * vn;
-      if (P > 0) { if (++npos > 5) { dt = Math.min(dt * 1.1, 0.3); alpha *= 0.99; } } else { npos = 0; dt *= 0.5; v.fill(0); alpha = 0.1; }
+      if (P > 0) { if (++npos > 5) { dt = Math.min(dt * 1.1, quantum ? 0.1 : 0.3); alpha *= 0.99; } } else { npos = 0; dt *= 0.5; v.fill(0); alpha = 0.1; }
       for (let k = 0; k < pos.length; k++) { v[k] += dt * F[k]; pos[k] += dt * v[k]; }
     }
   }
-  const t = { Z, pos };
+  const t = { Z, pos, formal, charge };
   templates.set(smiles, t);
   return t;
 }
@@ -126,7 +136,16 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
     const f = aimdFeasible([...sim.Z, ...Array.from({ length: count }, () => t.Z).flat()], hfBasis);
     if (!f.ok) throw new Error(f.reason);
   }
-  if (forceField === 'mindo3') mindo3Check([...sim.Z, ...Array.from({ length: count }, () => t.Z).flat()]);
+  const nextZ = [...sim.Z, ...Array.from({ length: count }, () => t.Z).flat()];
+  if (forceField === 'mindo3') mindo3Check(nextZ);
+  // una carica netta (o un campo elettrico) richiede un motore quantistico: il campo classico ha frammenti neutri
+  const nextCharge = sim.netCharge + count * t.charge;
+  if (nextCharge !== 0 || t.charge !== 0 || fieldVec) {
+    const why = quantumFor(nextZ, nextCharge);
+    if (!why.ok) throw new Error(why.reason);
+    if (fidelity !== 'auto' && (forceField === 'reactive' || forceField === 'lj'))
+      throw new Error('Specie cariche e campo elettrico richiedono MINDO/3 o Hartree–Fock: scegli "fedeltà automatica" o un motore quantistico.');
+  }
   mbHist = null;
   const placed = sim.editInventory(() => sim.addMolecule(t, count, T ?? sim.T, at));
   return placed;
@@ -134,6 +153,8 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
 
 let forceField = 'reactive';
 let fidelity = 'auto';
+let fieldVec = null;   // campo elettrico uniforme [Ex, Ey, Ez] in V/Å (solo MINDO/3)
+let spinMult = null;   // molteplicità di spin fissata (2S+1) oppure null = libera
 let hfBasis = 'STO-3G';
 let modelWhy = 'Scatola vuota: aggiungi atomi o molecole.';
 
@@ -152,7 +173,21 @@ function mindo3Check(Z) {
   if (Z.length > MINDO3_MAX_ATOMS) throw new Error(`Il calcolo quantistico MINDO/3 è limitato a ${MINDO3_MAX_ATOMS} atomi (ce ne sarebbero ${Z.length}): ogni passo richiede la diagonalizzazione dell'hamiltoniana.`);
 }
 
+/** Esiste un motore quantistico per questa composizione e carica? (necessario per ioni e campo elettrico) */
+function quantumFor(Z, charge) {
+  const m = mindo3Supports(Z);
+  if (m.ok && Z.length <= MINDO3_MAX_ATOMS) return { ok: true, kind: 'mindo3' };
+  const hf = aimdFeasible(Z, hfBasis);
+  if (hf.ok && !fieldVec) return { ok: true, kind: 'hf' };
+  return { ok: false, reason: `${charge ? `Carica totale ${charge > 0 ? '+' : ''}${charge}` : 'Campo elettrico'}: serve un calcolo quantistico, ma ${m.ok ? `MINDO/3 è limitato a ${MINDO3_MAX_ATOMS} atomi` : `MINDO/3 non copre ${m.missing.join(', ')}`}${hf.ok ? ' e Hartree–Fock non supporta il campo' : ' e il sistema è troppo grande per Hartree–Fock'}.` };
+}
+
 function bestModel(Z) {
+  if (Z.length && (sim.netCharge !== 0 || fieldVec)) {
+    const q = quantumFor(Z, sim.netCharge);
+    if (q.ok) return { kind: q.kind, why: `${sim.netCharge ? `Carica totale ${sim.netCharge > 0 ? '+' : ''}${sim.netCharge}` : 'Campo elettrico'}: ${q.kind === 'mindo3' ? 'MINDO/3 con la carica e il campo nella funzione d’onda.' : 'Hartree–Fock con la carica totale.'}` };
+    return { kind: 'reactive', why: q.reason };
+  }
   if (!Z.length) return { kind: 'reactive', why: 'Scatola vuota. Versa atomi o molecole: il modello si sceglie da solo.' };
   if (nobleOnly(Z)) {
     const names = [...new Set(Z)].map(z => NOBLE_LJ[z].symbol).join(', ');
@@ -174,11 +209,13 @@ function applyModel(kind, basis = hfBasis) {
   if (kind === 'mindo3') mindo3Check(sim.Z);
   if (kind === 'lj' && sim.Z.length && !nobleOnly(sim.Z)) throw new Error('Il Lennard–Jones pubblicato vale solo per He, Ne, Ar, Kr e Xe.');
   if (!['hf', 'reactive', 'mindo3', 'lj'].includes(kind)) throw new Error('Modello non valido.');
+  if ((kind === 'reactive' || kind === 'lj') && sim.netCharge !== 0) throw new Error(`La scatola ha carica ${sim.netCharge > 0 ? '+' : ''}${sim.netCharge}: il campo classico descrive solo frammenti neutri. Usa MINDO/3 o Hartree–Fock.`);
+  if (kind !== 'mindo3' && fieldVec) throw new Error('Il campo elettrico esterno è calcolato con MINDO/3: spegnilo o usa MINDO/3.');
   const same = kind === forceField && (kind === 'reactive' || sim.provider);
   forceField = kind;
   if (!same) {
-    sim.provider = kind === 'hf' ? makeHFProvider({ basis })
-      : kind === 'mindo3' ? makeMindo3Provider()
+    sim.provider = kind === 'hf' ? makeHFProvider({ basis, fixedMultiplicity: spinMult })
+      : kind === 'mindo3' ? makeMindo3Provider({ multiplicity: spinMult, field: fieldVec })
       : kind === 'lj' ? makeNobleLJProvider()
       : null;
   }
@@ -206,6 +243,50 @@ function setForceField(kind, basis = hfBasis) {
   applyModel(kind, basis);
 }
 
+/**
+ * Accende, cambia o spegne il campo elettrico uniforme (V/Å). Cambiare il campo cambia l'energia potenziale:
+ * la differenza è lavoro esterno sul sistema, contabilizzato come tale (non deriva numerica).
+ */
+function setField(f) {
+  const v = f && f.some(x => x) ? f.map(Number) : null;
+  if (v && (v.length !== 3 || !v.every(Number.isFinite) || Math.hypot(...v) > 10)) throw new Error('Campo elettrico: tre componenti finite, modulo al massimo 10 V/Å.');
+  const old = fieldVec;
+  if (!sim.res && sim.N) sim.forces();
+  const before = sim.res?.E ?? 0;
+  fieldVec = v;
+  try {
+    if (fidelity === 'auto') refreshFidelity();
+    else if (v && forceField !== 'mindo3') throw new Error('Il campo elettrico esterno è calcolato con MINDO/3: scegli MINDO/3 o la fedeltà automatica.');
+    sim.provider?.setField?.(v);
+    sim.res = null;
+    if (sim.N) { sim.forces(); sim.work += sim.res.E - before; }
+  } catch (e) {
+    fieldVec = old; sim.provider?.setField?.(old); sim.res = null;
+    throw e;
+  }
+}
+
+/** Fissa la molteplicità di spin 2S+1 (null = spin libero, livello di Fermi comune). Il cambio è lavoro esterno. */
+function setMultiplicity(mult) {
+  const v = mult === null || mult === 0 ? null : Number(mult);
+  if (v !== null && (!Number.isInteger(v) || v < 1 || v > 7)) throw new Error('Molteplicità ammessa: 1–7.');
+  if (!sim.res && sim.N) sim.forces();
+  const before = sim.res?.E ?? 0, old = spinMult;
+  spinMult = v;
+  try {
+    if (sim.provider && 'multiplicity' in sim.provider) { sim.provider.multiplicity = v; sim.provider.reset(); }
+    if (sim.provider && 'fixedMultiplicity' in sim.provider) { sim.provider.fixedMultiplicity = v; sim.provider.reset(); }
+    sim.res = null;
+    if (sim.N) { sim.forces(); sim.work += sim.res.E - before; }
+  } catch (e) {
+    spinMult = old;
+    if (sim.provider && 'multiplicity' in sim.provider) sim.provider.multiplicity = old;
+    if (sim.provider && 'fixedMultiplicity' in sim.provider) sim.provider.fixedMultiplicity = old;
+    sim.provider?.reset(); sim.res = null;
+    throw e;
+  }
+}
+
 function refreshFidelity() {
   if (fidelity !== 'auto') return;
   const pick = bestModel(sim.Z);
@@ -216,6 +297,7 @@ function refreshFidelity() {
 
 function loadPreset(p) {
   sim = new Simulation({ box: p.box, T: p.T, dt: p.dt ?? 0.2, seed: p.seed ?? 2024 });
+  fieldVec = p.field ?? null; spinMult = p.multiplicity ?? null;
   censusSent = -1; lastEventSent = 0; mbHist = null;
   stepsPerFrame = p.speed ?? 40;
   if (p.atoms) {
@@ -234,6 +316,7 @@ function loadPreset(p) {
   }
   if (p.forceField) setForceField(p.forceField);
   else refreshFidelity();
+  if (p.thermostat !== undefined) sim.thermostat = p.thermostat;
   let placed = 0, wanted = 0;
   for (const [s, n] of p.add) {
     wanted += n;
@@ -307,6 +390,9 @@ function classifyPhase() {
     const label = { solido: 'solido', liquido: 'liquido', gas: 'gas', misto: 'misto' }[v.id];
     return { label, title: v.name, frac: 1 - o.fraction.vapor, clusters: 0, T: sim.temperature(), note: `${v.why}. T* = kT/ε = ${(sim.temperature() / eps).toFixed(2)}${mobility.lostFraction != null ? ` · primi vicini persi in 3τ: ${Math.round(100 * mobility.lostFraction)}%` : ''} · struttura locale q₆ (ten Wolde–Frenkel).` };
   }
+  // una fase (gas, liquido, solido) è una proprietà collettiva: con poche molecole non ha senso
+  const nFrag = sim.frags?.length ?? 0;
+  if (nFrag && nFrag < 8) return { label: 'pochi', title: `${nFrag} ${nFrag === 1 ? 'molecola' : 'molecole'}: nessuna fase`, frac: 0, clusters: nFrag, T: sim.temperature(), note: 'Gas, liquido e solido descrivono molte particelle: qui si seguono le singole molecole.' };
   const pos = sim.pos;
   const heavy = [];
   for (let i = 0; i < N; i++) if (sim.Z[i] !== 1) heavy.push(i);
@@ -364,6 +450,7 @@ function frame() {
       heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
       forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null, phase: cachedPhase(),
+      charge: sim.netCharge, field: fieldVec, multiplicity: spinMult, dipole: sim.provider?.info?.dipole ?? null,
     },
     mb: speedHistogram(),
   };
@@ -440,7 +527,7 @@ onmessage = (ev) => {
         postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero. ${modelWhy}` : modelWhy });
         break;
       }
-      case 'clear': sim.clear(); light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
+      case 'clear': sim.clear(); fieldVec = null; spinMult = null; light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
       case 'remove': sim.editInventory(() => sim.remove(m.indices)); lastEventSent = sim.eventSerial; refreshFidelity(); break;
       case 'set':
         if (m.T !== undefined) { if (!Number.isFinite(m.T) || m.T < 0) throw new Error('Temperatura non valida.'); sim.T = m.T; }
@@ -453,6 +540,8 @@ onmessage = (ev) => {
         if (m.light) light = { ...light, ...m.light };
         if (m.mbSpecies !== undefined) { mbSpecies = m.mbSpecies; mbHist = null; }
         if (m.forceField !== undefined) setForceField(m.forceField, m.basis ?? hfBasis);
+        if (m.field !== undefined) setField(m.field);
+        if (m.multiplicity !== undefined) setMultiplicity(m.multiplicity);
         if (m.barostat) sim.barostat = { ...sim.barostat, ...m.barostat };
         if (m.rdfPair !== undefined) { rdfPairUser = m.rdfPair; rdf.reset(m.rdfPair); physSent = -1; }
         break;

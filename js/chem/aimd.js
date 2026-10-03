@@ -15,24 +15,33 @@ export const AIMD_MAX_ATOMS = 8;
  * Lo stato di spin è scelto una volta, all'inizio: il più stabile tra le due molteplicità più basse
  * (per O₂ il tripletto, come prevede la regola di Hund).
  */
-export function makeHFProvider({ basis = 'STO-3G' } = {}) {
+export function makeHFProvider({ basis = 'STO-3G', fixedMultiplicity = null } = {}) {
   let guess = null;
   let multiplicity = null;
+  let charge = 0;
   let key = '';
   let step = 0;
   const provider = {
     kind: 'hf',
     basis,
     info: {},
+    fixedMultiplicity,
     reset() { guess = null; multiplicity = null; key = ''; step = 0; },
-    compute(Z, pos, F) {
+    setField(f) { if (f && f.some(v => v)) throw new Error('Il campo elettrico esterno è disponibile con MINDO/3, non con Hartree–Fock.'); },
+    compute(Z, pos, F, ctx = {}) {
+      if ((ctx.charge ?? 0) !== charge) { charge = ctx.charge ?? 0; guess = null; multiplicity = null; }
       const atoms = Z.map((z, i) => ({ Z: z, xyz: [pos[3 * i] / BOHR_ANG, pos[3 * i + 1] / BOHR_ANG, pos[3 * i + 2] / BOHR_ANG] }));
       const k = Array.from(Z).join(',');
       if (k !== key) { guess = null; multiplicity = null; key = k; }
-      const nel = Z.reduce((s, z) => s + z, 0);
-      const run = (mult, g, bs) => runHF(atoms, { basis, unrestricted: true, multiplicity: mult, guess: g, breakSymmetry: bs, conv: 1e-9, maxIter: 150 });
+      const nel = Z.reduce((s, z) => s + z, 0) - charge;
+      const run = (mult, g, bs) => runHF(atoms, { basis, charge, unrestricted: true, multiplicity: mult, guess: g, breakSymmetry: bs, conv: 1e-9, maxIter: 150 });
       let res;
-      if (multiplicity === null) {
+      if (provider.fixedMultiplicity && multiplicity === null) {
+        const m = provider.fixedMultiplicity;
+        if ((nel - (m - 1)) % 2 !== 0 || m - 1 > nel) throw new Error(`Molteplicità ${m} impossibile con ${nel} elettroni.`);
+        res = run(m, null, m === 1);
+        multiplicity = m;
+      } else if (multiplicity === null) {
         // stato fondamentale di spin: si confrontano le due molteplicità più basse
         const low = nel % 2 === 0 ? 1 : 2;
         const cands = [];
@@ -68,7 +77,7 @@ export function makeHFProvider({ basis = 'STO-3G' } = {}) {
           if (n > 0.05) bonds.push({ i, j, n, w: 1 });
         }
       }
-      provider.info = { multiplicity, S2: res.S2, converged: res.converged, iterations: res.iterations, nbf: res.n, basis };
+      provider.info = { multiplicity, S2: res.S2, converged: res.converged, iterations: res.iterations, nbf: res.n, basis, charge };
       provider.last = res;
       return {
         E: res.energy * HARTREE_EV,

@@ -14,7 +14,7 @@ export function ionizedSubshell(config) {
 }
 
 /** Energia di prima ionizzazione come differenza di energie totali (ΔSCF): E(catione) − E(atomo). */
-export function ionizationEnergy(scf) {
+export function ionizationEnergy(scf, opts = {}) {
   if (scf.Z === 1) {
     // Il catione H⁺ non ha elettroni: E = 0.
     return { hartree: -scf.energy.total, eV: -scf.energy.total * HARTREE_EV, converged: true, from: { n: 1, l: 0 } };
@@ -23,17 +23,21 @@ export function ionizationEnergy(scf) {
   const cationCfg = scf.config
     .map(s => (s === from ? { ...s, occ: s.occ - 1 } : { ...s }))
     .filter(s => s.occ > 0);
-  const cation = runSCF(scf.Z, cationCfg);
+  const cation = runSCF(scf.Z, cationCfg, opts);
   const de = cation.energy.total - scf.energy.total;
   return { hartree: de, eV: de * HARTREE_EV, converged: cation.converged, from };
 }
 
-/** Calcola l'atomo con numero atomico Z e restituisce un oggetto serializzabile. */
-export function computeAtom(Z) {
+/**
+ * Calcola l'atomo con numero atomico Z e restituisce un oggetto serializzabile.
+ * relativistic (predefinito): equazione di Koelling–Harmon + scambio di MacDonald–Vosko (schema ScRLDA del NIST);
+ * false: Kohn–Sham non relativistico (LDA). Per gli atomi pesanti la differenza è grande (contrazione di 6s, 7s).
+ */
+export function computeAtom(Z, { relativistic = true } = {}) {
   const config = groundStateConfiguration(Z);
   const t0 = Date.now();
-  const scf = runSCF(Z, config);
-  const ion = ionizationEnergy(scf);
+  const scf = runSCF(Z, config, { relativistic });
+  const ion = ionizationEnergy(scf, { relativistic });
   const elapsed = Date.now() - t0;
 
   const orbitals = scf.orbitals.map(o => {
@@ -65,6 +69,7 @@ export function computeAtom(Z) {
     config,
     term: hundTerm(config),
     grid: { Z, N: grid.N, h: grid.h, xmin: grid.xmin },
+    relativistic,
     orbitals,
     V: scf.V,
     rho,

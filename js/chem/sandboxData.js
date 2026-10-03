@@ -24,10 +24,33 @@ export const SANDBOX_MOLECULES = [
   { id: 'OH', smiles: '[OH]', name: 'radicale ossidrile' },
 ];
 
+// Ioni e specie cariche: richiedono un motore quantistico (MINDO/3 o Hartree–Fock), che riceve la carica totale.
+// MINDO/3 non ha i parametri della coppia Cl–O: Cl⁻ non si può mettere con acqua o ossigeno.
+export const SANDBOX_IONS = [
+  { id: 'H3O+', smiles: '[OH3+]', name: 'ione ossonio (idronio)' },
+  { id: 'OH-', smiles: '[OH-]', name: 'ione idrossido' },
+  { id: 'NH4+', smiles: '[NH4+]', name: 'ione ammonio' },
+  { id: 'NH2-', smiles: '[NH2-]', name: 'ione ammiduro' },
+  { id: 'H+', smiles: '[H+]', name: 'protone nudo' },
+  { id: 'H-', smiles: '[H-]', name: 'ione idruro' },
+  { id: 'CH3+', smiles: '[CH3+]', name: 'catione metile (carbocatione)' },
+  { id: 'CH3-', smiles: '[CH3-]', name: 'anione metile (carbanione)' },
+  { id: 'NO2+', smiles: 'O=[N+]=O', name: 'ione nitronio, l\'elettrofilo della nitrazione' },
+  { id: 'NO3-', smiles: '[O-][N+](=O)[O-]', name: 'ione nitrato' },
+  { id: 'CH3O-', smiles: 'C[O-]', name: 'ione metossido' },
+  { id: 'F-', smiles: '[F-]', name: 'ione fluoruro' },
+  { id: 'Cl-', smiles: '[Cl-]', name: 'ione cloruro (non con O: manca la coppia Cl–O)' },
+];
+
 export const SANDBOX_ELEMENTS = [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 35, 36, 53, 54];
 
 // Nomi delle specie riconosciute durante la simulazione (formula come la scrive hillFormula).
 export const SPECIES_NAMES = {
+  // ioni (la carica è letta dalla funzione d'onda dei motori quantistici)
+  'H₃O⁺': 'ione ossonio', 'HO⁻': 'ione idrossido', 'NH₄⁺': 'ione ammonio', 'H₂N⁻': 'ione ammiduro', 'H⁺': 'protone',
+  'H⁻': 'ione idruro', 'CH₃⁺': 'catione metile', 'CH₃⁻': 'anione metile', 'NO₂⁺': 'ione nitronio', 'NO₃⁻': 'ione nitrato',
+  'CH₃O⁻': 'ione metossido', 'F⁻': 'ione fluoruro', 'Cl⁻': 'ione cloruro', 'H₂O⁺': 'catione radicale dell\'acqua',
+  'C₆H₆NO₂⁺': 'complesso benzene–nitronio (σ o π)', 'C₆H₅NO₂': 'nitrobenzene', 'C₆H₆': 'benzene', 'NO₂': 'diossido di azoto',
   'H': 'idrogeno atomico', 'H₂': 'idrogeno', 'O': 'ossigeno atomico', 'O₂': 'ossigeno', 'O₃': 'ozono',
   'HO': 'radicale ossidrile ·OH', 'HO₂': 'radicale idroperossile', 'H₂O': 'acqua', 'H₂O₂': 'perossido di idrogeno',
   'N': 'azoto atomico', 'N₂': 'azoto', 'NH₃': 'ammoniaca', 'H₂N': 'radicale amminico', 'HN': 'imidogeno', 'N₂H₄': 'idrazina',
@@ -83,6 +106,25 @@ export const PRESETS = [
     box: 6.2, T: 300, atoms: waterLattice(), thermalize: 300, thermostat: true, speed: 20, style: 'cloud',
     text: 'Otto molecole d\'acqua alla densità del liquido (1,0 g/cm³), con la struttura elettronica ricalcolata a ogni passo: le cariche, la polarizzazione delle molecole e i legami a idrogeno cambiano con la geometria. Limite noto: MINDO/3 sottostima i legami a idrogeno.',
     tips: ['Colora per carica: O negativo, H positivo, calcolati dalla funzione d\'onda.'],
+  },
+  {
+    id: 'q-neutral', name: 'Neutralizzazione: H₃O⁺ + OH⁻', forceField: 'mindo3', quantum: true,
+    box: 8, T: 300, dt: 0.1, add: [['[OH3+]', 1], ['[OH-]', 1]], thermostat: false, speed: 30,
+    text: 'Uno ione ossonio e uno ione idrossido in fase gassosa, con la struttura elettronica calcolata a ogni passo e la carica di ogni specie letta dalla funzione d\'onda. L\'attrazione elettrostatica li avvicina, il protone passa e si formano due molecole d\'acqua: H₃O⁺ + OH⁻ → 2 H₂O. Senza solvente l\'energia liberata (circa 10 eV, l\'affinità protonica di OH⁻ meno quella di H₂O) resta nelle due molecole, che si scaldano a migliaia di kelvin: in acqua il solvente la disperderebbe come calore di neutralizzazione (57 kJ/mol).',
+    tips: ['Sistema isolato: guarda salire la temperatura quando il protone passa.', 'Colora per carica: la carica positiva si sposta con il protone.', 'Il bilancio dell\'energia può mostrare un salto di qualche decimo di eV quando, avvicinandosi, gli ioni passano a un altro stato elettronico (il gap HOMO–LUMO cambia di colpo): la dinamica segue un solo stato, quello più basso, e non descrive transizioni fra stati.'],
+  },
+  {
+    id: 'q-wheland', name: 'Nitrazione del benzene: l\'intermedio di Wheland perde H⁺', forceField: 'mindo3', quantum: true,
+    box: 14, T: 300, thermalize: 300, thermostat: true, speed: 20, style: 'ball',
+    atoms: [[8, -3.134, -0.1045, -0.7237], [7, -2.243, -0.117, 0.0904], [8, -2.1615, -0.2046, 1.2976], [6, -0.8523, 0.0053, -0.5204], [6, -0.0185, -1.2344, -0.3517], [6, 1.2613, -1.2034, 0.1618], [6, 1.8356, 0.0405, 0.5469], [6, 1.1429, 1.2723, 0.3787], [6, -0.1385, 1.2703, -0.1319], [1, -0.9033, 0.1026, -1.6497], [1, -0.458, -2.1935, -0.6856], [1, 1.8456, -2.1326, 0.2655], [1, 2.8564, 0.052, 0.9729], [1, 1.6374, 2.2205, 0.6466], [1, -0.6701, 2.2265, -0.2975], [7, -0.9888, 0.2656, -3.5408], [1, -1.0058, -0.6383, -3.9997], [1, -1.8191, 0.7634, -3.8422], [1, -0.1926, 0.7697, -3.9151]].map(([Z, x, y, z], i) => ({ Z, pos: [x, y, z], formal: i === 3 ? 1 : 0 })),
+    text: 'Sostituzione elettrofila aromatica, secondo passo. Si parte dal complesso σ (intermedio di Wheland) C₆H₆NO₂⁺: l\'elettrofilo NO₂⁺ è legato a un carbonio diventato sp³, l\'anello ha perso l\'aromaticità e porta la carica positiva. Un\'ammoniaca vicina strappa il protone di quel carbonio: si ottengono nitrobenzene e NH₄⁺ e l\'anello torna aromatico. Geometria iniziale ottimizzata con MINDO/3, dinamica quantistica a ogni passo. Nel laboratorio la base è HSO₄⁻ o l\'acqua.',
+    tips: ['Colora per carica: la carica positiva passa dall\'anello allo ione ammonio.', 'Stile "orbitali": l\'HOMO del nitrobenzene è di nuovo un orbitale π delocalizzato sull\'anello.', 'Primo passo: in "Scatola vuota" aggiungi benzene e NO₂⁺ (lista degli ioni). MINDO/3 lega il complesso σ solo di circa 3 kcal/mol (la chimica reale molto di più): a 300 K resta spesso un complesso di incontro.'],
+  },
+  {
+    id: 'q-field', name: 'Molecole d\'acqua in un campo elettrico', forceField: 'mindo3', quantum: true,
+    box: 10, T: 150, add: [['O', 6]], field: [0, 0, 0.5], thermostat: true, speed: 20,
+    text: 'Un campo elettrico uniforme di 0,5 V/Å lungo z entra nella funzione d\'onda di MINDO/3: polarizza le molecole e ne orienta i dipoli. L\'energia −μ·E è minima con il dipolo parallelo al campo, cioè con gli idrogeni (estremo positivo) verso +z e l\'ossigeno verso −z. L\'agitazione termica si oppone all\'allineamento. Cambia intensità e direzione del campo nei controlli: il lavoro fatto dal campo è contato nel bilancio dell\'energia.',
+    tips: ['Confronta il dipolo totale (pannello) a campo acceso e spento.', 'Abbassa la temperatura: l\'allineamento aumenta (legge di Langevin–Debye).'],
   },
   {
     id: 'argon', name: 'Gas di argon: Maxwell–Boltzmann',

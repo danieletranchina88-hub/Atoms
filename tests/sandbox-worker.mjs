@@ -21,5 +21,12 @@ try {
   next=wait(m=>m.type==='frame'&&m.N===120&&m.stats.t>300);
   worker.postMessage({type:'preset',preset:PRESETS.find(p=>p.id==='water')});worker.postMessage({type:'set',paused:false,thermostat:false});
   frame=await next;assert.ok(frame.stats.dt<=0.2+1e-12,`dt ${frame.stats.dt}`);assert.ok(Math.abs(frame.stats.diagnostics.drift)<0.1,`drift ${frame.stats.diagnostics.drift}`);
-  console.log('Sandbox worker: UHF step, clear, immediate molecular census and fixed time step passed.');
+  // ioni: la carica entra nel calcolo quantistico, il campo classico li rifiuta
+  next=wait(m=>m.type==='frame'&&m.N===0);worker.postMessage({type:'clear'});await next;
+  worker.postMessage({type:'set',paused:true});
+  next=wait(m=>m.type==='frame'&&m.N===5&&m.stats.charge===1);worker.postMessage({type:'add',smiles:'[NH4+]',count:1});frame=await next;
+  assert.equal(frame.stats.forceField,'mindo3');
+  worker.postMessage({type:'set',forceField:'reactive'});const refused=await new Promise(r=>{worker.on('message',function h(m){if(m.type==='error'){worker.off('message',h);r(m);}});});
+  assert.match(refused.text,/carica/);
+  console.log('Sandbox worker: UHF step, clear, immediate molecular census, fixed time step and ions passed.');
 } finally {await worker.terminate();}

@@ -97,6 +97,56 @@ for (const [name, Z, xyz, opts] of [
   check('radicali con spin paralleli non si legano (tripletto)', d2 > 3.2 && Math.abs(sim2.provider.info.Sz - 1) < 0.05, `C···C ${d2.toFixed(2)} Å, S_z = ${sim2.provider.info.Sz.toFixed(2)}`);
   check('2 CH₃ → C₂H₆ nella dinamica quantistica', cc && cc.n > 0.85 && d < 1.7, `ordine di legame C–C ${cc ? cc.n.toFixed(2) : 0}, distanza ${d.toFixed(2)} Å dopo ${(sim.time / 1000).toFixed(2)} ps, S_z = ${sim.provider.info.Sz.toFixed(2)}`);
 }
+// ioni: calori di formazione contro PySCF (pyscf-semiempirical 0.1.1, MINDO/3 con mol.charge e mol.spin)
+{
+  const IONS = [
+    ['NH₄⁺', [7, 1, 1, 1, 1], [[0, 0, 0], [0.63, 0.63, 0.63], [-0.63, -0.63, 0.63], [-0.63, 0.63, -0.63], [0.63, -0.63, -0.63]], 1, 0, 162.4212838320509],
+    ['OH⁻', [8, 1], [[0, 0, 0], [0, 0, 0.97]], -1, 0, -6.426754158389485],
+    ['H₃O⁺', [8, 1, 1, 1], [[0, 0, 0.1], [0.95, 0, -0.2], [-0.47, 0.82, -0.2], [-0.47, -0.82, -0.2]], 1, 0, 146.8992323668399],
+    ['NO₂⁺', [7, 8, 8], [[0, 0, 0], [0, 0, 1.15], [0, 0, -1.15]], 1, 0, 184.0780338150944],
+    ['CH₃⁺', [6, 1, 1, 1], [[0, 0, 0], [1.09, 0, 0], [-0.545, 0.944, 0], [-0.545, -0.944, 0]], 1, 0, 260.3304317477141],
+    ['H₂O⁺ (doppietto)', [8, 1, 1], [[0, 0, 0], [0, -0.757, 0.587], [0, 0.757, 0.587]], 1, 1, 231.2039852511698],
+  ];
+  let worst = 0, name = '';
+  for (const [nm, Z, xyz, charge, spin, ref] of IONS) {
+    const nel = Z.reduce((s, z) => s + ({ 1: 1, 6: 4, 7: 5, 8: 6 })[z], 0) - charge;
+    const nb = (nel - spin) / 2;
+    const r = new Mindo3({ Tel: 0, conv: 1e-10, charge, nalpha: nb + spin, nbeta: nb }).compute(Z, Float64Array.from(xyz.flat()), null);
+    if (Math.abs(r.Hf - ref) > Math.abs(worst)) { worst = r.Hf - ref; name = nm; }
+  }
+  check('ioni: ΔfH come PySCF', Math.abs(worst) < 1e-3, `scarto massimo ${worst.toExponential(1)} kcal/mol (${name}), 6 ioni`);
+}
+// campo elettrico uniforme: −∂E/∂E = μ, forze esatte, forza netta qE su uno ione
+{
+  const Z = [8, 1, 1], pos = Float64Array.from(water.flat());
+  const run = (field, p = pos, F = null, charge = 0, z = Z) => new Mindo3({ Tel: 0, conv: 1e-12, field, charge }).compute(z, p, F);
+  const mu = run(null).dipole, h = 1e-4;
+  let err = 0;
+  for (let c = 0; c < 3; c++) { const a = [0, 0, 0], b = [0, 0, 0]; a[c] = h; b[c] = -h; err = Math.max(err, Math.abs(-(run(a).E - run(b).E) / (2 * h) - mu[c])); }
+  check('campo: dipolo = −∂E/∂E', err < 1e-6, `μ(H₂O) = ${(Math.hypot(...mu) * 4.80320).toFixed(2)} D, scarto ${err.toExponential(1)} e·Å`);
+  const fld = [0.3, -0.2, 0.5], F = new Float64Array(9);
+  run(fld, pos, F);
+  let ferr = 0;
+  for (let k = 0; k < 9; k++) { const a = pos.slice(), b = pos.slice(); a[k] += h; b[k] -= h; ferr = Math.max(ferr, Math.abs(-(run(fld, a).E - run(fld, b).E) / (2 * h) - F[k])); }
+  const F2 = new Float64Array(6); run(fld, Float64Array.from([0, 0, 0, 0, 0, 0.97]), F2, -1, [8, 1]);
+  const net = [F2[0] + F2[3], F2[1] + F2[4], F2[2] + F2[5]];
+  check('campo: forze e forza qE sullo ione', ferr < 1e-5 && net.every((v, c) => Math.abs(v + fld[c]) < 1e-9), `forze ${ferr.toExponential(1)} eV/Å; OH⁻: F = (${net.map(v => v.toFixed(3)).join('; ')}) eV/Å`);
+}
+// gruppi non accoppiati: nessun elettrone passa fra molecole lontane senza sovrapposizione degli orbitali
+{
+  const mk = (opts, formal) => { const m = new Mindo3({ Tel: 300, conv: 1e-9, ...opts }); m.formal = formal; return m; };
+  const Zw = [8, 1, 1, 8, 1, 1], pw = Float64Array.from([0, 0, -7.5, 0, -0.757, -6.9, 0, 0.757, -6.9, 0, 0, 7.5, 0, -0.757, 8.1, 0, 0.757, 8.1]);
+  const rw = mk({ field: [0, 0, 2] }, [0, 0, 0, 0, 0, 0]).compute(Zw, pw, null);
+  const Zi = [6, 1, 1, 1, 7, 8, 8], pi = [-6, 0, 0, -6, 1.09, 0.3, -6, -0.6, 0.95, -6, -0.6, -0.95, 6, 0.1, 0, 6, 0, 1.15, 6, 0, -1.15];
+  const formal = [-1, 0, 0, 0, 1, 0, 0];
+  const ri = mk({}, formal).compute(Zi, Float64Array.from(pi), null);
+  const F = new Float64Array(21); mk({ conv: 1e-11 }, formal).compute(Zi, Float64Array.from(pi), F);
+  let ferr = 0;
+  for (let k = 0; k < 21; k++) { const a = pi.slice(), b = pi.slice(); a[k] += 1e-4; b[k] -= 1e-4; ferr = Math.max(ferr, Math.abs(-(mk({ conv: 1e-11 }, formal).compute(Zi, Float64Array.from(a)).E - mk({ conv: 1e-11 }, formal).compute(Zi, Float64Array.from(b)).E) / 2e-4 - F[k])); }
+  const qw = rw.q[0] + rw.q[1] + rw.q[2], qc = ri.q[0] + ri.q[1] + ri.q[2] + ri.q[3];
+  check('molecole lontane: niente trasferimento di elettroni a distanza', Math.abs(qw) < 0.01 && Math.abs(qc + 1) < 0.01 && ferr < 1e-5,
+    `H₂O a 15 Å in 2 V/Å: q = ${qw.toFixed(3)}; CH₃⁻ ··· NO₂⁺ a 12 Å: q(CH₃) = ${qc.toFixed(3)}; forze ${ferr.toExponential(1)}`);
+}
 check('elementi e coppie senza parametri rifiutati', !mindo3Supports([17, 8]).ok && !mindo3Supports([18]).ok && mindo3Supports([6, 1, 8, 7]).ok, 'Cl–O e Ar esclusi');
 
 if (failures) { console.log(`\n${failures} verifiche fallite`); process.exit(1); }
