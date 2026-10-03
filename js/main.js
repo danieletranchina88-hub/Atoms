@@ -38,7 +38,7 @@ const state = {
   Z: 6,
   atom: null,
   mode: 'atom',
-  atomView: 'orbitals',      // 'density' | 'orbitals'
+  atomView: 'density',      // 'density' | 'orbitals' — la densità totale è |ψ|², non un colore di sottolivello
   render: 'both',            // 'cloud' | 'surface' | 'both'
   enclosed: 0.9,
   points: 60000,
@@ -246,9 +246,9 @@ function setMode(mode) {
   const prev = state.mode;
   state.mode = mode;
   const models = {
-    atom: 'DFT-LDA · atomo isolato · campo centrale non relativistico; dati misurati separati dai calcoli',
+    atom: 'Densità elettronica |ψ|² dal DFT-LDA · regola di Born · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
-    bond: 'LCAO e ibridi illustrativi · per energie e geometrie molecolari usa Hartree–Fock in Molecole',
+    bond: 'LCAO: σ e π come combinazione degli orbitali calcolati · il bastoncino non è il legame',
     molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
     reaction: 'Gas ideali · HF/MP2 + rotore rigido e oscillatore armonico · equilibrio distinto dalla cinetica',
     lab: 'Modelli termodinamici e cinetici · attività, unità e condizioni esplicite',
@@ -712,15 +712,21 @@ function render3D() {
     viewer.frame(extent, true);
     if (parts.length) {
       const res = sampleAtom(parts, state.points, 11);
-      const palette = visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
+      const palette = state.atomView === 'density'
+        ? [colorToRGB(cssVar('--scene-mode') === 'light' ? '#3d6ea8' : '#d7e6ff')]
+        : visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
       const colors = new Float32Array(res.count * 3);
-      for (let i = 0; i < res.count; i++) colors.set(palette[res.groups[i]], 3 * i);
-      viewer.addPoints(res.positions, colors, { size: 0.9, opacity: cssVar('--scene-mode') === 'light' ? 0.55 : 0.5 });
+      for (let i = 0; i < res.count; i++) colors.set(palette[state.atomView === 'density' ? 0 : res.groups[i]], 3 * i);
+      viewer.addPoints(res.positions, colors, { size: state.atomView === 'density' ? 1.15 : 0.9, opacity: cssVar('--scene-mode') === 'light' ? 0.45 : 0.62 });
     }
     viewer.addNucleus();
-    setTitle(`${el.name}`, state.atomView === 'orbitals' ? 'orbitali occupati, colori per sottolivello' : 'densità elettronica totale');
-    setLegend(visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
-    note.textContent = `Ogni punto è una posizione possibile di un elettrone, estratta con probabilità |ψ|². Nucleo non in scala: è circa 100 000 volte più piccolo dell'atomo. Tacche degli assi ogni ${formatPm(viewer.tickPm)}.`;
+    setTitle(`${el.name}`, state.atomView === 'orbitals' ? 'scomposizione in orbitali occupati, non l’aspetto' : 'densità di probabilità elettronica');
+    setLegend(state.atomView === 'density'
+      ? [[cssVar('--scene-mode') === 'light' ? '#3d6ea8' : '#d7e6ff', 'ρ = Σ nᵢ|ψᵢ|²']]
+      : visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
+    note.textContent = state.atomView === 'density'
+      ? `Ogni punto è campionato con la regola di Born, probabilità ∝ |ψ|² degli orbitali Kohn–Sham occupati. Il nucleo è disegnato circa 100 000 volte più grande del reale: il raggio nucleare è dell’ordine dei fm, la nube degli Å. Tacche ogni ${formatPm(viewer.tickPm)}.`
+      : `Scomposizione negli orbitali occupati, colori per sottolivello: non è l’aspetto dell’atomo. La densità totale è la somma. Nucleo non in scala. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }
 
@@ -734,7 +740,7 @@ function render3D() {
     viewer.addNucleus();
     setTitle(`${orbitalHTML(n, l, m)} · ${el.name}`, orb.occupied ? `ε = ${eV(orb.e)}` : `stato non occupato, ε = ${eV(orb.e)}`);
     setLegend([[cssVar('--phase-pos'), 'ψ > 0'], [cssVar('--phase-neg'), 'ψ < 0']]);
-    note.textContent = `${state.render !== 'cloud' ? `La superficie racchiude il ${Math.round(state.enclosed * 100)}% della probabilità di trovare l'elettrone. ` : ''}Tacche degli assi ogni ${formatPm(viewer.tickPm)}. Usa "Sezione" per vedere i nodi radiali interni.`;
+    note.textContent = `Isosuperficie di ψ e nuvola campionata con |ψ|². Il segno di ψ è una fase matematica, non un colore osservato. La superficie racchiude il ${Math.round(state.enclosed * 100)}% della probabilità. Sezione per i nodi. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }
 
@@ -753,7 +759,7 @@ function render3D() {
     viewer.addNucleus([0, 0, dist / 2], el.symbol);
     setTitle(`${type.label}<sub>${n}${type.sub}</sub> · ${el.symbol}₂`, `asse di legame z, d = ${Math.round(dist * BOHR_PM)} pm`);
     setLegend([[cssVar('--phase-pos'), 'ψ > 0'], [cssVar('--phase-neg'), 'ψ < 0']]);
-    note.textContent = `Combinazione lineare di orbitali atomici ${n}${type.ao === 's' ? 's' : 'p'} calcolati per ${el.name}. Tacche degli assi ogni ${formatPm(viewer.tickPm)}.`;
+    note.textContent = `Legame come combinazione lineare degli orbitali atomici calcolati (LCAO). L’addensamento fra i nuclei è la densità di probabilità, non un bastoncino. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }
   const h = HYBRIDS[bond.hybrid];

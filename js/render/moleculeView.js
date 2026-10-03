@@ -26,11 +26,12 @@ export function buildMolecule(atoms, bonds, opts = {}) {
   const bondColor = new THREE.Color(light ? '#8a93a3' : '#b7bfcc');
   const scale = opts.scale ?? 1;
 
+  const nucleiOnly = opts.nucleiOnly === true;
   atoms.forEach((a, i) => {
-    const color = opts.atomColors?.[i] ?? cpkColor(a.Z);
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.05 });
+    const color = opts.atomColors?.[i] ?? (nucleiOnly ? (cssVar('--nucleus') || '#f0b429') : cpkColor(a.Z));
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: nucleiOnly ? 0.25 : 0.35, metalness: 0.05, emissive: nucleiOnly ? color : '#000000', emissiveIntensity: nucleiOnly ? 0.35 : 0 });
     const m = new THREE.Mesh(sphereGeo, mat);
-    const r = (0.12 + 0.0034 * covalentRadius(a.Z)) * ANG * scale;
+    const r = (nucleiOnly ? 0.06 : (0.12 + 0.0034 * covalentRadius(a.Z))) * ANG * scale;
     m.scale.setScalar(r);
     m.position.set(...a.xyz);
     m.userData.radius = r;
@@ -61,7 +62,7 @@ export function buildMolecule(atoms, bonds, opts = {}) {
   };
 
   const pieces = []; // per l'animazione: { mesh, bond, offset }
-  bonds.forEach((b) => {
+  if (!nucleiOnly) bonds.forEach((b) => {
     const order = b.order;
     let offsets;
     let dashedFrom = Infinity;

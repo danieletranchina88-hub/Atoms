@@ -4,13 +4,13 @@ Un simulatore didattico di chimica nel browser. Calcola orbitali, molecole e gra
 
 La vista dà priorità a esperimenti, misure e grafici. Le spiegazioni estese sono richiudibili; ogni modalità mostra il modello impiegato. Vedi [SCIENTIFIC_MODEL.md](SCIENTIFIC_MODEL.md) per dominio di validità, fonti e verifiche.
 
-Novità: fedeltà automatica. I gas nobili usano Lennard–Jones con σ e ε pubblicati e la fase è letta dalla struttura locale (q₆ di Steinhardt: cristallo, liquido, vapore). Fino a 36 atomi di H, C, N, O… la sandbox passa a MINDO/3; fino a 6 atomi può usare Hartree–Fock. Si può versare H₂/O₂, acqua, argon o Na/Cl₂ nella stessa scatola senza cancellarla. Il passo Δt resta quello scelto; se un passo è instabile viene rifiutato e Δt si dimezza.
+Novità: la vista predefinita è la densità di probabilità, non il modello a palline. L’atomo è |ψ|² degli orbitali calcolati (regola di Born); l’orbitale mostra il segno di ψ, che è una fase e non un colore osservato; la molecola, dopo Hartree–Fock, è un’isosuperficie di ρ e il legame è l’addensamento fra i nuclei. Il nucleo è fuori scala. Lewis, CPK e bastoncini restano una convenzione. Fedeltà automatica in sandbox: Lennard–Jones pubblicato per i nobili, MINDO/3 fino a 36 atomi, Hartree–Fock fino a 6.
 
 ## Le modalità
 
 | Modalità | Cosa fa |
 |---|---|
-| **Atomo** | I 118 elementi con un calcolo autoconsistente DFT-LDA. Tavola periodica colorabile per elettronegatività, ionizzazione, affinità elettronica e raggio calcolato. Nuvola elettronica, gusci, configurazione (con le eccezioni alla regola di Madelung), caselle ↑↓ secondo Hund, energie degli orbitali, Z<sub>eff</sub> di Slater, energia di ionizzazione calcolata contro quella misurata. |
+| **Atomo** | I 118 elementi con un calcolo autoconsistente DFT-LDA. Vista predefinita: nuvola |ψ|² della densità totale. Si può scomporre negli orbitali occupati. Configurazione (con le eccezioni alla regola di Madelung), caselle ↑↓ secondo Hund, energie degli orbitali, Z<sub>eff</sub> di Slater, energia di ionizzazione calcolata contro quella misurata. |
 | **Orbitale** | Qualunque orbitale (n, l, m) fino a n = 7: p<sub>x</sub>, d<sub>z²</sub>, i sette f… Nuvola Monte Carlo, isosuperficie colorata per fase, nodi radiali e angolari, sezione piana di ψ. |
 | **Legami σ π** | Orbitali molecolari LCAO σ, σ\*, π, π\* di molecole biatomiche e orbitali ibridi sp…sp³d², costruiti dagli orbitali atomici calcolati. |
 | **Molecole** | Sandbox molecolare con Hartree–Fock *ab initio*. Si parte da una libreria di 67 molecole, da una stringa SMILES o modificando la molecola con un clic sugli atomi. Calcola: legami singoli, doppi e tripli (ordine di Lewis e ordine di Mayer quantistico), elettronegatività (Pauling, Allen), cariche formali, numeri di ossidazione, cariche parziali (Mulliken, Löwdin), VSEPR e ibridazione, risonanza, momento di dipolo, orbitali molecolari in 3D (con carattere σ/π e legante/antilegante), densità elettronica, potenziale elettrostatico, geometria ottimizzata, vibrazioni con spettro IR, spettro UV-visibile (CIS), spettro fotoelettronico (Koopmans), termodinamica statistica, curva di dissociazione RHF/UHF. |

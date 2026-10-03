@@ -35,7 +35,7 @@ const M = {
   entry: null, smiles: '', name: '', charge: 0, multiplicity: 1,
   graph: null, analysis: null, atoms: null, basis: 'STO-3G', basisAuto: true,
   summary: null, freq: null, lib: null, scan: null,
-  view: { overlay: 'model', mo: null, labels: 'formal', dipole: true, iso: 0.05, vib: null, chart2: 'ir' },
+  view: { overlay: 'density', mo: null, labels: 'none', dipole: false, iso: 0.05, isoRho: 0.05, vib: null, chart2: 'ir', userOverlay: false },
   cis: null,
   status: '', busy: false, token: 0,
   cat: 'hydride',
@@ -180,7 +180,7 @@ function loadSmiles(smiles, { multiplicity, lib = null } = {}) {
   M.cis = null;
   M.view.mo = null;
   M.view.vib = null;
-  if (M.view.overlay !== 'model' && M.view.overlay !== 'charges') M.view.overlay = 'model';
+  if (M.view.overlay !== 'model' && M.view.overlay !== 'charges' && !M.view.userOverlay) M.view.overlay = 'density';
   M.status = lib ? 'Geometria ottimizzata HF (libreria precalcolata).' : 'Geometria iniziale dal modello VSEPR: puoi ottimizzarla con Hartree–Fock.';
   renderAll();
   runSCF();
@@ -193,6 +193,7 @@ async function runSCF() {
     const summary = await request('scf', { atoms: M.atoms, opts: { basis: M.basis, charge: M.charge, multiplicity: M.multiplicity } });
     if (token !== M.token) return;
     M.summary = summary;
+    if (!M.view.userOverlay) M.view.overlay = 'density';
     // orbitale predefinito: HOMO
     M.view.mo = { index: summary.nalpha - 1, spin: summary.unrestricted ? 'α' : null };
     setBusy(null);
@@ -420,7 +421,7 @@ function renderControls() {
   c.innerHTML = `
     <div class="ctl"><span class="lbl">Visualizza</span>
       ${seg('mol-overlay', [
-        { v: 'model', label: 'Modello' },
+        { v: 'model', label: 'Lewis / CPK' },
         { v: 'mo', label: 'Orbitale', disabled: !S },
         { v: 'density', label: 'Densità', disabled: !S },
         { v: 'esp', label: 'Potenziale el.', disabled: !S },
@@ -438,7 +439,7 @@ function renderControls() {
       <div class="range-row"><input type="range" id="mol-iso" min="${M.view.overlay === 'mo' ? 0.01 : 0.002}" max="${M.view.overlay === 'mo' ? 0.2 : 0.3}" step="0.002" value="${M.view.overlay === 'mo' ? M.view.iso : (M.view.isoRho ?? 0.05)}"><output id="mol-iso-out">${nf(M.view.overlay === 'mo' ? M.view.iso : (M.view.isoRho ?? 0.05), 3)}</output></div>
     </div>` : ''}
     <label class="mini-toggle"><input type="checkbox" id="mol-dipole" ${M.view.dipole ? 'checked' : ''} ${!S ? 'disabled' : ''}> freccia del momento di dipolo</label>`;
-  bindSeg('mol-overlay', (v) => { M.view.overlay = v; renderControls(); render3D(); });
+  bindSeg('mol-overlay', (v) => { M.view.userOverlay = true; M.view.overlay = v; renderControls(); render3D(); });
   $('mol-labels').addEventListener('change', (e) => { M.view.labels = e.target.value; render3D(); });
   $('mol-dipole').addEventListener('change', (e) => { M.view.dipole = e.target.checked; render3D(); });
   const iso = $('mol-iso');
@@ -571,7 +572,8 @@ async function render3D() {
   });
   const bonds = M.graph.bonds.map((b, k) => ({ a: b.a, b: b.b, order: lw.bonds[k].averageOrder }));
   const atomColors = M.view.overlay === 'charges' && S ? S.mulliken.map(q => chargeColor(q)) : null;
-  const mol = buildMolecule(M.atoms, bonds, { labels, atomColors });
+  const showModel = M.view.overlay === 'model' || M.view.overlay === 'charges';
+  const mol = buildMolecule(M.atoms, showModel ? bonds : [], { labels, atomColors, nucleiOnly: !showModel });
   viewer.add(mol.group);
   M.mol3d = mol;
   highlightSelection();
@@ -619,7 +621,7 @@ async function render3D() {
         const iso = M.view.isoRho ?? 0.05;
         viewer.addSurface(g, iso, 1, cssVar('--accent'), { opacity: 0.55 });
         sub = `densità elettronica ρ = ${nf(iso, 3)} e/bohr³`;
-        note = 'Superficie di densità elettronica costante. A valori alti (≈ 0,2) resta attorno ai nuclei; attorno a 0,05 si vedono i legami; a 0,002 la superficie di van der Waals.';
+        note = 'Superficie di densità elettronica costante, dalla matrice densità Hartree–Fock. Intorno a 0,05 e/a₀³ si vede l’addensamento fra i nuclei: è il legame. A 0,002 e/a₀³ la superficie è quella di van der Waals usata in letteratura. I punti sono i nuclei, non in scala. I colori CPK e i bastoncini sono una convenzione di Lewis, non l’aspetto.';
       } else {
         setBusy('Potenziale elettrostatico sulla superficie di van der Waals…');
         const g = await request('grid', { kind: 'density', res: N, half, center: [0, 0, 0] });

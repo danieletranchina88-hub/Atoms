@@ -245,7 +245,7 @@ export class Viewer {
   }
 
   addNucleus(position = [0, 0, 0], label = null) {
-    const r = this.extent * 0.018;
+    const r = this.extent * 0.012;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(r, 20, 14),
       new THREE.MeshStandardMaterial({ color: cssVar('--nucleus') || '#f0b429', emissive: cssVar('--nucleus') || '#f0b429', emissiveIntensity: 0.5 }),
@@ -267,7 +267,7 @@ export class Viewer {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const mat = new THREE.PointsMaterial({
-      size: this.extent * 0.012 * size,
+      size: this.extent * 0.016 * size,
       map: this.dot,
       vertexColors: true,
       transparent: true,
