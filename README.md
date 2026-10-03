@@ -6,14 +6,6 @@ La vista dà priorità a esperimenti, misure e grafici. Le spiegazioni estese so
 
 Novità: fedeltà automatica. I gas nobili usano Lennard–Jones con σ e ε pubblicati e la fase è letta dalla struttura locale (q₆ di Steinhardt: cristallo, liquido, vapore). Fino a 36 atomi di H, C, N, O… la sandbox passa a MINDO/3; fino a 6 atomi può usare Hartree–Fock. Si può versare H₂/O₂, acqua, argon o Na/Cl₂ nella stessa scatola senza cancellarla. Il passo Δt resta quello scelto; se un passo è instabile viene rifiutato e Δt si dimezza.
 
-## Quaderno di Chimica Generale (`studio/`)
-
-Un sito di studio separato dal simulatore, per preparare l'esame di chimica generale e inorganica seguendo il programma del corso (23 argomenti, 80 ore). Si apre da `studio/index.html` (su GitHub Pages: `/Atoms/studio/`).
-
-Ogni argomento ha: obiettivi d'esame spuntabili, teoria, strumenti interattivi, esercizi svolti da scoprire un passaggio alla volta, una palestra di esercizi generati a caso (corretti sia nel valore sia nelle cifre significative), errori tipici, domande d'orale con risposta modello e un quiz finale con spiegazioni. I progressi restano nel browser.
-
-Argomenti pronti: **1. Materia – Proprietà e Misura** (Petrucci, cap. 1; definizioni SI del BIPM, 2019; densità dal CRC Handbook). Gli altri arrivano uno alla volta. `tests/studio.mjs` verifica regole delle cifre significative, conversioni ed esercizi generati.
-
 ## Le modalità
 
 | Modalità | Cosa fa |
