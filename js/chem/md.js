@@ -8,7 +8,10 @@
 import { ReactiveFF } from './reactive.js';
 import { ELEMENTS } from '../physics/elements.js';
 import { hillFormula } from './smiles.js';
-import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
+import { KB_EV } from './reactiveData.js';
+
+// elementi ammessi nella scatola: tutti quelli coperti da GFN2-xTB (H–Rn); il campo classico ne copre meno
+const knownElement = (z) => Number.isInteger(z) && z >= 1 && z <= 86;
 
 export const ACC = 0.00964853321;        // (eV/Å)/amu → Å/fs²
 export const MV2 = 1 / ACC;              // amu·Å²/fs² → eV
@@ -204,7 +207,7 @@ export class Simulation {
   addMolecule(template, count = 1, T = this.T, at = null) {
     if (!Number.isInteger(count) || count < 1 || count > 400 || this.N + count * template.Z.length > 400)
       throw new Error('Massimo 400 atomi nella scatola.');
-    if (!template.Z.length || template.Z.some(z => !ATOM_PARAMS[z]) ||
+    if (!template.Z.length || template.Z.some(z => !knownElement(z)) ||
         template.pos.length !== 3 * template.Z.length || !Array.from(template.pos).every(Number.isFinite))
       throw new Error('Geometria o elemento non supportato.');
     const n0 = template.Z.length;
@@ -244,7 +247,7 @@ export class Simulation {
 
   /** Inserisce atomi con posizioni (Å) e velocità (Å/fs) assegnate. */
   addAtoms(list) {
-    if (this.N + list.length > 400 || list.some(a => !ATOM_PARAMS[a.Z] || a.pos?.length !== 3 ||
+    if (this.N + list.length > 400 || list.some(a => !knownElement(a.Z) || a.pos?.length !== 3 ||
       !a.pos.every(Number.isFinite) || (a.vel && (a.vel.length !== 3 || !a.vel.every(Number.isFinite)))))
       throw new Error('Atomi non validi (massimo 400, coordinate finite).');
     const start = this.N;

@@ -25,8 +25,16 @@ try {
   next=wait(m=>m.type==='frame'&&m.N===0);worker.postMessage({type:'clear'});await next;
   worker.postMessage({type:'set',paused:true});
   next=wait(m=>m.type==='frame'&&m.N===5&&m.stats.charge===1);worker.postMessage({type:'add',smiles:'[NH4+]',count:1});frame=await next;
-  assert.equal(frame.stats.forceField,'mindo3');
+  assert.equal(frame.stats.forceField,'gfn2');
   worker.postMessage({type:'set',forceField:'reactive'});const refused=await new Promise(r=>{worker.on('message',function h(m){if(m.type==='error'){worker.off('message',h);r(m);}});});
   assert.match(refused.text,/carica/);
-  console.log('Sandbox worker: UHF step, clear, immediate molecular census, fixed time step and ions passed.');
+  // elementi oltre il campo classico (ferro): GFN2-xTB, con energia conservata nei primi passi
+  next=wait(m=>m.type==='frame'&&m.N===0);worker.postMessage({type:'clear'});await next;
+  worker.postMessage({type:'set',paused:true});
+  next=wait(m=>m.type==='frame'&&m.N===4&&m.stats.forceField==='gfn2');
+  worker.postMessage({type:'add',smiles:'[Fe]',count:1});worker.postMessage({type:'add',smiles:'O',count:1});frame=await next;
+  assert.equal(frame.stats.hf.method,'GFN2-xTB');assert.equal(frame.stats.hf.converged,true);
+  next=wait(m=>m.type==='frame'&&m.stats.t>0);worker.postMessage({type:'set',thermostat:false});worker.postMessage({type:'step',n:20});frame=await next;
+  assert.ok(Math.abs(frame.stats.diagnostics.drift)<0.02,`drift ${frame.stats.diagnostics.drift}`);
+  console.log('Sandbox worker: UHF step, clear, immediate molecular census, fixed time step, ions and GFN2-xTB passed.');
 } finally {await worker.terminate();}

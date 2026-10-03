@@ -4,6 +4,7 @@ Uso: python3 tools/xtb/reference_gfn2.py > tests/data/gfn2-reference.json
 import json
 import numpy as np
 from tblite.interface import Calculator
+from tblite.library import ffi
 
 A2B = 1 / 0.52917721090
 MOLS = {
@@ -52,4 +53,15 @@ for name, (Z, xyz, charge, uhf) in MOLS.items():
         "charges": np.asarray(res.get("charges")).round(8).tolist(),
         "dipole": np.asarray(res.get("dipole")).round(8).tolist(),
     }
+# campo elettrico uniforme (unità atomiche): solo energia e dipolo, perché in tblite 0.7.0 il gradiente con il campo
+# non è la derivata della sua stessa energia (verificato alle differenze finite); il gradiente si controlla a parte
+out["field"] = {}
+for name, F in [("HCl_H2O", [0.01, -0.005, 0.02]), ("H3O+", [0.0, 0.02, -0.01]), ("Fe(CO)", [0.015, 0.0, 0.0])]:
+    Z, xyz, charge, uhf = MOLS[name]
+    calc = Calculator("GFN2-xTB", np.array(Z), np.array(xyz, dtype=float) * A2B, charge=charge, uhf=uhf)
+    calc.set("verbosity", 0)
+    calc.set("accuracy", 1e-4)
+    calc.add("electric-field", ffi.new("double[3]", F))
+    res = calc.singlepoint()
+    out["field"][name] = {"field": F, "energy": float(res.get("energy")), "dipole": np.asarray(res.get("dipole")).round(8).tolist()}
 print(json.dumps(out, indent=1))

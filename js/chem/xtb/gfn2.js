@@ -289,8 +289,9 @@ function repulsion(Z, pos, wantGrad) {
 /* ------------------------------------------------------------------ */
 
 export class GFN2xTB {
-  constructor({ Tel = 300, maxIter = 300, etol = 1e-10, ptol = 1e-8, damp = 0.4 } = {}) {
-    Object.assign(this, { Tel, maxIter, etol, ptol, damp });
+  /** field: campo elettrico uniforme in unità atomiche (hartree/(e·bohr)), oppure null. */
+  constructor({ Tel = 300, maxIter = 300, etol = 1e-10, ptol = 1e-8, damp = 0.4, field = null } = {}) {
+    Object.assign(this, { Tel, maxIter, etol, ptol, damp, field });
     this.guess = null; // vettore (cariche di shell, dipoli, quadrupoli) dell'ultimo calcolo, per ripartire
   }
   reset() { this.guess = null; }
@@ -305,7 +306,7 @@ export class GFN2xTB {
     const key = Z.join(',');
     if (this.basisKey !== key) { this.basis = buildBasis(Z, EL); this.basisKey = key; this.guess = null; }
     const bas = this.basis, n = bas.nao, sh = bas.shells, nsh = sh.length;
-    const { S, D, Q } = moleculeIntegrals(bas, pos);
+    const { S, D, Q, derivs } = moleculeIntegrals(bas, pos, { withGrad: gradient });
     // quadrupoli a traccia nulla: 1,5 r_a r_b − ½ δ_ab r²
     const Qt = Q.map(() => new Float64Array(n * n));
     for (let k = 0; k < n * n; k++) {
@@ -402,13 +403,13 @@ export class GFN2xTB {
     const F = new Float64Array(n * n), P = new Float64Array(n * n);
     let Eel = 0, Eold = 0, converged = false, iter = 0, last = null;
     for (iter = 1; iter <= this.maxIter; iter++) {
-      const pot = this._potentials(x, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4 });
+      const pot = this._potentials(x, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos });
       this._fock(F, H0, S, D, Qt, pot, bas, nsh);
       const orb = solveFock(F, X, n);
       const occ = fermiOccupations(orb.e, na, nb, kT);
-      density(P, orb.C, occ.f, n);
+      density(P, orb, occ.f);
       const xo = this._moments(P, S, D, Qt, bas, n0, N, nsh);
-      Eel = this._electronicEnergy(P, H0, xo, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4 }) + occ.ts;
+      Eel = this._electronicEnergy(P, H0, xo, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos }) + occ.ts;
       let diff = 0;
       for (let k = 0; k < nvar; k++) diff = Math.max(diff, Math.abs(xo[k] - x[k]));
       last = { orb, occ, xo };
@@ -431,9 +432,11 @@ export class GFN2xTB {
       dipole, converged, iterations: iter, orbitalEnergies: orb.e, occupations: occ.f, nao: n,
       homoLumo: frontier(orb.e, occ.f), cn,
     };
-    this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), C: orb.C, e: orb.e, f: occ.f, basis: bas, n };
+    const PS = new Float64Array(n * n);
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = P[i * n + k]; if (a) for (let j = 0; j < n; j++) PS[i * n + j] += a * S[k * n + j]; }
+    this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), PS, Ct: orb.Ct, nC: orb.nC, e: orb.e, f: occ.f, basis: bas, n };
     if (gradient) {
-      res.gradient = this._gradient({ Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, Qt, x, eta, gamma, hd, mrad, dk, qk, d4, atm, rep, kT, amSD, amDD, amSQ });
+      res.gradient = this._gradient({ Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, Qt, derivs, x, eta, gamma, hd, mrad, dk, qk, d4, atm, rep, kT, amSD, amDD, amSQ });
     }
     return res;
   }
@@ -472,6 +475,9 @@ export class GFN2xTB {
     }
     const disp = d4Energy(Z, d4, qat);
     for (let i = 0; i < N; i++) vat[i] += disp.dEdq[i];
+    // campo elettrico uniforme: φ(r) = −F·r agisce sulle cariche e sui dipoli atomici
+    const fld = this.field;
+    if (fld) for (let i = 0; i < N; i++) for (let d = 0; d < 3; d++) { vat[i] -= fld[d] * c.pos[3 * i + d]; vd[3 * i + d] -= fld[d]; }
     return { vsh, vat, vd, vq };
   }
 
@@ -541,25 +547,27 @@ export class GFN2xTB {
       for (let c2 = 0; c2 < 6; c2++) E += amSQ[6 * o + c2] * qat[i] * qp[6 * j + c2];
     }
     E += d4Energy(Z, d4, qat).E;
+    const fld = this.field;
+    if (fld) for (let i = 0; i < N; i++) for (let d = 0; d < 3; d++) E -= fld[d] * (qat[i] * c.pos[3 * i + d] + dp[3 * i + d]);
     return E;
   }
 
   /** Gradiente analitico dell'energia libera elettronica (formula di Hellmann–Feynman con il termine di Pulay −W·dS). */
   _gradient(c) {
-    const { Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, gamma, mrad, dk, qk, d4, atm, rep } = c;
+    const { Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, derivs, gamma, mrad, dk, qk, d4, atm, rep } = c;
     const g = new Float64Array(3 * N);
     for (let k = 0; k < 3 * N; k++) g[k] = rep.grad[k] + atm.grad[k];
     const pot = this._potentials(xo, c);
     const qsh = xo.subarray(0, nsh), dp = xo.subarray(nsh, nsh + 3 * N), qp = xo.subarray(nsh + 3 * N);
     const qat = new Float64Array(N);
     for (let I = 0; I < nsh; I++) qat[sh[I].atom] += qsh[I];
+    // forza del campo esterno sulle cariche atomiche (a cariche fissate)
+    if (this.field) for (let i = 0; i < N; i++) for (let d = 0; d < 3; d++) g[3 * i + d] -= qat[i] * this.field[d];
     // matrice densità pesata con le energie orbitali
     const W = new Float64Array(n * n);
-    for (let k = 0; k < n; k++) {
-      const o = occ.f[k] * orb.e[k];
-      if (Math.abs(occ.f[k]) < 1e-14) continue;
-      for (let i = 0; i < n; i++) { const ci = orb.C[i * n + k] * o; if (ci) for (let j = 0; j < n; j++) W[i * n + j] += ci * orb.C[j * n + k]; }
-    }
+    const we = new Float64Array(orb.nC);
+    for (let k = 0; k < orb.nC; k++) we[k] = occ.f[k] > 1e-14 ? occ.f[k] * orb.e[k] : 0;
+    weightedSum(W, orb, we);
     const aoS = bas.aoShell, aoA = bas.aoAtom;
     const v = new Float64Array(n);
     for (let mu = 0; mu < n; mu++) v[mu] = pot.vsh[aoS[mu]] + pot.vat[aoA[mu]];
@@ -607,7 +615,6 @@ export class GFN2xTB {
     const disp = d4Energy(Z, d4, qat, true);
     for (let k = 0; k < 3 * N; k++) g[k] += disp.grad[k];
     // derivate degli integrali: sovrapposizione (H0, cariche di Mulliken, Pulay), dipolo e quadrupolo
-    const buf = pairBuffers(true);
     const dQA = new Float64Array(6), tq = new Float64Array(6), tqa = new Float64Array(6);
     const traceless = (src, dst) => {
       const tr = 0.5 * (src[0] + src[2] + src[5]);
@@ -615,15 +622,10 @@ export class GFN2xTB {
       dst[3] = 1.5 * src[3]; dst[4] = 1.5 * src[4]; dst[5] = 1.5 * src[5] - tr;
     };
     const rawQ = new Float64Array(6);
-    for (let I = 0; I < nsh; I++) {
-      const si = sh[I], A = si.atom;
-      for (let J = 0; J < I; J++) {
-        const sj = sh[J], B = sj.atom;
-        if (A === B) continue;
-        const R = [pos[3 * B] - pos[3 * A], pos[3 * B + 1] - pos[3 * A + 1], pos[3 * B + 2] - pos[3 * A + 2]];
-        if (R[0] ** 2 + R[1] ** 2 + R[2] ** 2 > 1600) continue;
-        shellPair(si.l, si.alpha, si.coeff, sj.l, sj.alpha, sj.coeff, R, buf);
-        const nb = nSph(sj.l), nrm = si.norm * sj.norm;
+    for (const dv of derivs) {
+      const { I, J, R } = dv, si = sh[I], sj = sh[J], A = si.atom, B = sj.atom;
+      {
+        const nb = nSph(sj.l);
         const hIJ = hfac[I * nsh + J], sIJ = 0.5 * (se[I] + se[J]) * dpk[I * nsh + J];
         const vdA = pot.vd.subarray(3 * A, 3 * A + 3), vdB = pot.vd.subarray(3 * B, 3 * B + 3);
         const vqA = pot.vq.subarray(6 * A, 6 * A + 6), vqB = pot.vq.subarray(6 * B, 6 * B + 6);
@@ -633,19 +635,19 @@ export class GFN2xTB {
           const ws = 2 * (p * (hIJ - 0.5 * (v[mu] + v[nu])) - W[o]);
           const DB = [D[0][o], D[1][o], D[2][o]];
           for (let gd = 0; gd < 3; gd++) {
-            const dS = buf.dS[gd][k] * nrm;
+            const dS = dv.dS[gd][k];
             let x = ws * dS - 2 * p * s * sIJ * R[gd];
             // dipoli: ⟨μ|(r−B)|ν⟩ pesato con il potenziale di B e ⟨ν|(r−A)|μ⟩ = ⟨μ|(r−B)|ν⟩ + R S con quello di A
             for (let cc = 0; cc < 3; cc++) {
-              const dD = buf.dD[gd * 3 + cc][k] * nrm;
+              const dD = dv.dD[gd * 3 + cc][k];
               x -= p * vdB[cc] * dD;
               x -= p * vdA[cc] * (dD - (cc === gd ? s : 0) + R[cc] * dS);
             }
             // quadrupoli (derivate della forma a traccia nulla)
             for (let cc = 0; cc < 6; cc++) {
               const [u, w] = QIDX[cc];
-              const dQ = buf.dQ[gd * 6 + cc][k] * nrm;
-              const dDu = buf.dD[gd * 3 + u][k] * nrm, dDw = buf.dD[gd * 3 + w][k] * nrm;
+              const dQ = dv.dQ[gd * 6 + cc][k];
+              const dDu = dv.dD[gd * 3 + u][k], dDw = dv.dD[gd * 3 + w][k];
               rawQ[cc] = dQ;
               dQA[cc] = dQ - (u === gd ? DB[w] : 0) + R[u] * dDw + dDu * R[w] - (w === gd ? DB[u] : 0)
                 - ((u === gd ? R[w] : 0) + (w === gd ? R[u] : 0)) * s + R[u] * R[w] * dS;
@@ -667,15 +669,44 @@ export class GFN2xTB {
 /* ------------------------------------------------------------------ */
 
 function solveFock(F, X, n) {
-  // F' = X F X, autovettori C = X C'
+  // F' = X F X (simmetrica: si calcola solo il triangolo superiore), poi autovalori e autovettori di F'
   const T = new Float64Array(n * n), Fp = new Float64Array(n * n);
   for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = X[i * n + k]; if (a) for (let j = 0; j < n; j++) T[i * n + j] += a * F[k * n + j]; }
-  for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = T[i * n + k]; if (a) for (let j = 0; j < n; j++) Fp[i * n + j] += a * X[k * n + j]; }
-  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) { const s = 0.5 * (Fp[i * n + j] + Fp[j * n + i]); Fp[i * n + j] = Fp[j * n + i] = s; }
+  for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = T[i * n + k]; if (a) for (let j = i; j < n; j++) Fp[i * n + j] += a * X[k * n + j]; }
+  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) Fp[i * n + j] = Fp[j * n + i];
   const { values, vectors } = eigh(Fp, n);
-  const C = new Float64Array(n * n);
-  for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = X[i * n + k]; if (a) for (let j = 0; j < n; j++) C[i * n + j] += a * vectors[k * n + j]; }
-  return { e: values, C };
+  return { e: values, V: vectors, X, n, Ct: null, nC: 0 };
+}
+
+/** Coefficienti degli orbitali 0 … m−1 nella base atomica, per righe: Ct[k·n + μ] = C_μk = Σ_m X_μm V_mk. */
+function backTransform(orb, m) {
+  const { X, V, n } = orb;
+  const Ct = new Float64Array(m * n);
+  for (let k = 0; k < m; k++) for (let q = 0; q < n; q++) {
+    const v = V[q * n + k];
+    if (!v) continue;
+    const row = k * n, xr = q * n;
+    for (let i = 0; i < n; i++) Ct[row + i] += X[xr + i] * v;
+  }
+  orb.Ct = Ct; orb.nC = m;
+}
+
+/** Σ_k w_k c_k c_kᵀ sugli orbitali calcolati (matrice simmetrica). */
+function weightedSum(out, orb, w) {
+  const n = orb.n, Ct = orb.Ct;
+  out.fill(0);
+  for (let k = 0; k < orb.nC; k++) {
+    const o = w[k];
+    if (!o) continue;
+    const row = k * n;
+    for (let i = 0; i < n; i++) {
+      const ci = Ct[row + i] * o;
+      if (!ci) continue;
+      const oi = i * n;
+      for (let j = i; j < n; j++) out[oi + j] += ci * Ct[row + j];
+    }
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) out[i * n + j] = out[j * n + i];
 }
 
 /** Occupazioni di Fermi a temperatura elettronica kT con livelli di Fermi separati per α e β. */
@@ -718,17 +749,14 @@ function fermiChannel(e, nel, kT) {
 }
 const fermi = (x) => x > 0 ? Math.exp(-x) / (1 + Math.exp(-x)) : 1 / (1 + Math.exp(x));
 
-function density(P, C, f, n) {
-  P.fill(0);
-  for (let k = 0; k < n; k++) {
-    const o = f[k];
-    if (o < 1e-14) continue;
-    for (let i = 0; i < n; i++) {
-      const ci = C[i * n + k] * o;
-      if (!ci) continue;
-      for (let j = 0; j < n; j++) P[i * n + j] += ci * C[j * n + k];
-    }
-  }
+/** Matrice densità dagli orbitali occupati (più il primo vuoto, utile per il disegno del LUMO). */
+function density(P, orb, f) {
+  let m = 0;
+  for (let k = 0; k < f.length; k++) if (f[k] > 1e-14) m = k + 1;
+  backTransform(orb, Math.min(f.length, m + 1));
+  const w = new Float64Array(orb.nC);
+  for (let k = 0; k < orb.nC; k++) w[k] = f[k] > 1e-14 ? f[k] : 0;
+  weightedSum(P, orb, w);
 }
 
 function frontier(e, f) {

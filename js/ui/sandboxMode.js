@@ -310,7 +310,7 @@ function loadPreset(p) {
   clearCloud();
   if (p.light) SB.lambda = p.light.lambda;
   post({ type: 'preset', preset: p });
-  const quantum = p.forceField === 'hf' || p.forceField === 'mindo3' || p.quantum;
+  const quantum = p.forceField === 'hf' || p.forceField === 'mindo3' || p.forceField === 'gfn2' || p.quantum;
   const empty = !((p.add && p.add.length) || p.atoms);
   post({ type: 'set', paused: quantum, T: p.T });
   SB.userPaused = quantum;
@@ -386,10 +386,11 @@ function ensureCapacity(N, NB) {
 }
 
 function atomRadius(Z) {
-  if (SB.style === 'vdw') return 0.5 * ATOM_PARAMS[Z][5] * 0.82;
+  // raggio di van der Waals: dal campo classico se c'è, altrimenti stimato dal raggio covalente (r_vdW ≈ r_cov + 0,8 Å)
+  if (SB.style === 'vdw') return ATOM_PARAMS[Z] ? 0.5 * ATOM_PARAMS[Z][5] * 0.82 : 0.82 * (covalentRadius(Z) / 100 + 0.8);
   // nella nuvola si vedono solo i nuclei (puntiformi alla scala degli elettroni)
   if (SB.style === 'cloud' || SB.style === 'orbital') return Z === 1 ? 0.07 : 0.11;
-  const cov = ATOM_PARAMS[Z][0] === 0 ? 0.5 * ATOM_PARAMS[Z][5] * 100 * 0.5 : covalentRadius(Z);
+  const cov = ATOM_PARAMS[Z]?.[0] === 0 ? 0.5 * ATOM_PARAMS[Z][5] * 100 * 0.5 : covalentRadius(Z);
   return 0.12 + 0.0034 * cov;
 }
 
@@ -562,7 +563,7 @@ function onWave(m) {
   if (wantOrb && !w) {
     cloud.busy = false;
     if (cloud.group) { scene.group.remove(cloud.group); cloud.group = null; }
-    SB.cloudNote = '<b>Gli orbitali esistono solo nel calcolo quantistico:</b> scegli "quantistico MINDO/3" o "Hartree–Fock ab initio".';
+    SB.cloudNote = '<b>Gli orbitali esistono solo nel calcolo quantistico:</b> scegli GFN2-xTB, MINDO/3 o Hartree–Fock.';
     return;
   }
   if (!cloud.worker) {
@@ -576,6 +577,7 @@ function onWave(m) {
   const req = { id: m.reqId, what: wantOrb ? 'orbital' : 'density', box, res };
   if (!w) Object.assign(req, { mode: 'promolecular', Z: m.Z, pos: m.pos });
   else if (w.kind === 'sto') Object.assign(req, { mode: 'sto', Z: w.Z, pos: w.pos, first: w.first, P: w.P, orb: orbital?.c });
+  else if (w.kind === 'xtb') Object.assign(req, { mode: 'xtb', Z: w.Z, pos: w.pos, P: w.P, orb: orbital?.c });
   else Object.assign(req, { mode: 'gauss', Z: w.atoms.map(a => a.Z), pos: Float64Array.from(w.atoms.flatMap(a => a.xyz.map(v => v * BOHR_A))), atoms: w.atoms, basisName: w.basisName, P: w.P, orb: orbital?.c });
   req.surfaces = wantOrb
     ? [{ iso: 0.05, sign: 1 }, { iso: 0.05, sign: -1 }]
@@ -613,7 +615,7 @@ function onGrid(g) {
     // tre superfici di densità costante: il confine di van der Waals (0,002 e/bohr³), la regione dei legami, i gusci interni
     SB.cloudNote = meta.mode === 'promolecular'
       ? 'Nuvola elettronica <b>promolecolare</b>: somma delle densità degli atomi isolati (calcolate con la DFT del sito). Con il campo classico gli elettroni non si ridistribuiscono nei legami: per la densità vera scegli il motore quantistico.'
-      : `Densità elettronica ρ(r) calcolata dalla funzione d'onda ${meta.mode === 'sto' ? 'MINDO/3 (valenza) più il core atomico' : 'Hartree–Fock (tutti gli elettroni)'}: superfici a 0,002 e/bohr³ (confine di van der Waals), 0,05 (legami) e 0,3 (vicino ai nuclei).`;
+      : `Densità elettronica ρ(r) calcolata dalla funzione d'onda ${meta.mode === 'sto' ? 'MINDO/3 (valenza) più il core atomico' : meta.mode === 'xtb' ? 'GFN2-xTB (valenza) più il core atomico' : 'Hartree–Fock (tutti gli elettroni)'}: superfici a 0,002 e/bohr³ (confine di van der Waals), 0,05 (legami) e 0,3 (vicino ai nuclei).`;
   } else {
     const o = meta.orbital;
     SB.cloudNote = o ? `${SB.orbital === 'lumo' ? 'LUMO' : 'HOMO'} (spin ${o.spin}), ε = ${nf(o.e * meta.eUnit, 2)} eV: isosuperficie |ψ| = 0,05 bohr<sup>−3/2</sup>, in colore il segno della funzione d'onda.` : 'Orbitale non disponibile.';
@@ -760,7 +762,7 @@ function renderSide() {
     <h3 class="side-h">Sandbox chimica</h3>
     <label class="lbl" for="sb-preset">Esperimento</label>
     <select id="sb-preset">
-      <optgroup label="Quantistica: elettroni calcolati a ogni passo (MINDO/3)">${PRESETS.filter(x => x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
+      <optgroup label="Quantistica: elettroni calcolati a ogni passo (GFN2-xTB, MINDO/3)">${PRESETS.filter(x => x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
       <optgroup label="Campo di forze reattivo (classico, veloce)">${PRESETS.filter(x => !x.atoms && !x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
       <optgroup label="Ab initio (Hartree–Fock)">${PRESETS.filter(x => x.atoms && !x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
     </select>
@@ -776,10 +778,12 @@ function renderSide() {
     </div>
     <label class="lbl">Aggiungi molecole</label>
     <div class="mol-list">${molBtns}</div>
-    <label class="lbl">Aggiungi ioni (calcolati con MINDO/3 o Hartree–Fock)</label>
+    <label class="lbl">Aggiungi ioni (calcolati con GFN2-xTB)</label>
     <div class="mol-list">${ionBtns}</div>
     <label class="lbl">Aggiungi atomi (radicali, gas nobili)</label>
     <div class="mol-list">${elBtns}</div>
+    <label class="lbl" for="sb-more-el">Altri elementi fino al radon (solo GFN2-xTB)</label>
+    <select id="sb-more-el"><option value="">scegli un elemento…</option>${ELEMENTS.slice(0, 86).map((e, k) => k + 1).filter(Z => !SANDBOX_ELEMENTS.includes(Z)).map(Z => `<option value="${sym(Z)}" ${SB.add.kind === 'atom' && SB.add.symbol === sym(Z) ? 'selected' : ''}>${Z} · ${sym(Z)} · ${ELEMENTS[Z - 1].name}</option>`).join('')}</select>
     <label class="lbl" for="sb-smiles">Oppure una molecola da SMILES</label>
     <div class="smiles-row"><input id="sb-smiles" placeholder="es. CC(=O)O oppure [NH4+]" value="${SB.add.kind === 'smiles' ? escapeHtml(SB.add.smiles) : ''}" spellcheck="false"><button type="button" class="btn" id="sb-smiles-ok">Usa</button></div>
     <div class="ctl" style="margin-top:8px"><label class="lbl" for="sb-count">Quantità: <span id="sb-count-out">${SB.count}</span></label>
@@ -817,11 +821,12 @@ function renderSide() {
   $('sb-pour-salt').addEventListener('click', () => pour([['[Na]', 8], ['ClCl', 4]]));
   $('element-card').querySelectorAll('[data-mol]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'mol', id: b.dataset.mol }; renderSide(); }));
   $('element-card').querySelectorAll('[data-el]').forEach(b => b.addEventListener('click', () => { SB.add = { kind: 'atom', symbol: b.dataset.el }; renderSide(); }));
+  $('sb-more-el').addEventListener('change', (e) => { if (e.target.value) { SB.add = { kind: 'atom', symbol: e.target.value }; renderSide(); } });
   $('sb-smiles-ok').addEventListener('click', () => {
     const s = $('sb-smiles').value.trim();
     try {
       const g = parseSmiles(s);
-      if (g.atoms.some(a => !ATOM_PARAMS[a.Z])) throw new Error('elemento non disponibile nella sandbox');
+      if (g.atoms.some(a => !(a.Z >= 1 && a.Z <= 86))) throw new Error('elemento non disponibile nella sandbox (ammessi H–Rn)');
       SB.add = { kind: 'smiles', smiles: s };
       SB.info = '';
     } catch (e) { SB.info = `SMILES non valido: ${e.message}`; }
@@ -912,9 +917,10 @@ function renderControls() {
     <div class="btn-row"><button class="btn" id="sb-zero">Azzera misure</button><button class="btn" id="sb-export">Esporta CSV</button></div>
     <div class="ctl"><span class="lbl">Modello delle forze</span></div>
     <div class="seg" id="sb-ff">
-      <button type="button" data-v="auto" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'auto'}" title="Sceglie il modello più fedele che può ancora girare: LJ pubblicato per i nobili, MINDO/3 fino a 36 atomi, Hartree–Fock fino a 6, altrimenti classico">fedeltà automatica</button>
+      <button type="button" data-v="auto" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'auto'}" title="Sceglie il modello più fedele che può ancora girare: LJ pubblicato per i nobili, GFN2-xTB fino a 40 atomi (tutti gli elementi fino al radon, ioni, campo), altrimenti classico">fedeltà automatica</button>
       <button type="button" data-v="reactive" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico</button>
       <button type="button" data-v="lj" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'lj'}" title="Lennard–Jones con σ e ε pubblicati. Solo He, Ne, Ar, Kr, Xe">LJ nobili</button>
+      <button type="button" data-v="gfn2" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'gfn2'}" title="GFN2-xTB a ogni passo (Grimme 2019), elementi H–Rn, fino a 120 atomi, validato su tblite">GFN2-xTB</button>
       <button type="button" data-v="mindo3" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'mindo3'}" title="MINDO/3 a ogni passo, fino a 90 atomi di H, B, C, N, O, F, P, S, Cl">MINDO/3</button>
       <button type="button" data-v="hf" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'hf'}" title="Hartree–Fock/STO-3G a ogni passo, fino a 8 atomi">Hartree–Fock</button>
     </div>
@@ -925,7 +931,7 @@ function renderControls() {
     <div class="ctl"><span class="lbl">Campo elettrico uniforme (V/Å) ${st?.field ? `· acceso, |E| = ${nf(Math.hypot(...st.field), 2)} V/Å` : '· spento'}</span>
       <div class="range-row field-row">${['x', 'y', 'z'].map((c, k) => `<label for="sb-E${c}">E<sub>${c}</sub></label><input id="sb-E${c}" type="text" inputmode="decimal" value="${nf(st?.field?.[k] ?? 0, 2)}" style="width:58px">`).join('')}</div>
       <div class="btn-row" style="margin-top:4px"><button type="button" class="btn" id="sb-field-on">Applica il campo</button><button type="button" class="btn" id="sb-field-off" ${st?.field ? '' : 'disabled'}>Spegni</button></div>
-      <p class="hint">Calcolato con MINDO/3 nella funzione d'onda: polarizza le molecole, orienta i dipoli e spinge gli ioni (forza qE). 1 V/Å = 10¹⁰ V/m, come vicino alla punta di un microscopio a effetto di campo. Accendere o cambiare il campo è lavoro sul sistema, contato nel bilancio. Con base minima la ionizzazione per effetto tunnel non è descritta.</p></div>
+      <p class="hint">Calcolato con GFN2-xTB (o MINDO/3) nella funzione d'onda: polarizza le molecole, orienta i dipoli e spinge gli ioni (forza qE). 1 V/Å = 10¹⁰ V/m, come vicino alla punta di un microscopio a effetto di campo. Accendere o cambiare il campo è lavoro sul sistema, contato nel bilancio. Con base minima la ionizzazione per effetto tunnel non è descritta.</p></div>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
       <button type="button" data-v="1" aria-pressed="${thermo}" title="Termostato di Bussi: scambia calore con un bagno a temperatura costante (insieme canonico NVT)">Termostato</button>
@@ -1061,8 +1067,8 @@ function renderPanelBody() {
   const kj = (e) => nf(e * KJ_PER_EV, 1);
   const ph = s.phase;
   $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole${ph ? ` · ${ph.title}` : ''}</small>`;
-  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : s.forceField === 'lj' ? 'Lennard–Jones dei gas nobili' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
-  $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : s.forceField === 'lj' ? 'Lennard–Jones' : 'classico qualitativo'}</b></span>`;
+  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : s.forceField === 'gfn2' ? 'Dinamica quantistica (SCF GFN2-xTB a ogni passo)' : s.forceField === 'lj' ? 'Lennard–Jones dei gas nobili' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
+  $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : s.forceField === 'gfn2' ? 'GFN2-xTB quantistico' : s.forceField === 'lj' ? 'Lennard–Jones' : 'classico qualitativo'}</b></span>`;
   const dtIn = $('sb-dt');
   if (dtIn && document.activeElement !== dtIn && Math.abs(+dtIn.value - s.dt) > 1e-9) dtIn.value = +s.dt.toPrecision(4);
   $('panel-body').innerHTML = `
@@ -1076,20 +1082,20 @@ function renderPanelBody() {
       <dt>Volume</dt><dd>${nf(V / 1000, 2)} nm³</dd>
       <dt>Densità numerica</dt><dd>${nf(nMol / V * 1e27 / NA, 2)} mol/L</dd>
     </dl></div>
-    ${s.forceField === 'mindo3' && s.hf?.method ? `<div><h3>Struttura elettronica a ogni passo</h3>
+    ${(s.forceField === 'mindo3' || s.forceField === 'gfn2') && s.hf?.method ? `<div><h3>Struttura elettronica a ogni passo</h3>
     <dl class="info-list">
-      <dt>Metodo</dt><dd>MINDO/3 (UHF, SCF)</dd>
-      <dt>Orbitali di valenza</dt><dd>${s.hf.nbf}</dd>
+      <dt>Metodo</dt><dd>${s.hf.method === 'GFN2-xTB' ? 'GFN2-xTB (SCC, multipoli, D4)' : 'MINDO/3 (UHF, SCF)'}</dd>
+      <dt>Funzioni di base di valenza</dt><dd>${s.hf.nbf}</dd>
       <dt>Spin totale S<sub>z</sub></dt><dd>${nf(Math.abs(s.hf.Sz), 1)}${Math.abs(s.hf.Sz) > 0.25 ? ' (elettroni spaiati)' : ''}</dd>
       <dt>HOMO / LUMO</dt><dd>${nf(s.hf.homo, 2)} / ${nf(s.hf.lumo, 2)} eV</dd>
       <dt>Gap HOMO–LUMO</dt><dd>${nf(s.hf.gap, 2)} eV</dd>
       <dt>Carica totale</dt><dd>${chargeText(s.charge ?? 0)}</dd>
       ${s.dipole ? `<dt>Momento di dipolo</dt><dd>${nf(Math.hypot(...s.dipole) * 4.80320, 2)} D${s.charge ? ' (dipende dall\'origine: c\'è una carica netta)' : ''}</dd>` : ''}
       ${s.field ? `<dt>Campo elettrico</dt><dd>(${s.field.map(v => nf(v, 2)).join('; ')}) V/Å</dd>` : ''}
-      <dt>Calore di formazione ΔfH</dt><dd>${nf(s.hf.Hf * 4.184, 0)} kJ/mol</dd>
+      ${s.hf.Hf !== undefined ? `<dt>Calore di formazione ΔfH</dt><dd>${nf(s.hf.Hf * 4.184, 0)} kJ/mol</dd>` : ''}
       <dt>Iterazioni SCF</dt><dd>${s.hf.iterations}${s.hf.converged ? '' : ' (non convergente)'}</dd>
     </dl>
-    <p class="hint">A ogni passo si risolvono le equazioni di Roothaan–Hall per tutti gli elettroni di valenza; le forze sono il gradiente analitico dell'energia. Lo spin non è imposto: radicali e O₂ tripletto escono dal calcolo. Cariche e ordini di legame dalla matrice densità. ΔfH è la somma dei calori di formazione di tutte le molecole della scatola.</p></div>` : ''}
+    ${s.hf.method === 'GFN2-xTB' ? `<p class="hint">A ogni passo si risolve l'hamiltoniana tight binding autoconsistente GFN2-xTB: cariche di shell, dipoli e quadrupoli atomici, dispersione D4 dipendente dalle cariche e temperatura elettronica di ${s.hf.Tel} K. Le forze sono il gradiente analitico, verificato su tblite entro 10⁻⁹ hartree/bohr. Lo spin è fissato dal numero di elettroni spaiati (singoletto o doppietto se libero). Cariche di Mulliken e ordini di legame di Mayer dalla matrice densità.</p>` : `<p class="hint">A ogni passo si risolvono le equazioni di Roothaan–Hall per tutti gli elettroni di valenza; le forze sono il gradiente analitico dell'energia. Lo spin non è imposto: radicali e O₂ tripletto escono dal calcolo. Cariche e ordini di legame dalla matrice densità. ΔfH è la somma dei calori di formazione di tutte le molecole della scatola.</p>`}</div>` : ''}
     ${s.forceField === 'hf' && s.hf ? `<div><h3>Calcolo quantistico a ogni passo</h3>
     <dl class="info-list">
       <dt>Metodo</dt><dd>UHF/${s.hf.basis}</dd>
@@ -1277,6 +1283,7 @@ function renderAnalysis() {
       <div id="sb-events" class="wide"></div>
       <details class="wide"><summary>Modello, equazioni e limiti</summary>
         <p>Velocity Verlet: F = −∇U, x(t+Δt) = x + vΔt + ½aΔt². NVE: energia approssimativamente conservata con errore dipendente dal passo. NVT: termostato CSVR di Bussi.</p>
+        <p>GFN2-xTB (Bannwarth, Ehlert, Grimme, J. Chem. Theory Comput. 15, 1652, 2019): nuclei classici, elettroni di valenza in base STO-nG minima con tight binding autoconsistente; elettrostatica di secondo e terzo ordine per shell, multipoli atomici fino al quadrupolo, dispersione D4 autoconsistente con termine a tre corpi, repulsione efficace. Copre tutti gli elementi da H a Rn. Implementato in JavaScript e verificato contro tblite: energie entro 10⁻¹⁰ hartree, gradienti entro 10⁻⁹ hartree/bohr. Errori tipici del metodo: alcune kcal/mol sulle energie di reazione, barriere spesso sottostimate; nessun solvente implicito.</p>
         <p>MINDO/3: nuclei classici, elettroni di valenza con SCF UHF semiempirica (Bingham, Dewar, Lo 1975) a ogni passo; fino a 90 atomi di H, B, C, N, O, F, P, S, Cl. Spin libero (livello di Fermi comune), parametri verificati contro PySCF. È un metodo semiempirico: errori tipici sui calori di formazione di circa 11 kcal/mol, legami a idrogeno sottostimati.</p>
         <p>Hartree–Fock: nuclei classici, elettroni UHF/STO-3G; fino a 8 atomi. SCF non convergente: arresto. Lo spin iniziale è scelto fra le due molteplicità più basse, non fra tutti gli stati possibili.</p>
         <p>Campo classico: potenziale empirico specifico del progetto, ispirato a forme pubblicate. Barriere e reazioni non validate in generale; non è un’implementazione parametrizzata di ReaxFF o REBO. Assenti solvente, fotofisica e cinetica elettronica.</p>
@@ -1344,7 +1351,7 @@ function renderSelected() {
       <dt>Carica parziale</dt><dd>${sgn(f.q[i], 2)} e</dd>
       <dt>Elettronegatività di Pauling</dt><dd>${nf(PAULING[Z], 2)}</dd>
       <dt>Numero di ossidazione</dt><dd>Richiede struttura di Lewis assegnata</dd>
-      <dt>Somma degli ordini di legame</dt><dd>${nf(sumN, 2)} (valenza ${ATOM_PARAMS[Z][0]})</dd>
+      <dt>Somma degli ordini di legame</dt><dd>${nf(sumN, 2)} ${ATOM_PARAMS[Z] ? ` (valenza ${ATOM_PARAMS[Z][0]})` : ''}</dd>
 
       <dt>Energia cinetica</dt><dd>${nf(f.ke[i] * KJ_PER_EV, 1)} kJ/mol</dd>
       <dt>Molecola</dt><dd>${fragFormula}${SPECIES_NAMES[fragFormula] ? ` (${SPECIES_NAMES[fragFormula]})` : ''}</dd>

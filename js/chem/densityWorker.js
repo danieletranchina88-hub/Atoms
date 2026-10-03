@@ -2,6 +2,7 @@
 //
 //  • funzione d'onda MINDO/3 (orbitali di Slater di valenza): ρ(r) = Σ P_μν φ_μ(r) φ_ν(r) per la valenza,
 //    più la densità degli elettroni di core presa dall'atomo isolato calcolato (DFT-LDA del sito);
+//  • funzione d'onda GFN2-xTB (base STO-nG di valenza): come MINDO/3, valenza più core dell'atomo isolato;
 //  • funzione d'onda Hartree–Fock (base gaussiana, tutti gli elettroni): ρ(r) = Σ P_μν φ_μ φ_ν;
 //  • campo classico: densità promolecolare, somma delle densità degli atomi isolati (DFT-LDA).
 // Le griglie sono in Å, centrate nell'origine della scatola; la densità è in e/bohr³, gli orbitali in bohr^(−3/2).
@@ -10,6 +11,8 @@ import { computeAtom } from '../physics/atom.js';
 import { makeGrid } from '../physics/scf.js';
 import { basisOnAtom, nBasis } from './mindo3.js';
 import { buildBasis, basisValues } from './integrals.js';
+import { buildBasis as xtbBasis, shellValues, nSph } from './xtb/gto.js';
+import { GFN2 } from './xtb/gfn2Data.js';
 import { marchingCubes } from '../render/marching.js';
 
 const BOHR = 0.52917721090;
@@ -19,10 +22,14 @@ const CUT = 4.5;       // Å: oltre, le funzioni di valenza sono trascurabili ai
 
 // densità radiali degli atomi isolati (totale e di core) su una griglia uniforme in Å
 const radial = new Map();
-function atomTables(Z) {
-  if (radial.has(Z)) return radial.get(Z);
+// core = orbitali dell'atomo isolato più interni del guscio di valenza (MINDO/3), oppure tutti quelli che
+// non sono shell della base GFN2 (per i metalli di transizione il 3d è valenza anche se n è minore)
+function atomTables(Z, xtb = false) {
+  const key = xtb ? -Z : Z;
+  if (radial.has(key)) return radial.get(key);
+  const xtbShells = xtb ? new Set(GFN2.elements[Z - 1].shells.map(sh => `${sh.n},${sh.l}`)) : null;
   const a = computeAtom(Z);
-  const g = makeGrid(Z);
+  const g = makeGrid(Z, { xmin: a.grid.xmin, h: a.grid.h });
   const nVal = Math.max(...a.orbitals.map(o => o.n));
   const nPts = Math.ceil(RMAX / DR) + 1;
   const total = new Float32Array(nPts), core = new Float32Array(nPts);
@@ -33,7 +40,7 @@ function atomTables(Z) {
       const r = g.r[i];
       const v = o.occ * o.u[i] * o.u[i] / (4 * Math.PI * r * r);
       rhoT[i] += v;
-      if (o.n < nVal) rhoC[i] += v;
+      if (xtb ? !xtbShells.has(`${o.n},${o.l}`) : o.n < nVal) rhoC[i] += v;
     }
   }
   let j = 0;
@@ -45,7 +52,7 @@ function atomTables(Z) {
     core[k] = rhoC[j] + t * (rhoC[j + 1] - rhoC[j]);
   }
   const tab = { total, core };
-  radial.set(Z, tab);
+  radial.set(key, tab);
   return tab;
 }
 const lookup = (arr, r) => { const x = r / DR; const k = x | 0; if (k >= arr.length - 1) return 0; const t = x - k; return arr[k] + t * (arr[k + 1] - arr[k]); };
@@ -70,7 +77,10 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
   const values = new Float32Array(res * res * res);
   const cl = cellList(pos, N, half);
   const tabs = new Map();
-  for (const z of new Set(Z)) tabs.set(z, atomTables(z));
+  for (const z of new Set(Z)) tabs.set(z, atomTables(z, mode === 'xtb'));
+  // base GFN2: shell per atomo, indici delle funzioni
+  let xb = null;
+  if (mode === 'xtb') xb = xtbBasis(Z, GFN2.elements);
   // base gaussiana (HF): funzioni raggruppate per atomo
   let gb = null, phiG = null;
   if (mode === 'gauss') {
@@ -78,6 +88,7 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
     phiG = new Float64Array(gb.nbf);
   }
   const near = new Int32Array(N);
+  const xphi = new Float64Array(9 * N), xidx = new Int32Array(9 * N);
   const phi = new Float64Array(4 * N);
   const idxs = new Int32Array(4 * N);
   for (let kz = 0; kz < res; kz++) {
@@ -110,6 +121,41 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
             rho += lookup(tabs.get(Z[A]).total, Math.hypot(x - pos[3 * A], y - pos[3 * A + 1], z - pos[3 * A + 2]));
           }
           values[gi] = rho;
+          continue;
+        }
+        if (mode === 'xtb') {
+          let m = 0;
+          for (let q = 0; q < nn; q++) {
+            const A = near[q];
+            const dx = (x - pos[3 * A]) / BOHR, dy = (y - pos[3 * A + 1]) / BOHR, dz = (z - pos[3 * A + 2]) / BOHR;
+            for (const k of xb.atomShells[A]) {
+              const sh = xb.shells[k];
+              shellValues(sh, dx, dy, dz, xphi, m);
+              for (let c = 0; c < nSph(sh.l); c++) xidx[m + c] = sh.ao + c;
+              m += nSph(sh.l);
+            }
+          }
+          if (what === 'density') {
+            const nb = xb.nao;
+            let rho = 0;
+            for (let a = 0; a < m; a++) {
+              const pa = xphi[a];
+              if (pa === 0) continue;
+              const row = xidx[a] * nb;
+              let s = 0;
+              for (let b = 0; b < m; b++) s += P[row + xidx[b]] * xphi[b];
+              rho += pa * s;
+            }
+            for (let q = 0; q < nn; q++) {
+              const A = near[q];
+              rho += lookup(tabs.get(Z[A]).core, Math.hypot(x - pos[3 * A], y - pos[3 * A + 1], z - pos[3 * A + 2]));
+            }
+            values[gi] = rho;
+          } else {
+            let s = 0;
+            for (let a = 0; a < m; a++) s += orb[xidx[a]] * xphi[a];
+            values[gi] = s;
+          }
           continue;
         }
         if (mode === 'sto') {

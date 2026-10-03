@@ -4,6 +4,8 @@
 
 import fs from 'fs';
 import { GFN2xTB } from '../js/chem/xtb/gfn2.js';
+import { makeGFN2Provider } from '../js/chem/xtb/provider.js';
+import { computeGrid } from '../js/chem/densityWorker.js';
 
 let failures = 0;
 const check = (name, ok, detail) => {
@@ -42,6 +44,24 @@ for (const [name, m] of Object.entries(ref.molecules)) {
   check('Fe–CO: gradiente analitico = differenze finite', err < 1e-7, `max scarto ${err.toExponential(1)} Eh/bohr`);
 }
 
+// campo elettrico uniforme: energia e dipolo contro tblite, gradiente contro le differenze finite
+for (const [name, f] of Object.entries(ref.field)) {
+  const m = ref.molecules[name];
+  const calc = new GFN2xTB({ field: f.field, etol: 1e-12, ptol: 1e-10 });
+  const pos = m.pos.flat(), opt = { charge: m.charge, uhf: m.uhf };
+  const r = calc.compute(m.Z, pos, opt);
+  let err = 0;
+  for (const k of [1, 2, 4]) {
+    const h = 1e-4, p = pos.slice();
+    p[k] += h; const ep = calc.compute(m.Z, p, { ...opt, gradient: false }).energy;
+    p[k] -= 2 * h; const em = calc.compute(m.Z, p, { ...opt, gradient: false }).energy;
+    err = Math.max(err, Math.abs((ep - em) / (2 * h) - r.gradient[k]));
+  }
+  const dE = Math.abs(r.energy - f.energy), dmu = maxDiff(f.dipole, r.dipole);
+  check(`${name} nel campo [${f.field}] au: energia, dipolo, gradiente`, dE < 1e-9 && dmu < 1e-6 && err < 1e-7,
+    `|ΔE| ${dE.toExponential(1)} Eh, |Δμ| ${dmu.toExponential(1)} e·bohr, gradiente − differenze finite ${err.toExponential(1)} Eh/bohr`);
+}
+
 // invarianza per traslazione e rotazione
 {
   const m = ref.molecules['HCl_H2O'];
@@ -51,6 +71,19 @@ for (const [name, m] of Object.entries(ref.molecules)) {
   const rot = m.pos.flatMap(([x, y, z]) => [c * x - s * y + 3.1, s * x + c * y - 1.2, z + 0.4]);
   const e1 = calc.compute(m.Z, rot, { gradient: false }).energy;
   check('HCl·H₂O: energia invariante per rototraslazione', Math.abs(e1 - e0) < 1e-9, `scarto ${Math.abs(e1 - e0).toExponential(1)} Eh`);
+}
+
+// nuvola elettronica disegnata dalla sandbox: valenza GFN2 + core dell'atomo isolato = tutti gli elettroni
+{
+  const p = makeGFN2Provider();
+  const pos = Float64Array.from([0, 0, 0, 0.757, 0.587, 0, -0.757, 0.587, 0].map((v, i) => v + [0.0371, 0.0613, 0.0517][i % 3]));
+  p.compute([8, 1, 1], pos, new Float64Array(9), {});
+  const w = p.wavefunction();
+  const integ = (opts) => { const g = computeGrid({ Z: w.Z, pos: w.pos, box: 8, res: 121, P: w.P, ...opts }); const dv = (g.step / 0.52917721090) ** 3; return g.values.reduce((s, v) => s + v * v ** (opts.what === 'orbital' ? 1 : 0) * dv, 0); };
+  const ne = integ({ mode: 'xtb', what: 'density' }), npro = integ({ mode: 'promolecular', what: 'density' });
+  const norm = integ({ mode: 'xtb', what: 'orbital', orb: w.homo.c });
+  check('H₂O: densità GFN2 + core e promolecolare integrano a 10 elettroni, HOMO normalizzato',
+    Math.abs(ne - 10) < 0.2 && Math.abs(npro - 10) < 0.2 && Math.abs(norm - 1) < 1e-2, `∫ρ = ${ne.toFixed(3)} (GFN2), ${npro.toFixed(3)} (atomi isolati), ∫|ψ|² = ${norm.toFixed(4)}`);
 }
 
 if (failures) { console.log(`\n${failures} verifiche GFN2-xTB fallite`); process.exit(1); }

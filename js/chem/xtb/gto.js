@@ -198,12 +198,14 @@ export function pairBuffers(withGrad) {
  * Matrici complete: S (nao²), D[3] e Q[6] con D[c][μ·n+ν] = ⟨μ|(r−R_ν)_c|ν⟩ e Q non a traccia nulla.
  * Le coppie di atomi più lontane di cutoff (bohr) sono trascurate.
  */
-export function moleculeIntegrals(basis, pos, { cutoff = 40 } = {}) {
+export function moleculeIntegrals(basis, pos, { cutoff = 40, withGrad = false } = {}) {
   const n = basis.nao, sh = basis.shells;
   const S = new Float64Array(n * n);
   const D = [0, 1, 2].map(() => new Float64Array(n * n));
   const Q = Array.from({ length: 6 }, () => new Float64Array(n * n));
-  const buf = pairBuffers(false);
+  const buf = pairBuffers(withGrad);
+  // derivate (rispetto all'atomo bra) delle coppie di shell su atomi diversi, già normalizzate, per il gradiente
+  const derivs = withGrad ? [] : null;
   const c2 = cutoff * cutoff;
   for (let I = 0; I < sh.length; I++) {
     const si = sh[I], A = si.atom;
@@ -211,8 +213,13 @@ export function moleculeIntegrals(basis, pos, { cutoff = 40 } = {}) {
       const sj = sh[J], B = sj.atom;
       const R = [pos[3 * B] - pos[3 * A], pos[3 * B + 1] - pos[3 * A + 1], pos[3 * B + 2] - pos[3 * A + 2]];
       if (R[0] ** 2 + R[1] ** 2 + R[2] ** 2 > c2) continue;
-      shellPair(si.l, si.alpha, si.coeff, sj.l, sj.alpha, sj.coeff, R, buf);
-      const nb = nSph(sj.l), nrm = si.norm * sj.norm;
+      const g = withGrad && A !== B;
+      shellPair(si.l, si.alpha, si.coeff, sj.l, sj.alpha, sj.coeff, R, g ? buf : { S: buf.S, D: buf.D, Q: buf.Q });
+      const nb = nSph(sj.l), nrm = si.norm * sj.norm, m = nSph(si.l) * nb;
+      if (g) {
+        const copy = (arr) => arr.map(b => { const o = new Float64Array(m); for (let k = 0; k < m; k++) o[k] = b[k] * nrm; return o; });
+        derivs.push({ I, J, R, dS: copy(buf.dS), dD: copy(buf.dD), dQ: copy(buf.dQ) });
+      }
       for (let i = 0; i < nSph(si.l); i++) for (let j = 0; j < nb; j++) {
         const mu = si.ao + i, nu = sj.ao + j, k = i * nb + j;
         const s = buf.S[k] * nrm;
@@ -228,7 +235,25 @@ export function moleculeIntegrals(basis, pos, { cutoff = 40 } = {}) {
       }
     }
   }
-  return { S, D, Q };
+  return { S, D, Q, derivs };
 }
 
 export { QIDX };
+
+/**
+ * Valori delle funzioni di base della shell sh (normalizzate) nel punto (dx, dy, dz) relativo all'atomo, in bohr.
+ * Scrive 2l+1 valori in out a partire da off.
+ */
+export function shellValues(sh, dx, dy, dz, out, off) {
+  const r2 = dx * dx + dy * dy + dz * dz;
+  let rad = 0;
+  for (let p = 0; p < sh.alpha.length; p++) rad += sh.coeff[p] * Math.exp(-sh.alpha[p] * r2);
+  rad *= sh.norm;
+  if (sh.l === 0) { out[off] = rad; return; }
+  if (sh.l === 1) { out[off] = rad * dy; out[off + 1] = rad * dz; out[off + 2] = rad * dx; return; }
+  out[off] = rad * S3 * dx * dy;
+  out[off + 1] = rad * S3 * dy * dz;
+  out[off + 2] = rad * (dz * dz - 0.5 * (dx * dx + dy * dy));
+  out[off + 3] = rad * S3 * dx * dz;
+  out[off + 4] = rad * S3 / 2 * (dx * dx - dy * dy);
+}
