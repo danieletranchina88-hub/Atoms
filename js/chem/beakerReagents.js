@@ -168,7 +168,7 @@ export function beakerPresets() {
     { id: 'barium', name: 'Ba²⁺ + SO₄²⁻: precipitazione selettiva', steps: [[WATER, 80], [q('Ba+2', 'Cl-', 0.1), 10]], next: q('Na+', 'SO4-2', 0.1), amount: 5,
       text: 'Aggiungi solfato: le quantità delle fasi solide seguono i prodotti delle attività e i bilanci di materia.' },
     { id: 'cementation', name: 'Zn + Cu²⁺: deposizione di rame', steps: [[WATER, 80], [q('Cu+2', 'Cl-', 0.1), 10]], next: metal('Zn'), amount: 0.1,
-      text: 'Zn + Cu²⁺ → Zn²⁺ + Cu. Osserva il deposito metallico nel bilancio redox. Morfologia e velocità non sono previste.' },
+      text: 'Zn + Cu²⁺ → Zn²⁺ + Cu. All\'equilibrio lo zinco in eccesso riduce anche l\'acqua (H₂ e Zn(OH)₂): è favorito termodinamicamente ma nella realtà è lento, e il modello non calcola velocità. Morfologia del deposito non prevista.' },
     { id: 'empty', name: 'Becher vuoto', steps: [], text: 'Componi qualunque soluzione con il catione e l\'anione che vuoi, alla concentrazione che vuoi.' },
   ];
 }

@@ -252,11 +252,12 @@ function setMode(mode) {
     molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
     reaction: 'Gas ideali · HF/MP2 + rotore rigido e oscillatore armonico · equilibrio distinto dalla cinetica',
     lab: 'Modelli termodinamici e cinetici · attività, unità e condizioni esplicite',
-    sandbox: 'MINDO/3 semiempirico · UHF per pochi atomi · campo classico qualitativo · controlla il bilancio energetico',
-    phase: 'Dinamica LJ · gas nobile modello · NVE / NVT · transizioni emergenti',
-    beaker: 'Equilibrio MINTEQ · temperatura e attività esplicite · nessuna cinetica · validità limitata alle specie e condizioni del modello',
+    sandbox: 'Modello scelto per la scatola: Lennard–Jones per i gas nobili · MINDO/3 quantistico (fino a 90 atomi) o UHF ab initio (pochi atomi) · altrimenti potenziale classico qualitativo · verifica la deriva energetica',
+    phase: 'Dinamica Lennard–Jones · gas nobile modello · NVE / NVT · transizioni emergenti',
+    beaker: 'Equilibrio in acqua (database MINTEQ v4) · van \'t Hoff per la temperatura · attività Debye–Hückel esteso/Davies, affidabilità limitata ad alta forza ionica · nessuna cinetica',
+    kinetics: 'Legge di azione di massa · Arrhenius · integratore implicito per sistemi rigidi · isoterma, a volume costante',
   };
-  $('model-status').textContent = models[mode];
+  $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'molecule' && mode !== 'molecule') deactivateMolecule();
   if (prev === 'reaction' && mode !== 'reaction') deactivateReaction();

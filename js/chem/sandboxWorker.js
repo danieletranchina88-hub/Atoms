@@ -10,7 +10,8 @@ import { KB_EV, ATOM_PARAMS } from './reactiveData.js';
 import { makeHFProvider, aimdFeasible } from './aimd.js';
 import { makeMindo3Provider, mindo3Supports } from './mindo3.js';
 import { RDF, MSD, HeatCapacity } from './mdAnalysis.js';
-import { makeNobleLJProvider, nobleOnly, NOBLE_LJ, LJ_TRIPLE_T, LJ_CRITICAL_T } from './ljNoble.js';
+import { makeNobleLJProvider, nobleOnly, NOBLE_LJ } from './ljNoble.js';
+import { localOrder, phaseVerdict, Mobility } from './structureOrder.js';
 
 const BOHR_ANG = 0.52917721090;
 let sim = new Simulation({ box: 20, T: 300 });
@@ -294,15 +295,17 @@ function classifyPhase() {
   const N = sim.N;
   if (!N) return { label: 'vuota', title: 'Scatola vuota', frac: 0, clusters: 0, T: 0, note: 'Aggiungi atomi o molecole.' };
   if (forceField === 'lj' && nobleOnly(sim.Z)) {
-    const eps = sim.Z.reduce((s, z) => s + NOBLE_LJ[z].epsilonK, 0) / N;
+    // struttura locale (q₆ di Steinhardt) entro 1,5σ, il primo minimo di g(r): non soglie su T* e ρ*,
+    // perché con pareti e coesistenza la densità media della scatola non è quella delle fasi
     const sig = sim.Z.reduce((s, z) => s + NOBLE_LJ[z].sigma, 0) / N;
-    const Tstar = sim.temperature() / eps;
-    const rho = N * sig ** 3 / sim.box ** 3;
-    let label = 'gas', title = 'Gas';
-    if (Tstar < LJ_TRIPLE_T && rho > 0.75) { label = 'solido'; title = 'Solido LJ'; }
-    else if (Tstar < LJ_CRITICAL_T && rho > 0.45) { label = 'liquido'; title = 'Liquido LJ'; }
-    else if (rho > 0.25 && Tstar < LJ_CRITICAL_T + 0.3) { label = 'misto'; title = 'Fluido denso'; }
-    return { label, title, frac: Math.min(1, rho), clusters: 0, T: sim.temperature(), note: `T* = kT/ε = ${Tstar.toFixed(2)}, ρ* = ${rho.toFixed(2)}. Triplo LJ ≈ ${LJ_TRIPLE_T}, critico ≈ ${LJ_CRITICAL_T}.` };
+    const eps = sim.Z.reduce((s, z) => s + NOBLE_LJ[z].epsilonK, 0) / N;
+    const o = localOrder(sim.pos, { cutoff: 1.5 * sig });
+    // tempo caratteristico τ = σ √(m/ε) in fs (m in u, ε in eV): per l'argon 2,16 ps
+    const m = sim.mass.reduce((a, b) => a + b, 0) / N;
+    const tau = sig * Math.sqrt(m / (eps * KB_EV) / ACC);
+    const v = phaseVerdict(o.fraction, mobility.sample(sim.pos, sim.time, tau, sig));
+    const label = { solido: 'solido', liquido: 'liquido', gas: 'gas', misto: 'misto' }[v.id];
+    return { label, title: v.name, frac: 1 - o.fraction.vapor, clusters: 0, T: sim.temperature(), note: `${v.why}. T* = kT/ε = ${(sim.temperature() / eps).toFixed(2)}${mobility.lostFraction != null ? ` · primi vicini persi in 3τ: ${Math.round(100 * mobility.lostFraction)}%` : ''} · struttura locale q₆ (ten Wolde–Frenkel).` };
   }
   const pos = sim.pos;
   const heavy = [];
@@ -330,6 +333,14 @@ function classifyPhase() {
   return { label, title, frac, clusters: big, T, note: 'Vicini entro 4,2 Å nel modello. Non è la fase sperimentale.' };
 }
 
+// la lettura della fase costa O(N²): si aggiorna ogni 10 fotogrammi o quando cambia il numero di atomi
+let phaseCache = null, phaseFrame = 0;
+const mobility = new Mobility();
+function cachedPhase() {
+  if (!phaseCache || phaseCache.N !== sim.N || ++phaseFrame % 10 === 0) phaseCache = { N: sim.N, value: classifyPhase() };
+  return phaseCache.value;
+}
+
 function frame() {
   if (!sim.res) sim.forces();
   const N = sim.N;
@@ -352,7 +363,7 @@ function frame() {
       Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Egrab: sim.Egrab, Etot: sim.totalEnergy(),
       heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
-      forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null, phase: classifyPhase(),
+      forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null, phase: cachedPhase(),
     },
     mb: speedHistogram(),
   };
@@ -371,20 +382,20 @@ function frame() {
   postMessage(msg, [pos.buffer, q.buffer, ke.buffer]);
 }
 
-function guardTimestep() {
-  if (!sim.res) sim.forces();
-  let aMax = 0, vMax = 0;
-  for (let i = 0; i < sim.N; i++) {
-    const ax = ACC * Math.hypot(sim.F[3 * i], sim.F[3 * i + 1], sim.F[3 * i + 2]) / sim.mass[i];
-    const v = Math.hypot(sim.vel[3 * i], sim.vel[3 * i + 1], sim.vel[3 * i + 2]);
-    aMax = Math.max(aMax, ax);
-    vMax = Math.max(vMax, v);
+/**
+ * Un passo di velocity Verlet con rigetto: se lo spostamento previsto è instabile il passo non viene eseguito,
+ * Δt si dimezza e si riprova. Δt non viene mai aumentato da solo: crescere oltre il valore scelto (per esempio
+ * fino a 1–2 fs con atomi di idrogeno) rompe la conservazione dell'energia.
+ */
+const DT_MIN = 0.01;
+function safeStep() {
+  for (;;) {
+    try { sim.step(); return; } catch (e) {
+      if (!/instabile/.test(e.message) || sim.dt / 2 < DT_MIN) throw e;
+      sim.dt /= 2;
+      postMessage({ type: 'info', text: `Passo instabile: Δt dimezzato a ${sim.dt.toLocaleString('it-IT', { maximumSignificantDigits: 3 })} fs e passo ripetuto. Nessuna velocità è stata tagliata.` });
+    }
   }
-  const dtForce = aMax > 1e-8 ? Math.sqrt(0.08 / aMax) : 2;
-  const dtVel = vMax > 1e-6 ? 0.12 / vMax : 2;
-  const safe = Math.max(0.02, Math.min(forceField === 'hf' ? 0.25 : forceField === 'mindo3' ? 0.4 : 2, dtForce, dtVel));
-  if (sim.dt > safe) sim.dt = safe;
-  else if (sim.dt < safe * 0.5) sim.dt = Math.min(safe, sim.dt * 1.05);
 }
 
 function loop() {
@@ -393,8 +404,7 @@ function loop() {
     if (!paused && sim.N) {
     let n = 0;
     while (n < stepsPerFrame && performance.now() - t0 < msTarget) {
-      guardTimestep();
-      sim.step();
+      safeStep();
       n++;
       if (sim.stepCount % sim.censusEvery === 0) analysisSample();
       if (light.on) {

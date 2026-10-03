@@ -424,6 +424,45 @@ function enthalpy(eq) {
  * Una "ricetta" descrive che cosa si versa:
  *  { label, kind: 'solution' | 'solid' | 'metal' | 'phase' | 'water', species: [[nome, coeff], ...], phase, c (mol/L), M (g/mol), dsol (kJ/mol) }
  */
+/** Composizione nelle componenti del database (più l'acqua) di una voce del registro delle variazioni. */
+function compositionOf(key) {
+  if (key === 'H2O') return { c: {}, w: 1 };
+  if (key === 'H2') return { c: { 'H+': 2, 'e-': 2 }, w: 0 };
+  if (key === 'CO2g') { const p = PHASES[PHI.get('CO2(g)')]; return { c: p.c, w: p.w ?? 0 }; }
+  if (key.startsWith('p:')) { const p = PHASES[PHI.get(key.slice(2))]; return p ? { c: p.c, w: p.w ?? 0 } : null; }
+  const sp = speciesMap.get(key);
+  return sp ? { c: sp.c, w: speciesWater(key) } : null;
+}
+
+// H₂CO₃* del database è mostrato come CO₂(aq) (la forma prevalente): CO₂(aq) = H₂CO₃ − H₂O
+function speciesWater(name) { return name === 'H2CO3' ? -1 : speciesMap.get(name)?.w ?? 0; }
+
+/**
+ * Cerca coefficienti interi (≤ 12) proporzionali alle variazioni in moli, con scarto ≤ 4 %, e accetta l'equazione
+ * solo se bilancia esattamente ogni componente (quindi atomi e cariche) e l'acqua.
+ */
+function balancedEquation(entries) {
+  const rows = entries.map(([key, x]) => ({ ...x, comp: compositionOf(key) }));
+  if (rows.length < 2 || rows.some(r => !r.comp) || !rows.some(r => r.v < 0) || !rows.some(r => r.v > 0)) return null;
+  const unit = Math.min(...rows.map(r => Math.abs(r.v)));
+  for (let k = 1; k <= 12; k++) {
+    const coef = rows.map(r => Math.round(Math.abs(r.v) / unit * k));
+    if (coef.some(c => c < 1 || c > 12) || rows.some((r, i) => Math.abs(Math.abs(r.v) / unit * k - coef[i]) > 0.04 * coef[i])) continue;
+    const bal = {};
+    rows.forEach((r, i) => {
+      const n = Math.sign(r.v) * coef[i];
+      for (const [comp, v] of Object.entries(r.comp.c)) bal[comp] = (bal[comp] ?? 0) + n * v;
+      bal.H2O = (bal.H2O ?? 0) + n * r.comp.w;
+    });
+    if (Object.values(bal).some(v => Math.abs(v) > 1e-9)) continue;
+    const g = coef.reduce((a, b) => { while (b) [a, b] = [b, a % b]; return a; });
+    const side = (sign) => rows.map((r, i) => ({ r, c: coef[i] / g })).filter(x => Math.sign(x.r.v) === sign)
+      .map(x => `${x.c === 1 ? '' : `${x.c} `}${x.r.label}`).join(' + ');
+    return `${side(-1)} → ${side(1)}`;
+  }
+  return null;
+}
+
 export class Beaker {
   constructor() { this.reset(); }
 
@@ -618,7 +657,7 @@ export class Beaker {
     if (co2 > 0) add('CO2g', 'CO₂(g)↑', co2);
     // acqua prodotta: −Σ w Δn (formare una specie con w > 0 consuma acqua)
     let dw = 0;
-    for (const n of names) dw -= (speciesMap.get(n)?.w ?? 0) * d.get(n).v;
+    for (const n of names) dw -= speciesWater(n) * d.get(n).v;
     for (const n of pnames) dw -= (PHASES[PHI.get(n)]?.w ?? 0) * d.get(`p:${n}`).v;
     if (co2 > 0) dw -= (PHASES[PHI.get('CO2(g)')].w ?? 0) * co2;
     if (Math.abs(dw) > 0) add('H2O', 'H₂O', dw);
@@ -632,8 +671,16 @@ export class Beaker {
     const kept = items.filter(x => Math.abs(x.v) > 0.08 * vmax);
     const reac = kept.filter(x => x.v < 0), prod = kept.filter(x => x.v > 0);
     if (!reac.length || !prod.length) return null;
-    const text=kept.sort((a,b)=>Math.abs(b.v)-Math.abs(a.v)).map(x=>`${x.label}: ${x.v>0?'+':''}${(x.v*1000).toLocaleString('it-IT',{maximumSignificantDigits:4})} mmol`).join('; ');
-    return {text,changes:items.map(x=>({label:x.label,mol:x.v}))};
+    const detail = [...kept].sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+      .map(x => `${x.label}: ${x.v > 0 ? '+' : ''}${(x.v * 1000).toLocaleString('it-IT', { maximumSignificantDigits: 4 })} mmol`).join('; ');
+    const changes = items.map(x => ({ label: x.label, mol: x.v }));
+    // equazione netta solo se coefficienti interi piccoli bilanciano esattamente componenti, cariche e acqua;
+    // altrimenti (molti complessi, reazioni parallele) si mostrano le variazioni in mmol
+    for (const frac of [0.08, 0.03]) {
+      const eqn = balancedEquation([...d.entries()].filter(([, x]) => Math.abs(x.v) > frac * vmax));
+      if (eqn) return { text: eqn, balanced: true, detail, changes };
+    }
+    return { text: detail, balanced: false, detail, changes };
   }
 
   summary() {

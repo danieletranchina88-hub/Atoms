@@ -87,13 +87,13 @@ export const PRESETS = [
   {
     id: 'argon', name: 'Gas di argon: Maxwell–Boltzmann',
     box: 42, T: 300, dt: 2, add: [['[Ar]', 120]],
-    text: "Confronta la distribuzione delle velocità e la pressione alle pareti con Maxwell–Boltzmann e nkT/V. Le interazioni UFF e le pareti morbide producono scarti dal gas ideale.",
+    text: "Confronta la distribuzione delle velocità e la pressione alle pareti con Maxwell–Boltzmann e nkT/V. Con il modello automatico l'argon usa Lennard–Jones (σ = 3,405 Å, ε/k = 119,8 K): attrazioni e pareti morbide producono piccoli scarti dal gas ideale.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
     id: 'argon-liquid', name: 'Argon: condensazione e cristallo',
     box: 22, T: 60, dt: 2, add: [['[Ar]', 160]],
-    text: "Esplora aggregazione e ordinamento nel potenziale UFF. Temperature di transizione e fasi reali non sono determinate quantitativamente da questo esperimento.",
+    text: "Esplora aggregazione e ordinamento con Lennard–Jones. La fase è letta dalla struttura locale (q₆ di Steinhardt): goccia, coesistenza con il vapore o cristallo. Il condensarsi libera calore: con il termostato spento la temperatura sale. Taglio, pareti e numero finito di atomi spostano le temperature di transizione rispetto all'argon reale.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {

@@ -4,7 +4,7 @@ Un simulatore didattico di chimica nel browser. Calcola orbitali, molecole e gra
 
 La vista dà priorità a esperimenti, misure e grafici. Le spiegazioni estese sono richiudibili; ogni modalità mostra il modello impiegato. Vedi [SCIENTIFIC_MODEL.md](SCIENTIFIC_MODEL.md) per dominio di validità, fonti e verifiche.
 
-Novità: fedeltà automatica. I gas nobili usano Lennard–Jones con σ e ε pubblicati e la fase è letta in unità ridotte (triplo e critico LJ). Fino a 36 atomi di H, C, N, O… la sandbox passa a MINDO/3; fino a 6 atomi può usare Hartree–Fock. Si può versare H₂/O₂, acqua, argon o Na/Cl₂ nella stessa scatola senza cancellarla. Il passo Δt si accorcia se le forze renderebbero il moto instabile.
+Novità: fedeltà automatica. I gas nobili usano Lennard–Jones con σ e ε pubblicati e la fase è letta dalla struttura locale (q₆ di Steinhardt: cristallo, liquido, vapore). Fino a 36 atomi di H, C, N, O… la sandbox passa a MINDO/3; fino a 6 atomi può usare Hartree–Fock. Si può versare H₂/O₂, acqua, argon o Na/Cl₂ nella stessa scatola senza cancellarla. Il passo Δt resta quello scelto; se un passo è instabile viene rifiutato e Δt si dimezza.
 
 ## Le modalità
 
