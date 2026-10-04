@@ -70,14 +70,18 @@ function cellList(pos, N, half) {
   return { nc, cells, cellOf };
 }
 
-export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basisName, atoms }) {
+function singleGrid({ mode, what, Z, pos, box, res, first, P, orb, basisName, atoms, Ps }) {
+  if (what === 'spin') P = Ps;
+  const isDensity = what === 'density' || what === 'spin';
+  if (isDensity && mode !== 'promolecular' && !P) throw new Error('Matrice densità non disponibile.');
   const N = Z.length;
   const half = box / 2 + 1.2;
   const step = 2 * half / (res - 1);
   const values = new Float32Array(res * res * res);
   const cl = cellList(pos, N, half);
   const tabs = new Map();
-  for (const z of new Set(Z)) tabs.set(z, atomTables(z, mode === 'xtb'));
+  if (what === 'density' && mode !== 'gauss' || mode === 'promolecular')
+    for (const z of new Set(Z)) tabs.set(z, atomTables(z, mode === 'xtb'));
   // base GFN2: shell per atomo, indici delle funzioni
   let xb = null;
   if (mode === 'xtb') xb = xtbBasis(Z, GFN2.elements);
@@ -135,7 +139,7 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
               m += nSph(sh.l);
             }
           }
-          if (what === 'density') {
+          if (isDensity) {
             const nb = xb.nao;
             let rho = 0;
             for (let a = 0; a < m; a++) {
@@ -146,7 +150,7 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
               for (let b = 0; b < m; b++) s += P[row + xidx[b]] * xphi[b];
               rho += pa * s;
             }
-            for (let q = 0; q < nn; q++) {
+            if (what !== 'spin') for (let q = 0; q < nn; q++) {
               const A = near[q];
               rho += lookup(tabs.get(Z[A]).core, Math.hypot(x - pos[3 * A], y - pos[3 * A + 1], z - pos[3 * A + 2]));
             }
@@ -167,7 +171,7 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
             for (let k = 0; k < nBasis(Z[A]); k++) idxs[m + k] = first[A] + k;
             m += nBasis(Z[A]);
           }
-          if (what === 'density') {
+          if (isDensity) {
             const nb = first[N];
             let rho = 0;
             for (let a = 0; a < m; a++) {
@@ -178,7 +182,7 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
               for (let b = 0; b < m; b++) s += P[row + idxs[b]] * phi[b];
               rho += pa * s;
             }
-            for (let q = 0; q < nn; q++) {
+            if (what !== 'spin') for (let q = 0; q < nn; q++) {
               const A = near[q];
               rho += lookup(tabs.get(Z[A]).core, Math.hypot(x - pos[3 * A], y - pos[3 * A + 1], z - pos[3 * A + 2]));
             }
@@ -193,7 +197,7 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
         // base gaussiana: tutte le funzioni (sistemi piccoli)
         basisValues(gb, x / BOHR, y / BOHR, z / BOHR, phiG);
         const nb = gb.nbf;
-        if (what === 'density') {
+        if (isDensity) {
           let rho = 0;
           for (let a = 0; a < nb; a++) {
             const pa = phiG[a];
@@ -212,6 +216,28 @@ export function computeGrid({ mode, what, Z, pos, box, res, first, P, orb, basis
     }
   }
   return { values, res, half, step };
+}
+
+/** Difference of two stored SCF densities on exactly the same laboratory grid. */
+export function computeGrid(m) {
+  if (m.what !== 'difference') return singleGrid(m);
+  const r = m.reference;
+  if (!r || r.mode !== m.mode || r.Z.join(',') !== m.Z.join(',')) throw new Error('Fissa un riferimento con gli stessi atomi e lo stesso modello.');
+  const current = singleGrid({ ...m, what: 'density' });
+  const baseline = singleGrid({ ...r, box: m.box, res: m.res, what: 'density' });
+  for (let k = 0; k < current.values.length; k++) current.values[k] -= baseline.values[k];
+  return current;
+}
+
+export function gridSlice(g, { axis = 'z', offset = 0 } = {}) {
+  if (!['x', 'y', 'z'].includes(axis) || !Number.isFinite(offset)) throw new Error('Sezione non valida.');
+  const k = Math.max(0, Math.min(g.res - 1, Math.round((offset + g.half) / g.step)));
+  const values = new Float32Array(g.res * g.res);
+  for (let v = 0; v < g.res; v++) for (let u = 0; u < g.res; u++) {
+    const [x, y, z] = axis === 'x' ? [k, u, v] : axis === 'y' ? [u, k, v] : [u, v, k];
+    values[u + g.res * v] = g.values[x + g.res * (y + g.res * z)];
+  }
+  return { values, res: g.res, half: g.half, axis, offset: -g.half + k * g.step };
 }
 
 /**
@@ -256,7 +282,9 @@ if (typeof self !== 'undefined') self.onmessage = (ev) => {
     if (m.surfaces) {
       const meshes = computeSurfaces(g, m.surfaces, m.pos, m.colors);
       const transfer = meshes.flatMap(x => [x.positions.buffer, x.normals.buffer, ...(x.colors ? [x.colors.buffer] : [])]);
-      postMessage({ id: m.id, what: m.what, meshes }, transfer);
+      const slice = m.slice ? gridSlice(g, m.slice) : null;
+      if (slice) transfer.push(slice.values.buffer);
+      postMessage({ id: m.id, what: m.what, meshes, slice }, transfer);
     } else postMessage({ id: m.id, what: m.what, ...g }, [g.values.buffer]);
   } catch (e) {
     postMessage({ id: m.id, error: e.message });

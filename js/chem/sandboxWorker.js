@@ -1,6 +1,9 @@
 // Worker della sandbox: fa girare la dinamica molecolare e invia al disegno 3D un fotogramma
 // alla volta (posizioni, legami, cariche, grandezze termodinamiche, specie e reazioni).
 
+import { prepareCollision } from './collision.js';
+import { BondMonitor, TrajectoryRecorder } from './reactionTrace.js';
+import { hillFormula } from './smiles.js';
 import { Simulation, MV2, ACC } from './md.js';
 import { ReactiveFF } from './reactive.js';
 import { parseSmiles } from './smiles.js';
@@ -93,8 +96,9 @@ function restore(d) {
  * sono ammesse: la carica formale resta sugli atomi che la portano e la somma è la carica della scatola.
  * Gli ioni e le molecole con elementi fuori dal campo classico si rilassano con GFN2-xTB alla loro carica.
  */
-function template(smiles) {
-  if (templates.has(smiles)) return templates.get(smiles);
+function template(smiles, quantumGeometry = false) {
+  const cacheKey = `${smiles}|${quantumGeometry}`;
+  if (templates.has(cacheKey)) return templates.get(cacheKey);
   const g = parseSmiles(smiles);
   if (!g.atoms.length || g.atoms.some(a => !(a.Z >= 1 && a.Z <= 86)))
     throw new Error('Sandbox: elemento non supportato nella stringa SMILES (ammessi H–Rn).');
@@ -106,7 +110,7 @@ function template(smiles) {
   if (formal.reduce((s, q) => s + q, 0) !== charge) { formal.fill(0); formal[0] = charge; }
   const pos = Float64Array.from(at.flatMap(a => a.xyz.map(v => v * BOHR_ANG)));
   if (Z.length > 1) {
-    const quantum = charge !== 0 || !classicalOK(Z);
+    const quantum = quantumGeometry || charge !== 0 || !classicalOK(Z);
     const ff = quantum ? null : new ReactiveFF();
     const xtb = quantum ? new GFN2xTB({ etol: 1e-8, ptol: 1e-6 }) : null;
     const nel = quantum ? gfn2El(Z) - charge : 0;
@@ -115,6 +119,7 @@ function template(smiles) {
     for (let s = 0; s < (quantum ? 400 : 2500); s++) {
       if (quantum) {
         const r = xtb.compute(Z, Float64Array.from(pos, x => x / BOHR_ANG), { charge, uhf: ((nel % 2) + 2) % 2 });
+        if (!r.converged || !Number.isFinite(r.energy) || !r.gradient.every(Number.isFinite)) throw new Error('GFN2-xTB: geometria iniziale non rilassabile con SCF convergente.');
         for (let k = 0; k < pos.length; k++) F[k] = -r.gradient[k] * 27.211386245988 / BOHR_ANG;
       } else ff.compute(Z, pos, F);
       let P = 0, vn = 0, fn = 0;
@@ -127,7 +132,7 @@ function template(smiles) {
     }
   }
   const t = { Z, pos, formal, charge };
-  templates.set(smiles, t);
+  templates.set(cacheKey, t);
   return t;
 }
 
@@ -138,7 +143,7 @@ const classicalOK = (Z) => Z.every(z => !!ATOM_PARAMS[z]);
 
 function add({ smiles, symbol, count = 1, at = null, T }) {
   const s = smiles ?? atomSmiles(symbol);
-  const t = template(s);
+  const t = template(s, fidelity === 'auto' || forceField === 'gfn2');
   // con atomi che formano legami serve un passo corto (vibrazioni di 10 fs); i gas nobili tollerano 2 fs
   if (t.Z.some(z => (ATOM_PARAMS[z]?.[0] ?? 1) > 0)) sim.dt = Math.min(sim.dt, 0.4);
   if (forceField === 'hf') {
@@ -160,8 +165,10 @@ function add({ smiles, symbol, count = 1, at = null, T }) {
   }
   mbHist = null;
   // il modello corrente deve poter calcolare le forze sulla scatola con i nuovi atomi
-  if (fidelity === 'auto' && forceField !== 'gfn2' && (!classicalOK(t.Z) || nextCharge !== 0 || t.charge !== 0) && gfn2Feasible(nextZ).ok) {
-    modelWhy = GFN2_WHY; applyModel('gfn2');
+  if (fidelity === 'auto') {
+    const pick = bestModel(nextZ, nextCharge);
+    modelWhy = pick.why;
+    if (pick.kind !== forceField) applyModel(pick.kind);
   }
   const placed = sim.editInventory(() => sim.addMolecule(t, count, T ?? sim.T, at));
   return placed;
@@ -205,15 +212,15 @@ function quantumFor(Z, charge) {
   return { ok: false, reason: `${what}: serve un calcolo quantistico, ma ${g.reason}` };
 }
 
-const GFN2_AUTO_MAX = 40;
+const GFN2_AUTO_MAX = GFN2_MAX_ATOMS;
 const GFN2_WHY = 'GFN2-xTB a ogni passo: tight binding quantistico con elettrostatica fino ai quadrupoli atomici e dispersione D4, validato su tblite.';
 
-function bestModel(Z) {
-  if (Z.length && (sim.netCharge !== 0 || fieldVec || solventName || !classicalOK(Z))) {
-    const q = quantumFor(Z, sim.netCharge);
-    const what = sim.netCharge ? `Carica totale ${sim.netCharge > 0 ? '+' : ''}${sim.netCharge}` : fieldVec ? 'Campo elettrico' : solventName ? 'Solvente implicito' : 'Elementi oltre il campo classico';
+function bestModel(Z, charge = sim.netCharge) {
+  if (Z.length && (charge !== 0 || fieldVec || solventName || !classicalOK(Z))) {
+    const q = quantumFor(Z, charge);
+    const what = charge ? `Carica totale ${charge > 0 ? '+' : ''}${charge}` : fieldVec ? 'Campo elettrico' : solventName ? 'Solvente implicito' : 'Elementi oltre il campo classico';
     if (q.ok) return { kind: q.kind, why: `${what}: ${GFN2_WHY}` };
-    return { kind: 'reactive', why: q.reason };
+    throw new Error(q.reason);
   }
   if (!Z.length) return { kind: 'reactive', why: 'Scatola vuota. Versa atomi o molecole: il modello si sceglie da solo.' };
   if (nobleOnly(Z)) {
@@ -221,7 +228,7 @@ function bestModel(Z) {
     return { kind: 'lj', why: `${names}: Lennard–Jones con σ e ε pubblicati, taglio 2,5σ. Nessun legame chimico.` };
   }
   if (Z.length <= GFN2_AUTO_MAX) return { kind: 'gfn2', why: GFN2_WHY };
-  return { kind: 'reactive', why: `Campo classico: sopra ${GFN2_AUTO_MAX} atomi il calcolo quantistico non sta nel fotogramma. Puoi forzare GFN2-xTB a mano fino a ${GFN2_MAX_ATOMS} atomi o MINDO/3 fino a ${MINDO3_MAX_ATOMS}.` };
+  throw new Error(`Fedeltà automatica: GFN2-xTB arriva a ${GFN2_MAX_ATOMS} atomi. Riduci il numero di molecole, oppure scegli esplicitamente il campo classico qualitativo.`);
 }
 
 function applyModel(kind, basis = hfBasis) {
@@ -257,8 +264,8 @@ function applyModel(kind, basis = hfBasis) {
 
 function setForceField(kind, basis = hfBasis) {
   if (kind === 'auto') {
-    fidelity = 'auto';
     const pick = bestModel(sim.Z);
+    fidelity = 'auto';
     modelWhy = pick.why;
     applyModel(pick.kind, basis);
     return;
@@ -391,6 +398,26 @@ function loadPreset(p) {
   return { placed, wanted };
 }
 
+/** Controlled binary encounter: only initial geometry and COM velocities are prescribed. */
+function loadCollision(m) {
+  const kind = m.model ?? 'gfn2';
+  if (!['gfn2', 'hf'].includes(kind)) throw new Error('Urti controllati: scegli GFN2-xTB o Hartree–Fock.');
+  const left = template(m.left, true), right = template(m.right, true);
+  const Z = [...left.Z, ...right.Z];
+  if (kind === 'hf') { const test = aimdFeasible(Z); if (!test.ok) throw new Error(test.reason); }
+  else gfn2Check(Z);
+  const collision = prepareCollision(left, right, m);
+  const saved = { sim, forceField, fidelity, fieldVec, spinMult, solventName, modelWhy };
+  try { loadPreset({ atoms: collision.atoms, box: collision.box, T: 300, dt: 0.1, speed: 2, forceField: kind, thermostat: false, multiplicity: m.multiplicity ?? null, solvent: m.solvent ?? null }); } catch (e) {
+    ({ sim, forceField, fidelity, fieldVec, spinMult, solventName, modelWhy } = saved);
+    censusSent = -1; phaseCache = null;
+    postMessage({ type: 'forcefield', kind: forceField, fidelity, why: modelWhy });
+    throw e;
+  }
+  paused = true;
+  postMessage({ type: 'collision-ready', collision: { energy: collision.energy, distance: collision.distance, impact: collision.impact, speed: collision.speed, reducedMass: collision.reducedMass, leftCount: left.Z.length, rightCount: right.Z.length } });
+}
+
 /** Istogramma delle velocità del centro di massa delle molecole di una specie. */
 function speedHistogram() {
   if (!sim.frags?.length) return null;
@@ -479,7 +506,7 @@ function cachedPhase() {
   return phaseCache.value;
 }
 
-function frame() {
+function stateFrame() {
   if (!sim.res) sim.forces();
   const N = sim.N;
   const res = sim.res;
@@ -495,17 +522,26 @@ function frame() {
   const Ekin = sim.kinetic();
   const msg = {
     type: 'frame',
-    N, Z: Int8Array.from(sim.Z), pos, q, ke, bonds: Float32Array.from(bonds), hbonds: Int32Array.from(res?.hbonds ?? []),
+    N, Z: Int16Array.from(sim.Z), pos, q, ke, vel: Float32Array.from(sim.vel), forces: Float32Array.from(sim.F), spin: res?.spin ? Float32Array.from(res.spin) : null, bonds: Float32Array.from(bonds), hbonds: Int32Array.from(res?.hbonds ?? []),
     stats: {
       t: sim.time, T: sim.temperature(), Ttarget: sim.T, thermostat: sim.thermostat, box: sim.box,
       Ekin, Epot: res?.E ?? 0, parts: res?.parts ?? null, Ewall: sim.Ewall, Egrab: sim.Egrab, Etot: sim.totalEnergy(),
       heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
-      forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null, phase: cachedPhase(),
+      forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null,
       charge: sim.netCharge, field: fieldVec, multiplicity: spinMult, solvent: solventName, dipole: sim.provider?.info?.dipole ?? null,
     },
-    mb: speedHistogram(),
   };
+  return msg;
+}
+
+function frame() {
+  recordTrace();
+  const msg = stateFrame();
+  msg.stats.phase = cachedPhase();
+  msg.mb = speedHistogram();
+  msg.trace = { ...recorder.meta(), config: { ...traceConfig }, Z: sim.Z.slice(), samples: pendingSamples, events: traceEvents.slice(-100) };
+  pendingSamples = [];
   if (censusSent !== sim.censusSerial) {
     censusSent = sim.censusSerial;
     msg.census = {
@@ -518,7 +554,57 @@ function frame() {
     // le analisi si ricalcolano ogni 5 censimenti (la normalizzazione di g(r) costa qualche millisecondo)
     if (physSent < 0 || sim.history.length - physSent >= 5 || sim.history.length < physSent) { msg.phys = physics(); physSent = sim.history.length; }
   }
-  postMessage(msg, [pos.buffer, q.buffer, ke.buffer]);
+  postMessage(msg, [msg.pos.buffer, msg.q.buffer, msg.ke.buffer, msg.vel.buffer, msg.forces.buffer]);
+}
+
+// All bond changes are measured on accepted steps, including changes within a connected fragment.
+const recorder = new TrajectoryRecorder();
+const bondMonitor = new BondMonitor();
+const traceConfig = { enabled: true, stride: null, waves: true, pauseOnBond: false };
+let inventoryVersion = 0, traceKey = '', pendingSamples = [], traceEvents = [], lastTraceStep = -1, lastStepChanged = false;
+
+function traceCensus(f) {
+  const parent = Array.from({ length: f.N }, (_, i) => i);
+  const find = i => { while (parent[i] !== i) i = parent[i]; return i; };
+  for (const key of bondMonitor.connected) {
+    const [i, j] = key.split(':').map(Number); parent[find(i)] = find(j);
+  }
+  const groups = new Map();
+  for (let i = 0; i < f.N; i++) { const root = find(i); if (!groups.has(root)) groups.set(root, []); groups.get(root).push(i); }
+  const counts = new Map();
+  for (const ids of groups.values()) {
+    const q = ids.reduce((v, i) => v + f.q[i], 0), rounded = Math.round(q);
+    const formula = hillFormula(ids.map(i => ({ Z: f.Z[i] })), Math.abs(q - rounded) < 0.35 ? rounded : 0);
+    counts.set(formula, (counts.get(formula) ?? 0) + 1);
+  }
+  return { frags: [...groups.values()], species: [...counts], events: [], history: [] };
+}
+
+function recordTrace() {
+  const key = `${inventoryVersion}|${forceField}|${fieldVec}|${solventName}|${spinMult}|${sim.netCharge}|${sim.Z.join(',')}`;
+  if (key !== traceKey) {
+    traceKey = key; recorder.reset('Nuovo inventario o modello elettronico'); bondMonitor.reset();
+    pendingSamples = []; traceEvents = []; lastTraceStep = -1; phaseCache = null; physSent = -1;
+  }
+  if (lastTraceStep === sim.stepCount) return;
+  if (!sim.res) sim.forces();
+  const f = stateFrame();
+  const changes = bondMonitor.sample({ t: sim.time, pos: f.pos, q: f.q, bonds: f.bonds });
+  lastStepChanged = changes.length > 0;
+  traceEvents.push(...changes);
+  if (traceEvents.length > 1000) traceEvents.splice(0, traceEvents.length - 1000);
+  if (changes.length && traceConfig.pauseOnBond) paused = true;
+  const stride = traceConfig.stride ?? (sim.N <= 8 ? 1 : sim.N <= 40 ? 5 : 20);
+  if (traceConfig.enabled && (lastTraceStep < 0 || sim.stepCount % stride === 0 || changes.length)) {
+    f.stats.phase = cachedPhase();
+    f.census = traceCensus(f); f.stats.nMol = f.census.frags.length;
+    const wave = traceConfig.waves && sim.N <= 40 ? sim.provider?.wavefunction?.() ?? null : null;
+    const sample = recorder.add(f, wave);
+    const { wave: unused, bytes, ...small } = sample;
+    pendingSamples.push(small);
+    if (pendingSamples.length > 600) pendingSamples.shift();
+  }
+  lastTraceStep = sim.stepCount;
 }
 
 /**
@@ -528,8 +614,9 @@ function frame() {
  */
 const DT_MIN = 0.01;
 function safeStep() {
+  recordTrace();
   for (;;) {
-    try { sim.step(); return; } catch (e) {
+    try { sim.step(); recordTrace(); return; } catch (e) {
       if (!/instabile/.test(e.message) || sim.dt / 2 < DT_MIN) throw e;
       sim.dt /= 2;
       postMessage({ type: 'info', text: `Passo instabile: Δt dimezzato a ${sim.dt.toLocaleString('it-IT', { maximumSignificantDigits: 3 })} fs e passo ripetuto. Nessuna velocità è stata tagliata.` });
@@ -546,6 +633,7 @@ function loop() {
       safeStep();
       n++;
       if (sim.stepCount % sim.censusEvery === 0) analysisSample();
+      if (paused) break;
       if (light.on) {
         // Impulsi Poisson, frequenza imposta: non una sezione di assorbimento.
         const p = light.rate * sim.dt / 1000;
@@ -568,19 +656,22 @@ onmessage = (ev) => {
   const m = ev.data;
   try {
     switch (m.type) {
+      case 'collision': loadCollision(m); inventoryVersion++; break;
       case 'preset': {
+        inventoryVersion++;
         const r = loadPreset(m.preset);
         postMessage({ type: 'info', text: r.placed < r.wanted ? `Inserite ${r.placed} molecole su ${r.wanted}: la scatola è piena.` : '' });
         break;
       }
       case 'add': {
         const placed = add(m);
+        if (placed) inventoryVersion++;
         refreshFidelity();
         postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero. ${modelWhy}` : modelWhy });
         break;
       }
-      case 'clear': sim.clear(); fieldVec = null; spinMult = null; solventName = null; light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
-      case 'remove': sim.editInventory(() => sim.remove(m.indices)); lastEventSent = sim.eventSerial; refreshFidelity(); break;
+      case 'clear': inventoryVersion++; sim.clear(); fieldVec = null; spinMult = null; solventName = null; light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
+      case 'remove': sim.editInventory(() => sim.remove(m.indices)); inventoryVersion++; lastEventSent = sim.eventSerial; refreshFidelity(); break;
       case 'set':
         if (m.T !== undefined) { if (!Number.isFinite(m.T) || m.T < 0) throw new Error('Temperatura non valida.'); sim.T = m.T; }
         if (m.thermostat !== undefined) sim.thermostat = m.thermostat;
@@ -601,13 +692,30 @@ onmessage = (ev) => {
       case 'resetAnalysis': resetAnalysis(); physSent = -1; break;
       case 'wave': {
         // funzione d'onda corrente per il disegno della densità e degli orbitali
-        const w = sim.provider?.wavefunction?.() ?? null;
-        postMessage({ type: 'wave', reqId: m.reqId, box: sim.box, Z: sim.Z.slice(), pos: Float64Array.from(sim.pos), wave: w, forceField });
+        const sample = m.traceId !== undefined ? recorder.get(m.traceId) : null;
+        if (m.traceId !== undefined && !sample) throw new Error('Fotogramma non più nel buffer.');
+        const w = sample ? sample.wave : sim.provider?.wavefunction?.() ?? null;
+        postMessage({ type: 'wave', reqId: m.reqId, purpose: m.purpose, epoch: recorder.epoch, t: sample?.stats.t ?? sim.time, box: sample?.stats.box ?? sim.box, Z: sample?.Z ?? sim.Z.slice(), pos: sample?.pos ?? Float64Array.from(sim.pos), wave: w, forceField: sample?.stats.forceField ?? forceField });
         break;
       }
+      case 'trace-config': {
+        if (m.stride !== undefined && m.stride !== null && (!Number.isInteger(m.stride) || m.stride < 1 || m.stride > 100)) throw new Error('Campionamento: 1–100 passi o automatico.');
+        for (const key of ['enabled', 'waves', 'pauseOnBond', 'stride']) if (key in m) traceConfig[key] = m[key];
+        break;
+      }
+      case 'trace-reset': traceKey = ''; break;
+      case 'trace-inspect': {
+        if (m.epoch !== recorder.epoch) break;
+        const sample = recorder.get(m.id);
+        if (!sample) throw new Error('Fotogramma non più nel buffer.');
+        paused = true;
+        postMessage({ type: 'trace-frame', reqId: m.reqId, frame: { ...sample, stats: { ...sample.stats, paused: true }, replay: true } });
+        break;
+      }
+      case 'trace-export': postMessage({ type: 'trace-export', data: { version: 1, kind: 'accepted-md-trajectory', units: { pos: 'angstrom', vel: 'angstrom/fs', forces: 'eV/angstrom', t: 'fs', energy: 'eV', charge: 'e', spin: 'n_alpha-n_beta' }, meta: recorder.meta(), config: traceConfig, events: traceEvents, frames: recorder.frames.map(({ wave, bytes, ...f }) => f) } }); break;
       case 'snapshot': postMessage({ type: 'snapshot', name: m.name, data: snapshot() }); break;
-      case 'restore': restore(m.data); physSent = -1; break;
-      case 'step': paused = true; for (let k = 0; k < Math.min(1000, m.n ?? 1); k++) sim.step(); sim.census(); break;
+      case 'restore': inventoryVersion++; restore(m.data); physSent = -1; break;
+      case 'step': paused = true; for (let k = 0; k < Math.min(1000, m.n ?? 1); k++) { safeStep(); if (traceConfig.pauseOnBond && lastStepChanged) break; } sim.census(); break;
       case 'grab': sim.setGrab(m.i === null ? null : { i: m.i, target: m.target }); break;
       case 'spark': sim.spark(m.center, m.radius ?? 4, m.T ?? 8000); break;
       case 'photon': {

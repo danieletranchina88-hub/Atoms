@@ -58,6 +58,7 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null,
       const f = HARTREE_EV / BOHR_ANG;
       for (let k = 0; k < F.length; k++) F[k] = -r.gradient[k] * f;
       const bonds = mayerBonds(calc.last, Z.length);
+      const { spin } = spinDensity(calc.last, Z.length);
       const mu = r.dipole.map(v => v * BOHR_ANG / 0.20819434); // e·bohr → debye
       provider.info = {
         method: 'GFN2-xTB', nbf: r.nao, iterations: r.iterations, converged: r.converged, charge, Tel,
@@ -66,7 +67,7 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null,
         solvation: calc.solvent ? r.parts.solvation * HARTREE_EV : null, Sz: uhf / 2, dipoleDebye: Math.hypot(...mu),
       };
       const parts = { gfn2: r.energy * HARTREE_EV, repulsion: r.parts.repulsion * HARTREE_EV, dispersion3: r.parts.atm * HARTREE_EV };
-      return { E: r.energy * HARTREE_EV, parts, q: Float64Array.from(r.charges), bonds, hbonds: [] };
+      return { E: r.energy * HARTREE_EV, parts, q: Float64Array.from(r.charges), bonds, hbonds: [], spin };
     },
     /** Funzione d'onda per il disegno: densità di valenza, HOMO e LUMO nella base STO-nG di GFN2. */
     wavefunction() {
@@ -76,7 +77,10 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null,
       let ho = -1, lu = -1;
       for (let k = 0; k < n; k++) { if (w.f[k] > 0.5) ho = k; else if (lu < 0) lu = k; }
       const vec = (k) => (k < 0 || k >= w.nC ? null : { e: w.e[k], spin: w.f[k] > 1.5 || w.f[k] < 0.5 ? 'α+β' : 'α', c: w.Ct.slice(k * n, (k + 1) * n) });
-      return { kind: 'xtb', Z: w.Z.slice(), pos: Float64Array.from(w.pos, v => v * BOHR_ANG), n, P: w.P, homo: vec(ho), lumo: vec(lu), eUnit: HARTREE_EV };
+      const { Ps } = spinDensity(w, w.Z.length);
+      const orbitals = [];
+      for (let k = Math.max(0, ho - 5); k < Math.min(w.nC, ho + 7); k++) orbitals.push({ ...vec(k), id: `MO:${k}`, index: k, occ: w.f[k] });
+      return { kind: 'xtb', Ps, orbitals, Z: w.Z.slice(), pos: Float64Array.from(w.pos, v => v * BOHR_ANG), n, P: w.P, homo: vec(ho), lumo: vec(lu), eUnit: HARTREE_EV };
     },
   };
   return provider;
@@ -95,4 +99,17 @@ function mayerBonds(w, N) {
   const bonds = [];
   for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) if (B[i * N + j] > 0.1) bonds.push({ i, j, n: B[i * N + j], w: 1 });
   return bonds;
+}
+
+/** Restricted spatial orbitals with two Fermi occupation channels, as in GFN2 (not UHF). */
+function spinDensity(w, N) {
+  const { n, nC, Ct, fa, fb, S, basis } = w;
+  const Ps = new Float64Array(n * n), spin = new Float64Array(N);
+  for (let k = 0; k < nC; k++) {
+    const f = fa[k] - fb[k];
+    if (Math.abs(f) < 1e-14) continue;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) Ps[i * n + j] += f * Ct[k * n + i] * Ct[k * n + j];
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) spin[basis.aoAtom[i]] += Ps[i * n + j] * S[j * n + i];
+  return { Ps, spin };
 }

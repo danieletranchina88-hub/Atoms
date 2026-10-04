@@ -745,7 +745,12 @@ export function makeMindo3Provider({ Tel = 300, conv = 1e-5, spinGuess = null, m
         for (let i = 0; i < n; i++) { let s2 = 0; for (let k = 0; k < n; k++) s2 += X[i * n + k] * l.C[k * n + l.k]; c[i] = s2; }
         return { e: l.e, spin: l.spin, c };
       };
-      return { kind: 'sto', Z: w.Z, pos: w.pos, first: w.first, n, P, homo: vec(occ[0]), lumo: vec(vir[0]), eUnit: 1 };
+      const St = new Float64Array(n * n), XS = new Float64Array(n * n), Ps = new Float64Array(n * n);
+      for (let k = 0; k < n * n; k++) St[k] = w.Pa[k] - w.Pb[k];
+      for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const x = X[i * n + k]; if (x) for (let j = 0; j < n; j++) XS[i * n + j] += x * St[k * n + j]; }
+      for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const x = XS[i * n + k]; if (x) for (let j = 0; j < n; j++) Ps[i * n + j] += x * X[k * n + j]; }
+      const orbitals = [...occ.slice(0, 6), ...vir.slice(0, 6)].map(l => ({ ...vec(l), id: `${l.spin}:${l.k}`, index: l.k, occ: l.f }));
+      return { kind: 'sto', Z: w.Z, pos: w.pos, first: w.first, n, P, Ps, orbitals, homo: vec(occ[0]), lumo: vec(vir[0]), eUnit: 1 };
     },
   };
   return provider;

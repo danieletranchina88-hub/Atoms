@@ -3,6 +3,7 @@
 // rompono, specie chimiche, reazioni, pressione e distribuzione di Maxwell–Boltzmann.
 
 import * as THREE from 'three';
+import { SandboxObservatory, downloadTrajectory } from './sandboxObservatory.js';
 import { PRESETS, SANDBOX_MOLECULES, SANDBOX_IONS, SANDBOX_ELEMENTS, SPECIES_NAMES } from '../chem/sandboxData.js';
 import { ATOM_PARAMS, KB_EV } from '../chem/reactiveData.js';
 import { cpkColor, covalentRadius, PAULING, valenceElectrons } from '../chem/elementData.js';
@@ -24,6 +25,8 @@ let worker = null;
 let active = false;
 let callback = null;
 let openInMolecule = null;
+let observatory = null;
+let densityReference = null;
 
 const SB = {
   preset: PRESETS.find(p => p.id === 'empty') ?? PRESETS[0],
@@ -61,6 +64,7 @@ const SB = {
 
 function post(msg) {
   if (!worker) startWorker();
+  if (observatory?.replay && !['wave', 'trace-inspect', 'trace-export', 'trace-config'].includes(msg.type)) observatory.live();
   worker.postMessage(msg);
 }
 
@@ -73,10 +77,14 @@ function startWorker() {
       const oldPaused = SB.userPaused;
       const elec = (st) => st ? `${st.charge}|${st.field}|${st.multiplicity}|${st.fidelity}|${st.solvent}` : '';
       const oldElec = elec(SB.frame?.stats);
-      SB.frame = m;
+      if (m.census) SB.liveCensus = m.census;
+      m.census ??= SB.liveCensus ? { ...SB.liveCensus, events: [] } : null;
+      observatory?.receive(m.trace, m);
+      if (!observatory?.replay) SB.frame = m;
       SB.userPaused = m.stats.paused;
       if (active && (oldMode !== m.stats.forceField || oldPaused !== SB.userPaused || oldElec !== elec(m.stats))) renderControls();
       SB.fresh = true;
+      if (active) renderHud();
       if (SB.tour) advanceTour(m.stats);
       if (m.stats?.phase) notePhase(m.stats.phase);
       if (m.phys) {
@@ -86,8 +94,9 @@ function startWorker() {
         if (changed && active) renderControls();
       }
       if (m.census) {
-        SB.census = m.census;
-        SB.history = m.census.history;
+        if (!observatory?.replay) SB.census = m.census;
+        SB.liveHistory = m.census.history;
+        if (!observatory?.replay) SB.history = m.census.history;
         renderHud();
         if (m.census.events.length) {
           SB.events.push(...m.census.events);
@@ -103,8 +112,18 @@ function startWorker() {
       SB.fidelity = m.fidelity ?? SB.fidelity;
       if (m.why) SB.info = m.why;
       if (active) { renderControls(); renderSide(); }
+    } else if (m.type === 'collision-ready') {
+      SB.preset = { id: 'collision', name: 'Urto controllato fra due reagenti', T: 300, dt: 0.1, text: `Energia traslazionale relativa: ${nf(m.collision.energy, 3)} eV; massa ridotta: ${nf(m.collision.reducedMass, 3)} u; separazione dei centri di massa: ${nf(m.collision.distance, 2)} Å; parametro d’urto: ${nf(m.collision.impact, 2)} Å. Quantità di moto totale nulla. I prodotti dipendono dalle forze calcolate.`, tips: [] };
+      SB.userPaused = true; SB.info = SB.preset.text; scene.framed = false; renderSide(); renderControls();
+    } else if (m.type === 'trace-frame') {
+      observatory.accept(m);
+    } else if (m.type === 'trace-export') {
+      downloadTrajectory(m.data);
     } else if (m.type === 'wave') {
-      onWave(m);
+      if (m.purpose === 'reference') {
+        if (!m.wave) { SB.info = 'La densità di questo campione non è salvata o il modello è classico.'; renderSide(); }
+        else if (m.epoch === observatory.epoch) { densityReference = m; SB.style = 'difference'; clearCloud(); SB.fresh = true; renderControls(); renderLegend(); }
+      } else onWave(m);
     } else if (m.type === 'snapshot') {
       saveSnapshot(m.name, m.data);
     } else if (m.type === 'photon') {
@@ -123,6 +142,13 @@ function startWorker() {
 
 export function initSandboxMode(v, { openMolecule }) {
   viewer = v;
+  observatory = new SandboxObservatory({ post,
+    display: f => { SB.frame = f; SB.census = f.census; SB.userPaused = true; SB.fresh = true; SB.history = observatory.samples.map(h => ({ t: h.stats.t, T: h.stats.T, E: h.stats.Etot, Ep: h.stats.Epot + h.stats.Ewall + h.stats.Egrab, Ec: h.stats.Etot - h.stats.heatBath - h.stats.work - h.stats.matterExchange, P: h.stats.P, counts: Object.fromEntries(h.census.species) })); clearCloud(); renderControls(); renderLegend(); renderLiveAnalysis(); },
+    live: f => { if (f) { SB.frame = f; SB.census = f.census ?? SB.liveCensus; SB.history = SB.liveHistory ?? []; SB.userPaused = f.stats.paused; SB.fresh = true; clearCloud(); if (active) { renderControls(); renderLegend(); renderLiveAnalysis(); } } },
+    select: i => { SB.selected = i; SB.fresh = true; renderSelected(); },
+    view: (style, orbital) => { if (style) SB.style = style; if (orbital) SB.orbital = orbital; SB.fresh = true; clearCloud(); renderControls(); renderLegend(); },
+    reference: v => { densityReference = v; if (!v) SB.orbital = 'homo'; clearCloud(); },
+  });
   openInMolecule = openMolecule;
   const canvas = viewer.renderer.domElement;
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -169,7 +195,7 @@ function ensureHud() {
   const hud = document.createElement('div');
   hud.id = 'sb-hud';
   hud.className = 'sb-hud';
-  hud.innerHTML = '<div id="sb-phase" class="sb-phase"></div><div id="sb-species" class="sb-species"></div><div id="sb-reactions" class="sb-reactions"></div>';
+  hud.innerHTML = '<div id="sb-phase" class="sb-phase"></div><div id="sb-hud-species" class="sb-species"></div><div id="sb-reactions" class="sb-reactions"></div>';
   vp.appendChild(hud);
 }
 
@@ -208,7 +234,7 @@ function spawnReactions(events) {
 function renderHud() {
   ensureHud();
   const phaseEl = $('sb-phase');
-  const specEl = $('sb-species');
+  const specEl = $('sb-hud-species');
   const rxEl = $('sb-reactions');
   if (!phaseEl) return;
   const ph = SB.frame?.stats?.phase ?? SB.phase;
@@ -219,8 +245,8 @@ function renderHud() {
   } else phaseEl.hidden = true;
   const species = SB.census?.species ?? [];
   specEl.innerHTML = species.slice(0, 6).map(([f, n]) => `<span>${f} <b>${n}</b></span>`).join('') || '<span>nessuna specie</span>';
-  const recent = SB.events.filter(e => !e.exchange).slice(-4).reverse();
-  rxEl.innerHTML = recent.map(e => `<div class="sb-rx"><b>${formulaText(e.reactants)} → ${formulaText(e.products)}</b><span>${nf(e.t / 1000, 2)} ps</span></div>`).join('') || '<div class="sb-rx dim">In attesa di una trasformazione…</div>';
+  const traceEvents = observatory?.events.filter(e => !observatory.replay || e.t <= SB.frame.stats.t).slice(-3).reverse() ?? [];
+  rxEl.innerHTML = traceEvents.map(e => `<div class="sb-rx"><b>${e.kind === 'formed' ? 'Si forma' : 'Si rompe'} ${sym(SB.frame.Z[e.i])}${e.i + 1}–${sym(SB.frame.Z[e.j])}${e.j + 1}</b><span>${nf(e.t, 2)} fs · BO ${nf(e.before, 2)} → ${nf(e.after, 2)}</span></div>`).join('') || '<div class="sb-rx dim">Segui i legami nel microscopio di reazione</div>';
 }
 
 // Giro delle fasi dell'argon (Lennard–Jones, ε/k = 119,8 K): le soglie sono in tempo simulato, non in secondi
@@ -334,6 +360,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 function buildScene() {
   scene.group = new THREE.Group();
   viewer.add(scene.group);
+  observatory?.attach3D(scene.group);
   scene.cap = 0; scene.bcap = 0; scene.boxSize = 0;
   scene.atoms = null; scene.bonds = null;
   const boxGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
@@ -389,7 +416,7 @@ function atomRadius(Z) {
   // raggio di van der Waals: dal campo classico se c'è, altrimenti stimato dal raggio covalente (r_vdW ≈ r_cov + 0,8 Å)
   if (SB.style === 'vdw') return ATOM_PARAMS[Z] ? 0.5 * ATOM_PARAMS[Z][5] * 0.82 : 0.82 * (covalentRadius(Z) / 100 + 0.8);
   // nella nuvola si vedono solo i nuclei (puntiformi alla scala degli elettroni)
-  if (SB.style === 'cloud' || SB.style === 'orbital') return Z === 1 ? 0.07 : 0.11;
+  if (['cloud', 'orbital', 'difference', 'spin'].includes(SB.style)) return Z === 1 ? 0.07 : 0.11;
   const cov = ATOM_PARAMS[Z]?.[0] === 0 ? 0.5 * ATOM_PARAMS[Z][5] * 100 * 0.5 : covalentRadius(Z);
   return 0.12 + 0.0034 * cov;
 }
@@ -430,8 +457,7 @@ function updateScene() {
     scene.framed = true;
     renderControls();
   }
-  flashUpdate();
-  pulseUpdate();
+  if (!observatory?.replay) { flashUpdate(); pulseUpdate(); } else { scene.flash.visible = false; for (const p of scene.pulses) p.visible = false; }
   if (!SB.fresh) return;
   SB.fresh = false;
   const { N, Z, pos, q, ke, bonds } = f;
@@ -468,7 +494,7 @@ function updateScene() {
     perp.crossVectors(d, view);
     if (perp.lengthSq() < 1e-6) perp.set(1, 0, 0).cross(d);
     perp.normalize();
-    const strength = Math.min(1, s / Math.max(n, 0.3));
+    const strength = Math.min(1, s);
     let offs, rads;
     if (n >= 2.5) { offs = [0, 0.17, -0.17]; rads = [0.055, 0.045, 0.045]; }
     else if (n >= 1.65) { offs = [0.085, -0.085]; rads = [0.06, 0.06]; }
@@ -523,6 +549,7 @@ function updateScene() {
     g.needsUpdate = true;
     scene.grabLine.visible = true;
   } else scene.grabLine.visible = false;
+  observatory?.update3D(f, SB.selected, viewer);
   const now = performance.now();
   pumpCloud(now);
   if (now - SB.lastPanel > 200) { SB.lastPanel = now; renderPanelBody(); }
@@ -534,7 +561,7 @@ function updateScene() {
 // 3D si calcola in un secondo worker (così la dinamica non si ferma), le isosuperfici qui
 // ---------------------------------------------------------------------------
 
-const cloud = { worker: null, busy: false, last: 0, id: 0, group: null, pos: null };
+const cloud = { requestKey: '', worker: null, busy: false, last: 0, id: 0, group: null, pos: null };
 const BOHR_A = 0.52917721090;
 
 function clearCloud() {
@@ -545,25 +572,31 @@ function clearCloud() {
   }
   SB.cloudNote = '';
   cloud.id++;
+  cloud.requestKey = '';
   cloud.busy = false;
 }
 
 function pumpCloud(now) {
-  if (SB.style !== 'cloud' && SB.style !== 'orbital') { if (cloud.group) clearCloud(); return; }
+  if (!['cloud', 'orbital', 'difference', 'spin'].includes(SB.style)) { if (cloud.group) clearCloud(); return; }
   if (cloud.busy || now - cloud.last < 120 || !SB.frame?.N) return;
+  const key = `${observatory.epoch}|${observatory.replay ? observatory.cursor : SB.frame.stats.t}|${SB.style}|${SB.orbital}|${cloud.id}`;
+  if (key === cloud.requestKey) return;
+  cloud.requestKey = key;
   cloud.busy = true;
   cloud.last = now;
-  post({ type: 'wave', reqId: cloud.id });
+  post({ type: 'wave', reqId: cloud.id, ...(observatory?.replay ? { traceId: observatory.cursor } : {}) });
 }
 
 function onWave(m) {
   if (m.reqId !== cloud.id || !active) return;
   const wantOrb = SB.style === 'orbital';
   const w = m.wave;
-  if (wantOrb && !w) {
+  observatory.wave(w, m.t);
+  const signedDensity = SB.style === 'difference' || SB.style === 'spin';
+  if ((wantOrb || signedDensity) && !w) {
     cloud.busy = false;
     if (cloud.group) { scene.group.remove(cloud.group); cloud.group = null; }
-    SB.cloudNote = '<b>Gli orbitali esistono solo nel calcolo quantistico:</b> scegli GFN2-xTB, MINDO/3 o Hartree–Fock.';
+    SB.cloudNote = '<b>Densità elettronica e orbitali di questo campione non disponibili:</b> scegli GFN2-xTB, MINDO/3 o Hartree–Fock.';
     return;
   }
   if (!cloud.worker) {
@@ -573,18 +606,27 @@ function onWave(m) {
   const box = m.box;
   const half = box / 2 + 1.2;
   const res = Math.max(28, Math.min(72, Math.round(2 * half / 0.24) + 1));
-  const orbital = wantOrb && w ? (SB.orbital === 'lumo' ? w.lumo : w.homo) : null;
-  const req = { id: m.reqId, what: wantOrb ? 'orbital' : 'density', box, res };
+  const orbital = wantOrb && w ? (SB.orbital === 'lumo' ? w.lumo : SB.orbital === 'homo' ? w.homo : w.orbitals?.find(o => o.id === SB.orbital)) : null;
+  if (wantOrb && !orbital) { cloud.busy = false; SB.cloudNote = 'Orbitale non presente in questo campione: scegli HOMO, LUMO o un orbitale della lista.'; return; }
+  const req = { id: m.reqId, what: wantOrb ? 'orbital' : SB.style === 'difference' ? 'difference' : SB.style === 'spin' ? 'spin' : 'density', box, res };
   if (!w) Object.assign(req, { mode: 'promolecular', Z: m.Z, pos: m.pos });
-  else if (w.kind === 'sto') Object.assign(req, { mode: 'sto', Z: w.Z, pos: w.pos, first: w.first, P: w.P, orb: orbital?.c });
-  else if (w.kind === 'xtb') Object.assign(req, { mode: 'xtb', Z: w.Z, pos: w.pos, P: w.P, orb: orbital?.c });
-  else Object.assign(req, { mode: 'gauss', Z: w.atoms.map(a => a.Z), pos: Float64Array.from(w.atoms.flatMap(a => a.xyz.map(v => v * BOHR_A))), atoms: w.atoms, basisName: w.basisName, P: w.P, orb: orbital?.c });
-  req.surfaces = wantOrb
+  else if (w.kind === 'sto') Object.assign(req, { mode: 'sto', Z: w.Z, pos: w.pos, first: w.first, P: w.P, Ps: w.Ps, orb: orbital?.c });
+  else if (w.kind === 'xtb') Object.assign(req, { mode: 'xtb', Z: w.Z, pos: w.pos, P: w.P, Ps: w.Ps, orb: orbital?.c });
+  else Object.assign(req, { mode: 'gauss', Z: w.atoms.map(a => a.Z), pos: Float64Array.from(w.atoms.flatMap(a => a.xyz.map(v => v * BOHR_A))), atoms: w.atoms, basisName: w.basisName, P: w.P, Ps: w.Ps, orb: orbital?.c });
+  if (SB.style === 'difference') {
+    const r = densityReference;
+    if (!r || r.epoch !== m.epoch || r.forceField !== m.forceField) { cloud.busy = false; SB.cloudNote = 'Fissa un riferimento Δρ nel microscopio di reazione per confrontare le densità.'; return; }
+    const rw = r.wave;
+    req.reference = rw.kind === 'gauss' ? { mode: 'gauss', Z: r.Z, pos: r.pos, atoms: rw.atoms, basisName: rw.basisName, P: rw.P }
+      : { mode: rw.kind, Z: rw.Z, pos: rw.pos, first: rw.first, P: rw.P };
+  }
+  req.slice = { axis: observatory.sliceAxis ?? 'z', offset: observatory.sliceOffset ?? 0 };
+  req.surfaces = signedDensity ? [{ iso: 0.005, sign: 1 }, { iso: 0.005, sign: -1 }] : wantOrb
     ? [{ iso: 0.05, sign: 1 }, { iso: 0.05, sign: -1 }]
     // tre superfici di densità costante: confine di van der Waals (0,002 e/bohr³), regione dei legami, gusci interni
     : [{ iso: 0.002, sign: 1, colorByAtom: true }, { iso: 0.05, sign: 1, colorByAtom: true }, { iso: 0.3, sign: 1, colorByAtom: true }];
-  if (!wantOrb) req.colors = Float32Array.from(req.Z.flatMap(z => { const c = new THREE.Color(cpkColor(z)); return [0.35 + 0.65 * c.r, 0.35 + 0.65 * c.g, 0.35 + 0.65 * c.b]; }));
-  cloud.meta = { mode: req.mode, orbital, eUnit: w?.eUnit ?? 1, ff: m.forceField };
+  if (!wantOrb && !signedDensity) req.colors = Float32Array.from(Array.from(req.Z).flatMap(z => { const c = new THREE.Color(cpkColor(z)); return [0.35 + 0.65 * c.r, 0.35 + 0.65 * c.g, 0.35 + 0.65 * c.b]; }));
+  cloud.meta = { mode: req.mode, orbital, eUnit: w?.eUnit ?? 1, ff: m.forceField, t: m.t, Z: m.Z, pos: m.pos, what: req.what, referenceT: densityReference?.t };
   cloud.worker.postMessage(req);
 }
 
@@ -593,6 +635,7 @@ function onGrid(g) {
   if (g.id !== cloud.id || !active || !scene.group) return;
   if (g.error) { SB.cloudNote = `Densità non calcolata: ${escapeHtml(g.error)}`; return; }
   const meta = cloud.meta;
+  if (g.slice) observatory.densitySlice(g.slice, meta);
   const grp = new THREE.Group();
   const OPAC = { 0.002: 0.13, 0.05: 0.24, 0.3: 0.5 };
   const pos = cssVar('--phase-pos'), neg = cssVar('--phase-neg');
@@ -611,15 +654,20 @@ function onGrid(g) {
     mesh.renderOrder = 2;
     grp.add(mesh);
   }
-  if (g.what === 'density') {
+  if (g.what === 'difference' || g.what === 'spin') {
+    SB.cloudNote = g.what === 'difference'
+      ? `Δρ = ρ(t) − ρ(riferimento ${nf(meta.referenceT, 2)} fs): positivo/negativo a ±0,005 e/bohr³. Comprende ridistribuzione e moto dei nuclei; non è una corrente elettronica.`
+      : 'Densità di spin ρα − ρβ: superfici a ±0,005 e/bohr³. Il segno indica prevalenza α o β; non è una traiettoria di spin.';
+  } else if (g.what === 'density') {
     // tre superfici di densità costante: il confine di van der Waals (0,002 e/bohr³), la regione dei legami, i gusci interni
     SB.cloudNote = meta.mode === 'promolecular'
       ? 'Nuvola elettronica <b>promolecolare</b>: somma delle densità degli atomi isolati (calcolate con la DFT del sito). Con il campo classico gli elettroni non si ridistribuiscono nei legami: per la densità vera scegli il motore quantistico.'
       : `Densità elettronica ρ(r) calcolata dalla funzione d'onda ${meta.mode === 'sto' ? 'MINDO/3 (valenza) più il core atomico' : meta.mode === 'xtb' ? 'GFN2-xTB (valenza) più il core atomico' : 'Hartree–Fock (tutti gli elettroni)'}: superfici a 0,002 e/bohr³ (confine di van der Waals), 0,05 (legami) e 0,3 (vicino ai nuclei).`;
   } else {
     const o = meta.orbital;
-    SB.cloudNote = o ? `${SB.orbital === 'lumo' ? 'LUMO' : 'HOMO'} (spin ${o.spin}), ε = ${nf(o.e * meta.eUnit, 2)} eV: isosuperficie |ψ| = 0,05 bohr<sup>−3/2</sup>, in colore il segno della funzione d'onda.` : 'Orbitale non disponibile.';
+    SB.cloudNote = o ? `${SB.orbital === 'lumo' ? 'LUMO' : SB.orbital === 'homo' ? 'HOMO' : `MO ${(o.index ?? 0) + 1}`} (spin ${o.spin}), ε = ${nf(o.e * meta.eUnit, 2)} eV: isosuperficie |ψ| = 0,05 bohr<sup>−3/2</sup>, in colore il segno della funzione d'onda.` : 'Orbitale non disponibile.';
   }
+  SB.cloudNote += ` Griglia elettronica a t = ${nf(meta.t, 2)} fs.`;
   if (cloud.group) { cloud.group.traverse(x => { x.geometry?.dispose(); x.material?.dispose(); }); scene.group.remove(cloud.group); }
   cloud.group = grp;
   if (g.what === 'density') renderLegend();
@@ -687,6 +735,7 @@ function onPointerDown(e) {
   drag.i = i;
   drag.target.copy(p);
   SB.selected = i;
+  observatory?.pick(i);
   viewer.controls.enabled = false;
   viewer.renderer.domElement.setPointerCapture?.(e.pointerId);
   post({ type: 'grab', i, target: [p.x, p.y, p.z] });
@@ -717,6 +766,7 @@ function onPointerUp(e) {
   const i = pickAtom(e);
   if (SB.tool === 'select') {
     SB.selected = i;
+    observatory?.pick(i);
     SB.fresh = true;
     renderLiveAnalysis();
   } else if (SB.tool === 'spark') {
@@ -761,7 +811,7 @@ function renderSide() {
   $('element-card').innerHTML = `<div class="btn-row"><a class="btn" href="#fasi">Fasi · dinamica MD</a><a class="btn" href="#becher">Soluzioni · cristalli</a></div>
     <h3 class="side-h">Sandbox chimica</h3>
     <label class="lbl" for="sb-preset">Esperimento</label>
-    <select id="sb-preset">
+    <select id="sb-preset">${SB.preset.id === 'collision' ? '<option value="collision" selected>Urto controllato fra due reagenti</option>' : ''}
       <optgroup label="Quantistica: elettroni calcolati a ogni passo (GFN2-xTB, MINDO/3)">${PRESETS.filter(x => x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
       <optgroup label="Campo di forze reattivo (classico, veloce)">${PRESETS.filter(x => !x.atoms && !x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
       <optgroup label="Ab initio (Hartree–Fock)">${PRESETS.filter(x => x.atoms && !x.quantum).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name}</option>`).join('')}</optgroup>
@@ -776,6 +826,24 @@ function renderSide() {
       <button type="button" class="btn" id="sb-pour-ar">argon</button>
       <button type="button" class="btn" id="sb-pour-salt">Na + Cl₂</button>
     </div>
+    <details class="sb-collision"><summary>Urto controllato fra due reagenti</summary>
+      <p class="hint">Imposta due molecole o ioni da SMILES, l'energia del moto relativo e l'orientazione iniziale. Le forze decidono che cosa succede.</p>
+      <label class="lbl" for="sb-collision-example">Coppia da esplorare</label><select id="sb-collision-example"><option value="">scegli…</option>${[
+        ['[H]', '[H][H]', 'Scambio H + H₂'], ['[F-]', 'CCl', 'Nucleofilo F⁻ + CH₃Cl'],
+        ['N', 'Cl', 'Acido-base NH₃ + HCl'], ['[H-]', '[H+]', 'Idruro + protone'],
+        ['[OH-]', 'C=O', 'Nucleofilo OH⁻ + formaldeide'], ['[Cu+2]', 'O', 'Coordinazione Cu²⁺ + H₂O'],
+        ['[CH3]', '[CH3]', 'Incontro di due radicali metile'], ['[Na+]', '[Cl-]', 'Associazione Na⁺ + Cl⁻'],
+      ].map(([a,b,t]) => `<option value="${escapeHtml(a)}|${escapeHtml(b)}">${t}</option>`).join('')}</select>
+      <label class="lbl" for="sb-collision-left">Reagente A (SMILES)</label><input id="sb-collision-left" value="${escapeHtml(SB.collisionInputs?.left ?? '[H]')}" spellcheck="false">
+      <label class="lbl" for="sb-collision-right">Reagente B (SMILES)</label><input id="sb-collision-right" value="${escapeHtml(SB.collisionInputs?.right ?? '[H][H]')}" spellcheck="false">
+      <div class="sbo-toolbar"><label for="sb-collision-energy">E relativa (eV)</label><input id="sb-collision-energy" type="number" min="0" max="100" step="0.1" value="${SB.collisionInputs?.energy ?? 0.6}">
+      <label for="sb-collision-distance">Separazione (Å)</label><input id="sb-collision-distance" type="number" min="2" max="50" step="0.5" value="${SB.collisionInputs?.distance ?? 7}">
+      <label for="sb-collision-impact">Parametro d'urto (Å)</label><input id="sb-collision-impact" type="number" min="-20" max="20" step="0.2" value="${SB.collisionInputs?.impact ?? 0}">
+      <label for="sb-collision-rotation">Rotazione di B (° nel piano xy)</label><input id="sb-collision-rotation" type="number" min="-360" max="360" step="15" value="${SB.collisionInputs?.rotation ?? 0}"></div>
+      <select id="sb-collision-model" aria-label="Modello per l'urto"><option value="gfn2">GFN2-xTB (≤120 atomi)</option><option value="hf">UHF/STO-3G (≤8 atomi)</option></select>
+      <div class="btn-row"><button type="button" class="btn" id="sb-collision-build">Prepara urto in NVE</button></div>
+      <p class="hint">Geometrie iniziali rilassate con GFN2-xTB nel vuoto; nessuna velocità interna imposta. L'urto parte in pausa. La scatola è finita, con pareti morbide. Non è un calcolo di costanti cinetiche.</p>
+    </details>
     <label class="lbl">Aggiungi molecole</label>
     <div class="mol-list">${molBtns}</div>
     <label class="lbl">Aggiungi ioni (calcolati con GFN2-xTB)</label>
@@ -794,6 +862,15 @@ function renderSide() {
     <div class="smiles-row"><input id="sb-save-name" placeholder="nome dell'esperimento" spellcheck="false"><button type="button" class="btn" id="sb-save">Salva</button></div>
     ${savedList().length ? `<ul class="sb-saves">${savedList().map((x, k) => `<li><button type="button" class="linkish" data-load="${k}" title="Riprendi da questo stato">${escapeHtml(x.name)}</button> <span class="desc-muted">${x.data.Z.length} atomi · ${new Date(x.date).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}</span> <button type="button" class="linkish" data-del="${k}" title="Elimina">✕</button></li>`).join('')}</ul>` : ''}
     <div class="btn-row"><button type="button" class="btn" id="sb-xyz" title="Coordinate atomiche nel formato XYZ, leggibile da Avogadro, VMD, Jmol…">Esporta .xyz</button></div>`;
+  $('sb-collision-example').addEventListener('change', e => { if (e.target.value) { const [a, b] = e.target.value.split('|'); $('sb-collision-left').value = a; $('sb-collision-right').value = b; } });
+  $('sb-collision-build').addEventListener('click', () => {
+    const ids = ['energy', 'distance', 'impact', 'rotation'];
+    if (ids.some(k => !$(`sb-collision-${k}`).checkValidity())) return;
+    const payload = { left: $('sb-collision-left').value.trim(), right: $('sb-collision-right').value.trim(), model: $('sb-collision-model').value };
+    for (const k of ids) payload[k] = +$(`sb-collision-${k}`).value;
+    SB.collisionInputs = payload; SB.events = []; SB.history = []; SB.census = null; SB.liveCensus = null; SB.selected = -1;
+    post({ type: 'collision', ...payload });
+  });
   $('sb-save').addEventListener('click', () => post({ type: 'snapshot', name: ($('sb-save-name').value.trim() || `esperimento ${savedList().length + 1}`).slice(0, 60) }));
   $('sb-xyz').addEventListener('click', () => post({ type: 'snapshot', name: '\u0000xyz' }));
   $('element-card').querySelectorAll('[data-load]').forEach(b => b.addEventListener('click', () => {
@@ -812,8 +889,8 @@ function renderSide() {
     writeSaved(list);
     renderSide();
   }));
-  $('sb-preset').addEventListener('change', (e) => loadPreset(PRESETS.find(x => x.id === e.target.value)));
-  $('sb-restart').addEventListener('click', () => loadPreset(SB.preset));
+  $('sb-preset').addEventListener('change', (e) => e.target.value !== 'collision' && loadPreset(PRESETS.find(x => x.id === e.target.value)));
+  $('sb-restart').addEventListener('click', () => SB.preset.id === 'collision' ? post({ type: 'collision', ...SB.collisionInputs }) : loadPreset(SB.preset));
   $('sb-clear').addEventListener('click', () => { post({ type: 'clear' }); SB.events = []; SB.history = []; SB.census = null; SB.selected = -1; SB.userPaused = false; post({ type: 'set', paused: false, forceField: 'auto' }); renderAnalysis(); });
   $('sb-pour-fire').addEventListener('click', () => pour([['[H][H]', 6], ['O=O', 3]]));
   $('sb-pour-water').addEventListener('click', () => pour([['O', 8]]));
@@ -917,7 +994,7 @@ function renderControls() {
     <div class="btn-row"><button class="btn" id="sb-zero">Azzera misure</button><button class="btn" id="sb-export">Esporta CSV</button></div>
     <div class="ctl"><span class="lbl">Modello delle forze</span></div>
     <div class="seg" id="sb-ff">
-      <button type="button" data-v="auto" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'auto'}" title="Sceglie il modello più fedele che può ancora girare: LJ pubblicato per i nobili, GFN2-xTB fino a 40 atomi (tutti gli elementi fino al radon, ioni, campo), altrimenti classico">fedeltà automatica</button>
+      <button type="button" data-v="auto" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'auto'}" title="Sceglie il modello più fedele che può ancora girare: LJ pubblicato per i nobili, GFN2-xTB fino a 120 atomi (H–Rn, ioni, campo). Oltre il limite occorre una scelta esplicita del modello qualitativo">fedeltà automatica</button>
       <button type="button" data-v="reactive" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'reactive'}" title="Potenziale empirico del progetto: non parametrizzato per prevedere reazioni generali">classico</button>
       <button type="button" data-v="lj" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'lj'}" title="Lennard–Jones con σ e ε pubblicati. Solo He, Ne, Ar, Kr, Xe">LJ nobili</button>
       <button type="button" data-v="gfn2" aria-pressed="${(st?.fidelity ?? SB.fidelity) === 'gfn2'}" title="GFN2-xTB a ogni passo (Grimme 2019), elementi H–Rn, fino a 120 atomi, validato su tblite">GFN2-xTB</button>
@@ -926,7 +1003,7 @@ function renderControls() {
     </div>
     <p class="hint">${escapeHtml(st?.modelWhy ?? SB.info ?? '')}</p>
     <div class="ctl"><span class="lbl">Carica e spin · carica totale ${chargeText(st?.charge ?? 0)}</span>
-      <div class="seg" id="sb-mult">${[[0, 'spin libero'], [1, 'singoletto'], [2, 'doppietto'], [3, 'tripletto'], [4, 'quartetto']].map(([v, t]) => `<button type="button" data-v="${v}" aria-pressed="${(st?.multiplicity ?? 0) === v || (v === 0 && !st?.multiplicity)}" title="${v ? `Molteplicità 2S+1 = ${v} fissata` : 'Lo spin esce dal calcolo (livello di Fermi comune per i due spin)'}">${t}</button>`).join('')}</div>
+      <div class="seg" id="sb-mult">${[[0, st?.forceField === 'gfn2' ? 'spin minimo' : 'spin automatico'], [1, 'singoletto'], [2, 'doppietto'], [3, 'tripletto'], [4, 'quartetto']].map(([v, t]) => `<button type="button" data-v="${v}" aria-pressed="${(st?.multiplicity ?? 0) === v || (v === 0 && !st?.multiplicity)}" title="${v ? `Molteplicità 2S+1 = ${v} fissata` : st?.forceField === 'gfn2' ? 'Singoletto o doppietto compatibile con il numero di elettroni; per O₂ scegli tripletto' : 'MINDO/3: livello di Fermi comune. UHF: confronto delle due molteplicità più basse'}">${t}</button>`).join('')}</div>
       <p class="hint">Le specie cariche si aggiungono dalla lista degli ioni o da SMILES con la carica, per esempio [NH4+] o C[O-]. La carica totale entra nella funzione d'onda; la carica di ogni molecola si legge dal calcolo.</p></div>
     <div class="ctl"><span class="lbl">Campo elettrico uniforme (V/Å) ${st?.field ? `· acceso, |E| = ${nf(Math.hypot(...st.field), 2)} V/Å` : '· spento'}</span>
       <div class="range-row field-row">${['x', 'y', 'z'].map((c, k) => `<label for="sb-E${c}">E<sub>${c}</sub></label><input id="sb-E${c}" type="text" inputmode="decimal" value="${nf(st?.field?.[k] ?? 0, 2)}" style="width:58px">`).join('')}</div>
@@ -954,6 +1031,19 @@ function renderControls() {
       <p class="hint">Barostato di Berendsen (τ<sub>P</sub> = 10 ps): la scatola si allarga o si stringe finché la pressione sulle pareti vale P₀.</p></div>
     <div class="ctl"><span class="lbl">Analisi</span>
       <div class="range-row"><label for="sb-rdf">g(r) fra</label><select id="sb-rdf">${rdfOptions()}</select><button type="button" class="btn" id="sb-reset-an" title="Azzera g(r), spostamento quadratico medio e fluttuazioni di energia">Azzera</button></div></div>
+    <div class="ctl"><span class="lbl">Vista microscopica</span></div>
+    <div class="seg" id="sb-style" style="margin-top:4px">
+      <button type="button" data-v="ball" aria-pressed="${SB.style === 'ball'}">sfere e bastoncini</button>
+      <button type="button" data-v="vdw" aria-pressed="${SB.style === 'vdw'}">van der Waals</button>
+      <button type="button" data-v="cloud" aria-pressed="${SB.style === 'cloud'}" title="La densità degli elettroni ρ(r): come appaiono davvero atomi e molecole">nuvola elettronica</button>
+      <button type="button" data-v="orbital" aria-pressed="${SB.style === 'orbital'}" title="Orbitali di frontiera calcolati: HOMO (l'elettrone più alto) e LUMO (il primo posto libero)">orbitali</button>
+      <button type="button" data-v="difference" aria-pressed="${SB.style === 'difference'}">Δρ elettronica</button>
+      <button type="button" data-v="spin" aria-pressed="${SB.style === 'spin'}">densità di spin</button>
+    </div>
+    ${SB.style === 'orbital' ? `<div class="seg" id="sb-orb" style="margin-top:4px">
+      <button type="button" data-v="homo" aria-pressed="${SB.orbital === 'homo'}">HOMO</button>
+      <button type="button" data-v="lumo" aria-pressed="${SB.orbital === 'lumo'}">LUMO</button>
+    </div>` : ''}
     <details><summary>Interazioni e aspetto</summary>
     <div class="ctl"><label class="lbl" for="sb-speed">Velocità (passi per fotogramma)</label>
       <div class="range-row"><input type="range" id="sb-speed" min="1" max="200" step="1" value="${spf}"><output id="sb-speed-out">${spf}</output></div></div>
@@ -971,16 +1061,6 @@ function renderControls() {
       <button type="button" data-v="ke" aria-pressed="${SB.color === 'ke'}">energia cinetica</button>
       <button type="button" data-v="phase" aria-pressed="${SB.color === 'phase'}">fase locale</button>
     </div>
-    <div class="seg" id="sb-style" style="margin-top:4px">
-      <button type="button" data-v="ball" aria-pressed="${SB.style === 'ball'}">sfere e bastoncini</button>
-      <button type="button" data-v="vdw" aria-pressed="${SB.style === 'vdw'}">van der Waals</button>
-      <button type="button" data-v="cloud" aria-pressed="${SB.style === 'cloud'}" title="La densità degli elettroni ρ(r): come appaiono davvero atomi e molecole">nuvola elettronica</button>
-      <button type="button" data-v="orbital" aria-pressed="${SB.style === 'orbital'}" title="Orbitali di frontiera calcolati: HOMO (l'elettrone più alto) e LUMO (il primo posto libero)">orbitali</button>
-    </div>
-    ${SB.style === 'orbital' ? `<div class="seg" id="sb-orb" style="margin-top:4px">
-      <button type="button" data-v="homo" aria-pressed="${SB.orbital === 'homo'}">HOMO</button>
-      <button type="button" data-v="lumo" aria-pressed="${SB.orbital === 'lumo'}">LUMO</button>
-    </div>` : ''}
     </details>`;
   const seg = (id, fn) => $(id).querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     fn(b.dataset.v);
@@ -1056,6 +1136,7 @@ function renderLegend() {
     leg.innerHTML = `${els.map(z => `<span><i class="swatch" style="background:${cpkColor(z)}"></i>${sym(z)}</span>`).join(' ')} · punti = nuclei; la nuvola prende il colore dell'atomo più vicino`;
     return;
   }
+  if (SB.style === 'difference' || SB.style === 'spin') { leg.innerHTML = '<span><i class="swatch" style="background:var(--phase-pos)"></i>positivo</span> <span><i class="swatch" style="background:var(--phase-neg)"></i>negativo</span> · punti = nuclei'; return; }
   if (SB.style === 'orbital') { leg.innerHTML = `<span><i class="swatch" style="background:${cssVar('--phase-pos')}"></i>ψ > 0</span> <span><i class="swatch" style="background:${cssVar('--phase-neg')}"></i>ψ < 0</span> · punti = nuclei`; return; }
   if (SB.color === 'charge') leg.innerHTML = '<span><i class="swatch" style="background:#e0402a"></i>δ− (negativa)</span> <span><i class="swatch" style="background:#dcdce0"></i>neutra</span> <span><i class="swatch" style="background:#3f7fe8"></i>δ+ (positiva)</span>';
   else if (SB.color === 'ke') leg.innerHTML = '<span><i class="swatch" style="background:#4070ff"></i>lento</span> <span><i class="swatch" style="background:#ffffff"></i>≈ 3/2 kT</span> <span><i class="swatch" style="background:#ff3020"></i>veloce</span>';
@@ -1074,7 +1155,7 @@ function renderPanelBody() {
   const kj = (e) => nf(e * KJ_PER_EV, 1);
   const ph = s.phase;
   $('viewport-title').innerHTML = `${SB.preset.name}<small>t = ${nf(s.t / 1000, 2)} ps · ${N} atomi · ${nMol} molecole${ph ? ` · ${ph.title}` : ''}</small>`;
-  $('viewport-note').innerHTML = `${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : s.forceField === 'gfn2' ? 'Dinamica quantistica (SCF GFN2-xTB a ogni passo)' : s.forceField === 'lj' ? 'Lennard–Jones dei gas nobili' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
+  $('viewport-note').innerHTML = `${observatory?.replay ? '<b>Replay del campione registrato.</b> ' : ''}${SB.cloudNote ? `${SB.cloudNote} ` : ''}${s.forceField === 'hf' ? 'Dinamica ab initio (Hartree–Fock a ogni passo)' : s.forceField === 'mindo3' ? 'Dinamica quantistica (SCF MINDO/3 a ogni passo)' : s.forceField === 'gfn2' ? 'Dinamica quantistica (SCF GFN2-xTB a ogni passo)' : s.forceField === 'lj' ? 'Lennard–Jones dei gas nobili' : 'Potenziale classico qualitativo'}: passo Δt = ${nf(s.dt, 2)} fs, ${s.paused ? '<b>in pausa</b>' : `${s.stepsPerFrame} passi per fotogramma`}. Trascina per ruotare, rotellina per ingrandire.`;
   $('live-metrics').innerHTML = `<span>T cinetica <b>${nf(s.T, 0)} K</b></span><span>Δt <b>${nf(s.dt, 3)} fs</b></span><span>Deriva energetica <b>${sgn((s.diagnostics?.drift ?? 0) * KJ_PER_EV, 4)} kJ/mol</b></span><span>Modello <b>${s.forceField === 'hf' ? 'UHF / STO-3G' : s.forceField === 'mindo3' ? 'MINDO/3 quantistico' : s.forceField === 'gfn2' ? 'GFN2-xTB quantistico' : s.forceField === 'lj' ? 'Lennard–Jones' : 'classico qualitativo'}</b></span>`;
   const dtIn = $('sb-dt');
   if (dtIn && document.activeElement !== dtIn && Math.abs(+dtIn.value - s.dt) > 1e-9) dtIn.value = +s.dt.toPrecision(4);
@@ -1286,24 +1367,27 @@ function renderAnalysis() {
   $('analysis').innerHTML = `
     <h2>Che cosa succede nella scatola</h2>
     <div class="analysis-grid">
+      <div id="sbo-observatory" class="wide"></div>
       <div id="sb-selected"></div>
       <div id="sb-species"></div>
       <div id="sb-events" class="wide"></div>
       <details class="wide"><summary>Modello, equazioni e limiti</summary>
         <p>Velocity Verlet: F = −∇U, x(t+Δt) = x + vΔt + ½aΔt². NVE: energia approssimativamente conservata con errore dipendente dal passo. NVT: termostato CSVR di Bussi.</p>
-        <p>GFN2-xTB (Bannwarth, Ehlert, Grimme, J. Chem. Theory Comput. 15, 1652, 2019): nuclei classici, elettroni di valenza in base STO-nG minima con tight binding autoconsistente; elettrostatica di secondo e terzo ordine per shell, multipoli atomici fino al quadrupolo, dispersione D4 autoconsistente con termine a tre corpi, repulsione efficace. Copre tutti gli elementi da H a Rn. Implementato in JavaScript e verificato contro tblite: energie entro 10⁻¹⁰ hartree, gradienti entro 10⁻⁹ hartree/bohr. Errori tipici del metodo: alcune kcal/mol sulle energie di reazione, barriere spesso sottostimate; nessun solvente implicito.</p>
+        <p>GFN2-xTB (Bannwarth, Ehlert, Grimme, J. Chem. Theory Comput. 15, 1652, 2019): nuclei classici, elettroni di valenza in base STO-nG minima con tight binding autoconsistente; elettrostatica di secondo e terzo ordine per shell, multipoli atomici fino al quadrupolo, dispersione D4 autoconsistente con termine a tre corpi, repulsione efficace. Copre tutti gli elementi da H a Rn. Implementato in JavaScript e verificato contro tblite: energie entro 10⁻¹⁰ hartree, gradienti entro 10⁻⁹ hartree/bohr. Errori tipici del metodo: alcune kcal/mol sulle energie di reazione, barriere spesso sottostimate; solvente implicito ALPB disponibile per l’acqua. Non include stati elettronici eccitati o salti fra superfici.</p>
         <p>MINDO/3: nuclei classici, elettroni di valenza con SCF UHF semiempirica (Bingham, Dewar, Lo 1975) a ogni passo; fino a 90 atomi di H, B, C, N, O, F, P, S, Cl. Spin libero (livello di Fermi comune), parametri verificati contro PySCF. È un metodo semiempirico: errori tipici sui calori di formazione di circa 11 kcal/mol, legami a idrogeno sottostimati.</p>
         <p>Hartree–Fock: nuclei classici, elettroni UHF/STO-3G; fino a 8 atomi. SCF non convergente: arresto. Lo spin iniziale è scelto fra le due molteplicità più basse, non fra tutti gli stati possibili.</p>
         <p>Campo classico: potenziale empirico specifico del progetto, ispirato a forme pubblicate. Barriere e reazioni non validate in generale; non è un’implementazione parametrizzata di ReaxFF o REBO. Assenti solvente, fotofisica e cinetica elettronica.</p>
         <p>Le cariche parziali non sono numeri di ossidazione. Gli ordini frazionari dinamici non determinano univocamente Lewis, ibridazione o specie chimica.</p>
       </details>
     </div>`;
+  observatory?.mount($('sbo-observatory'));
   renderLiveAnalysis();
 }
 
 function renderLiveAnalysis() {
   if (!active || !$('sb-species')) return;
   const c = SB.census;
+  observatory?.refresh();
   // composizione
   if (c) {
     const total = c.species.reduce((s, [, n]) => s + n, 0);
@@ -1317,7 +1401,7 @@ function renderLiveAnalysis() {
   // reazioni
   // con pochi atomi (ab initio) anche lo scambio di atomi uguali è la reazione da osservare
   const showExchange = (SB.frame?.stats.forceField === 'hf') || (SB.frame?.N ?? 99) <= 8;
-  const real = SB.events.filter(e => showExchange || !e.exchange);
+  const real = SB.events.filter(e => (!observatory?.replay || e.t <= SB.frame.stats.t) && (showExchange || !e.exchange));
   const agg = new Map();
   for (const e of real) {
     const k = `${e.reactants.join(' + ')} → ${e.products.join(' + ')}`;
@@ -1328,9 +1412,9 @@ function renderLiveAnalysis() {
   $('sb-events').innerHTML = `<h3>Cambi di connettività osservati</h3>
     ${real.length ? `<div class="analysis-grid">
       <div><p class="lbl">Ultimi eventi</p><ul class="sb-log">${recent.map(e => `<li><span class="t">${nf(e.t / 1000, 3)} ps</span> ${e.reactants.join(' + ')} → ${e.products.join(' + ')}${e.exchange ? ' <span class="desc-muted">(scambio di atomi)</span>' : ''}</li>`).join('')}</ul></div>
-      <div><p class="lbl">Reazioni elementari più frequenti</p><ul class="sb-log">${top.map(([k, n]) => `<li><span class="t">${n}×</span> ${k}</li>`).join('')}</ul></div>
+      <div><p class="lbl">Trasformazioni di connettività più frequenti</p><ul class="sb-log">${top.map(([k, n]) => `<li><span class="t">${n}×</span> ${k}</li>`).join('')}</ul></div>
     </div>` : '<p class="desc-muted">Nessun cambio di connettività registrato. Avvia o avanza di un passo per osservare la traiettoria.</p>'}
-    <p class="desc-muted">Una reazione è registrata quando cambia la connettività: un legame si forma (ordine > 0,55) o si rompe (< 0,35). Le reazioni che scambiano solo atomi uguali (H + H₂ → H₂ + H) non sono elencate.</p>`;
+    <p class="desc-muted">Una reazione è registrata quando cambia la connettività: un legame si forma (ordine > 0,55) o si rompe (< 0,35). Il microscopio sopra elenca anche i singoli legami coinvolti negli scambi di nuclei uguali.</p>`;
   renderSelected();
 }
 
@@ -1350,15 +1434,19 @@ function renderSelected() {
     if (s < 0.3) continue;
     if (a === i) partners.push({ j: b, n, s }); else if (b === i) partners.push({ j: a, n, s });
   }
-  const sumN = partners.reduce((sum, p) => sum + p.n, 0);
+  const sumN = partners.reduce((sum, p) => sum + p.s, 0);
   const frag = SB.census?.frags?.find(fr => fr.includes(i));
   const fragFormula = frag ? hillFormula(frag.map(k => ({ Z: f.Z[k] }))) : sym(Z);
   const orderName = (n) => (n > 2.5 ? 'triplo' : n > 1.75 ? 'doppio' : n > 1.3 ? 'frazionario' : n > 0.75 ? 'singolo' : 'parziale');
   box.innerHTML = `<h3>Atomo selezionato: ${sym(Z)}${i + 1} (${ELEMENTS[Z - 1].name})</h3>
     <dl class="info-list">
       <dt>Carica parziale</dt><dd>${sgn(f.q[i], 2)} e</dd>
+${f.spin ? `<dt>Popolazione di spin nα − nβ</dt><dd>${sgn(f.spin[i], 3)}</dd>` : ''}
+      <dt>Forza totale sul nucleo</dt><dd>${nf(Math.hypot(...f.forces.slice(3*i, 3*i+3)), 4)} eV/Å</dd>
+      <dt>Velocità del nucleo</dt><dd>${nf(Math.hypot(...f.vel.slice(3*i, 3*i+3)), 4)} Å/fs</dd>
       <dt>Elettronegatività di Pauling</dt><dd>${nf(PAULING[Z], 2)}</dd>
       <dt>Numero di ossidazione</dt><dd>Richiede struttura di Lewis assegnata</dd>
+      <dt>Analisi del legame</dt><dd>${f.stats.forceField === 'hf' ? 'Mayer UHF' : f.stats.forceField === 'gfn2' ? 'Mayer (GFN2)' : f.stats.forceField === 'mindo3' ? 'Matrice densità MINDO/3' : 'Ordine empirico'}</dd>
       <dt>Somma degli ordini di legame</dt><dd>${nf(sumN, 2)} ${ATOM_PARAMS[Z] ? ` (valenza ${ATOM_PARAMS[Z][0]})` : ''}</dd>
 
       <dt>Energia cinetica</dt><dd>${nf(f.ke[i] * KJ_PER_EV, 1)} kJ/mol</dd>
@@ -1367,7 +1455,7 @@ function renderSelected() {
     ${partners.length ? `<table class="data-table" style="margin-top:8px"><thead><tr><th>Legato a</th><th class="num">ordine</th><th>tipo</th><th class="num">distanza</th><th class="num">q vicino</th></tr></thead><tbody>
       ${partners.map(p => {
         const d = Math.hypot(f.pos[3 * i] - f.pos[3 * p.j], f.pos[3 * i + 1] - f.pos[3 * p.j + 1], f.pos[3 * i + 2] - f.pos[3 * p.j + 2]);
-        return `<tr><td>${sym(f.Z[p.j])}${p.j + 1}</td><td class="num">${nf(p.n, 2)}</td><td>${orderName(p.n)}</td><td class="num">${nf(d * 100, 0)} pm</td><td class="num">${sgn(f.q[p.j], 2)}</td></tr>`;
+        return `<tr><td>${sym(f.Z[p.j])}${p.j + 1}</td><td class="num">${nf(p.s, 2)}</td><td>${orderName(p.s)}</td><td class="num">${nf(d * 100, 0)} pm</td><td class="num">${sgn(f.q[p.j], 2)}</td></tr>`;
       }).join('')}</tbody></table>` : '<p class="desc-muted">Atomo libero (nessun legame).</p>'}
     ${frag && frag.length > 1 && frag.length <= 30 ? '<div class="btn-row"><button type="button" class="btn" id="sb-to-mol">Studia questa molecola con Hartree–Fock</button></div>' : ''}`;
   $('sb-to-mol')?.addEventListener('click', () => {

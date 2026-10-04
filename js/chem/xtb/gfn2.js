@@ -442,7 +442,7 @@ export class GFN2xTB {
     };
     const PS = new Float64Array(n * n);
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = P[i * n + k]; if (a) for (let j = 0; j < n; j++) PS[i * n + j] += a * S[k * n + j]; }
-    this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), PS, Ct: orb.Ct, nC: orb.nC, e: orb.e, f: occ.f, basis: bas, n };
+    this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), PS, S, Ct: orb.Ct, nC: orb.nC, e: orb.e, f: occ.f, fa: occ.fa, fb: occ.fb, basis: bas, n };
     if (gradient) {
       res.gradient = this._gradient({ Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, Qt, derivs, x, eta, gamma, hd, mrad, dk, qk, d4, atm, rep, kT, amSD, amDD, amSQ, solv });
     }
@@ -722,14 +722,15 @@ function weightedSum(out, orb, w) {
 
 /** Occupazioni di Fermi a temperatura elettronica kT con livelli di Fermi separati per α e β. */
 function fermiOccupations(e, na, nb, kT) {
-  const n = e.length, f = new Float64Array(n);
+  const n = e.length, f = new Float64Array(n), channels = [];
   let ts = 0;
   for (const nel of [na, nb]) {
     const { occ, ts: t } = fermiChannel(e, nel, kT);
+    channels.push(occ);
     for (let k = 0; k < n; k++) f[k] += occ[k];
     ts += t;
   }
-  return { f, ts };
+  return { f, ts, fa: channels[0], fb: channels[1] };
 }
 function fermiChannel(e, nel, kT) {
   const n = e.length, occ = new Float64Array(n);
