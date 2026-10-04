@@ -818,11 +818,25 @@ body[data-mode="beaker"] #analysis .data-table th:nth-child(4) { width: 15%; }
 }
 
 
-/* sandbox: reazioni e fasi in vista */
+/* Sandbox information flows outside the 3D viewport, including on narrow screens. */
+.sb-view-info:not([hidden]) {
+  display: flex; flex-direction: column; gap: 10px;
+  min-width: 0; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.sb-view-info .viewport-title,
+.sb-view-info .viewport-legend,
+.sb-view-info .viewport-tools {
+  position: static; max-width: 100%; text-shadow: none;
+  pointer-events: auto;
+}
+.sb-view-info .viewport-title small { margin-top: 5px; }
+.sb-view-info .viewport-tools { justify-content: flex-start; }
 .sb-hud {
-  position: absolute; left: 14px; right: 14px; top: 58px;
   display: flex; flex-direction: column; gap: 8px;
-  pointer-events: none; z-index: 3; max-width: 420px;
+  min-width: 0;
 }
 .sb-phase {
   display: flex; flex-direction: column; gap: 2px;
@@ -846,7 +860,7 @@ body[data-mode="beaker"] #analysis .data-table th:nth-child(4) { width: 15%; }
 }
 .sb-reactions { display: flex; flex-direction: column; gap: 4px; }
 .sb-rx {
-  display: flex; justify-content: space-between; gap: 10px;
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px;
   background: color-mix(in srgb, #122033 78%, transparent);
   border-left: 3px solid #3dde7a;
   border-radius: 8px; padding: 5px 8px;
