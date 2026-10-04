@@ -39,7 +39,7 @@ export const SANDBOX_IONS = [
   { id: 'NO3-', smiles: '[O-][N+](=O)[O-]', name: 'ione nitrato' },
   { id: 'CH3O-', smiles: 'C[O-]', name: 'ione metossido' },
   { id: 'F-', smiles: '[F-]', name: 'ione fluoruro' },
-  { id: 'Cl-', smiles: '[Cl-]', name: 'ione cloruro (non con O: manca la coppia Cl–O)' },
+  { id: 'Cl-', smiles: '[Cl-]', name: 'ione cloruro (GFN2-xTB con acqua; MINDO/3 senza Cl–O)' },
 ];
 
 export const SANDBOX_ELEMENTS = [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 35, 36, 53, 54];
@@ -186,51 +186,51 @@ export const PRESETS = [
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
-    id: 'water', name: 'Acqua: legami a idrogeno',
+    id: 'water', forceField: 'reactive', name: 'Acqua: legami a idrogeno',
     box: 15.5, T: 300, add: [['O', 40]],
     text: "Osserva geometria e interazioni tra molecole nel potenziale classico. Non è un modello validato delle proprietà dell’acqua liquida.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
     color: 'charge',
   },
   {
-    id: 'h2-o2', name: 'Combustione dell\'idrogeno',
+    id: 'h2-o2', forceField: 'reactive', name: 'Combustione dell\'idrogeno',
     box: 16, T: 2800, add: [['[H][H]', 24], ['O=O', 12]], photons: { lambda: 200, count: 4, pair: [8, 8] },
     text: "Miscela H₂/O₂ con impulsi meccanici iniziali. Registra le variazioni di connettività; prodotti e velocità dipendono dal potenziale qualitativo, non da una cinetica di combustione validata.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
-    id: 'methane', name: 'Combustione del metano',
+    id: 'methane', forceField: 'reactive', name: 'Combustione del metano',
     box: 16, T: 3200, add: [['C', 8], ['O=O', 16]], spark: { radius: 6, T: 9000 },
     text: "Miscela CH₄/O₂ riscaldata localmente. Confronta energia e frammenti: il modello non predice quantitativamente il meccanismo di combustione.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
-    id: 'h2-cl2', name: 'Idrogeno e cloro alla luce',
+    id: 'h2-cl2', forceField: 'reactive', name: 'Idrogeno e cloro alla luce',
     box: 18, T: 1100, add: [['[H][H]', 20], ['ClCl', 20]], light: { lambda: 400, on: true },
     text: "Miscela H₂/Cl₂ con deposito meccanico di energia hc/λ. Non vengono calcolati assorbimento ottico, selettività o rese fotochimiche.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
-    id: 'na-cl2', name: 'Sodio e cloro: si forma il sale',
+    id: 'na-cl2', forceField: 'reactive', name: 'Sodio e cloro: si forma il sale',
     box: 16, T: 900, add: [['[Na]', 16], ['ClCl', 8]],
     text: "Interazioni Na/Cl nel potenziale classico. Le cariche sono parziali e i frammenti restano neutri; non è un modello del reticolo ionico del sale.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
     color: 'charge',
   },
   {
-    id: 'carbon', name: 'Vapore di carbonio: catene e anelli',
+    id: 'carbon', forceField: 'reactive', name: 'Vapore di carbonio: catene e anelli',
     box: 14, T: 3500, add: [['[C]', 44]],
     text: "Aggregazione del carbonio nel potenziale del progetto. La comparsa di anelli non identifica fullereni o nanotubi stabili reali.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
-    id: 'methyl', name: 'Radicali metile → etano',
+    id: 'methyl', forceField: 'reactive', name: 'Radicali metile → etano',
     box: 18, T: 500, add: [['[CH3]', 24]],
     text: "Esplora gli urti di frammenti CH₃ nel modello classico. Stabilizzazione, barriere e velocità di ricombinazione non sono validate.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
   },
   {
-    id: 'haber', name: 'Azoto e idrogeno: perché serve un catalizzatore',
+    id: 'haber', forceField: 'reactive', name: 'Azoto e idrogeno: perché serve un catalizzatore',
     box: 16, T: 1500, add: [['N#N', 10], ['[H][H]', 30]],
     text: "Confronta la resistenza dei legami nel modello. Nessun catalizzatore o meccanismo Haber–Bosch è implementato; assenza di reazioni in pochi ps non prova inerzia chimica.",
     tips: ['Confronta NVE e NVT e dimezza Δt per verificare la stabilità numerica.'],
