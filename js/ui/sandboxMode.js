@@ -160,6 +160,7 @@ export function initSandboxMode(v, { openMolecule }) {
 export function activateSandbox() {
   active = true;
   document.body.dataset.mode = 'sandbox';
+  setViewInfoOutside(true);
   viewer.clear();
   viewer.setAxesVisible(false);
   buildScene();
@@ -173,6 +174,7 @@ export function activateSandbox() {
 
 export function deactivateSandbox() {
   active = false;
+  setViewInfoOutside(false);
   clearCloud();
   if (worker) worker.postMessage({ type: 'set', paused: true });
   if (callback) viewer.frameCallbacks.delete(callback);
@@ -189,14 +191,26 @@ export function sandboxRedraw() {
 
 const PHASE_HEX = { gas: '#7ec8ff', liquido: '#f0b429', solido: '#8b93ff', misto: '#e07a9a', vuota: '#9aa3b2' };
 
-function ensureHud() {
+// Keep text outside the canvas without changing the shared controls or their listeners.
+function setViewInfoOutside(outside) {
   const vp = $('viewport');
-  if (!vp || $('sb-hud')) return;
+  const header = $('sb-view-header');
+  const footer = $('sb-view-footer');
+  header.hidden = footer.hidden = !outside;
+  (outside ? header : vp).appendChild($('viewport-title'));
+  (outside ? footer : vp).appendChild($('viewport-legend'));
+  (outside ? footer : vp).appendChild(document.querySelector('.viewport-tools'));
+  if (outside && $('sb-hud')) footer.appendChild($('sb-hud'));
+}
+
+function ensureHud() {
+  const footer = $('sb-view-footer');
+  if (!footer || $('sb-hud')) return;
   const hud = document.createElement('div');
   hud.id = 'sb-hud';
   hud.className = 'sb-hud';
   hud.innerHTML = '<div id="sb-phase" class="sb-phase"></div><div id="sb-hud-species" class="sb-species"></div><div id="sb-reactions" class="sb-reactions"></div>';
-  vp.appendChild(hud);
+  footer.appendChild(hud);
 }
 
 function notePhase(phase) {
