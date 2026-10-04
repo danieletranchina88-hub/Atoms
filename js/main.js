@@ -253,7 +253,7 @@ function setMode(mode) {
     molecule: 'Hartree–Fock / basi gaussiane · molecole isolate; correlazione e solvente limitano l’accuratezza',
     reaction: 'Gas ideali · HF/MP2 + rotore rigido e oscillatore armonico · equilibrio distinto dalla cinetica',
     lab: 'Modelli termodinamici e cinetici · attività, unità e condizioni esplicite',
-    sandbox: 'Modello scelto per la scatola: Lennard–Jones per i gas nobili · MINDO/3 quantistico (fino a 90 atomi) o UHF ab initio (pochi atomi) · altrimenti potenziale classico qualitativo · verifica la deriva energetica',
+    sandbox: 'Modello scelto per la scatola: Lennard–Jones per i gas nobili · GFN2-xTB quantistico per tutti gli elementi fino al radon (fino a 40 atomi), anche in acqua implicita · MINDO/3 e Hartree–Fock a scelta · altrimenti potenziale classico qualitativo · verifica la deriva energetica',
     phase: 'Dinamica Lennard–Jones · gas nobile modello · NVE / NVT · transizioni emergenti',
     beaker: 'Equilibrio in acqua (database MINTEQ v4) · van \'t Hoff per la temperatura · attività Debye–Hückel esteso/Davies, affidabilità limitata ad alta forza ionica · nessuna cinetica',
     kinetics: 'Legge di azione di massa · Arrhenius · integratore implicito per sistemi rigidi · isoterma, a volume costante',
