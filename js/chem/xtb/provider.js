@@ -23,10 +23,10 @@ export function gfn2Feasible(Z) {
 
 /**
  * multiplicity: 2S+1 fissato, oppure null (spin più basso compatibile con il numero di elettroni);
- * field: campo elettrico uniforme [Ex, Ey, Ez] in V/Å.
+ * field: campo elettrico uniforme [Ex, Ey, Ez] in V/Å; solvent: 'water' (solvente implicito ALPB) oppure null.
  */
-export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null } = {}) {
-  const calc = new GFN2xTB({ Tel, etol: 1e-9, ptol: 1e-6 });
+export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null, solvent = null } = {}) {
+  const calc = new GFN2xTB({ Tel, etol: 1e-9, ptol: 1e-6, solvent });
   let charge = 0, uhfUsed = null, fieldVA = null;
   const setField = (f) => {
     fieldVA = f && f.some(v => v) ? f.slice() : null;
@@ -40,6 +40,8 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null 
     reset() { calc.reset(); },
     setField,
     get field() { return fieldVA; },
+    setSolvent(sv) { calc.solvent = sv || null; calc.reset(); },
+    get solvent() { return calc.solvent; },
     compute(Z, pos, F, ctx = {}) {
       if ((ctx.charge ?? 0) !== charge) { charge = ctx.charge ?? 0; calc.reset(); }
       const nel = gfn2Electrons(Z, charge);
@@ -60,7 +62,8 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null 
       provider.info = {
         method: 'GFN2-xTB', nbf: r.nao, iterations: r.iterations, converged: r.converged, charge, Tel,
         multiplicity: uhf + 1, homo: r.homoLumo.homo * HARTREE_EV, lumo: r.homoLumo.lumo * HARTREE_EV, gap: r.homoLumo.gap * HARTREE_EV,
-        dipole: r.dipole.map(v => v * BOHR_ANG), field: fieldVA, Sz: uhf / 2, dipoleDebye: Math.hypot(...mu),
+        dipole: r.dipole.map(v => v * BOHR_ANG), field: fieldVA, solvent: calc.solvent,
+        solvation: calc.solvent ? r.parts.solvation * HARTREE_EV : null, Sz: uhf / 2, dipoleDebye: Math.hypot(...mu),
       };
       const parts = { gfn2: r.energy * HARTREE_EV, repulsion: r.parts.repulsion * HARTREE_EV, dispersion3: r.parts.atm * HARTREE_EV };
       return { E: r.energy * HARTREE_EV, parts, q: Float64Array.from(r.charges), bonds, hbonds: [] };

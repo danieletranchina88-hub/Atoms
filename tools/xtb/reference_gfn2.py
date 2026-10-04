@@ -64,4 +64,14 @@ for name, F in [("HCl_H2O", [0.01, -0.005, 0.02]), ("H3O+", [0.0, 0.02, -0.01]),
     calc.add("electric-field", ffi.new("double[3]", F))
     res = calc.singlepoint()
     out["field"][name] = {"field": F, "energy": float(res.get("energy")), "dipole": np.asarray(res.get("dipole")).round(8).tolist()}
+# solvente implicito ALPB (acqua, stato di riferimento gsolv): energia, gradiente e cariche
+out["alpb"] = {}
+for name, (Z, xyz, charge, uhf) in MOLS.items():
+    calc = Calculator("GFN2-xTB", np.array(Z), np.array(xyz, dtype=float) * A2B, charge=charge, uhf=uhf)
+    calc.set("verbosity", 0)
+    calc.set("accuracy", 1e-4)
+    calc.add("alpb-solvation", "water")
+    res = calc.singlepoint()
+    out["alpb"][name] = {"energy": float(res.get("energy")), "gradient": np.asarray(res.get("gradient")).round(10).tolist(),
+                         "charges": np.asarray(res.get("charges")).round(8).tolist()}
 print(json.dumps(out, indent=1))

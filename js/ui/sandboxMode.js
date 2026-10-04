@@ -71,7 +71,7 @@ function startWorker() {
     if (m.type === 'frame') {
       const oldMode = SB.frame?.stats.forceField;
       const oldPaused = SB.userPaused;
-      const elec = (st) => st ? `${st.charge}|${st.field}|${st.multiplicity}|${st.fidelity}` : '';
+      const elec = (st) => st ? `${st.charge}|${st.field}|${st.multiplicity}|${st.fidelity}|${st.solvent}` : '';
       const oldElec = elec(SB.frame?.stats);
       SB.frame = m;
       SB.userPaused = m.stats.paused;
@@ -932,6 +932,12 @@ function renderControls() {
       <div class="range-row field-row">${['x', 'y', 'z'].map((c, k) => `<label for="sb-E${c}">E<sub>${c}</sub></label><input id="sb-E${c}" type="text" inputmode="decimal" value="${nf(st?.field?.[k] ?? 0, 2)}" style="width:58px">`).join('')}</div>
       <div class="btn-row" style="margin-top:4px"><button type="button" class="btn" id="sb-field-on">Applica il campo</button><button type="button" class="btn" id="sb-field-off" ${st?.field ? '' : 'disabled'}>Spegni</button></div>
       <p class="hint">Calcolato con GFN2-xTB (o MINDO/3) nella funzione d'onda: polarizza le molecole, orienta i dipoli e spinge gli ioni (forza qE). 1 V/Å = 10¹⁰ V/m, come vicino alla punta di un microscopio a effetto di campo. Accendere o cambiare il campo è lavoro sul sistema, contato nel bilancio. Con base minima la ionizzazione per effetto tunnel non è descritta.</p></div>
+    <div class="ctl"><span class="lbl">Solvente attorno alle molecole · ${st?.solvent ? 'acqua implicita (ALPB)' : 'vuoto'}</span>
+      <div class="seg" id="sb-solv">
+        <button type="button" data-v="" aria-pressed="${!st?.solvent}" title="Le molecole sono nel vuoto (fase gassosa)">vuoto</button>
+        <button type="button" data-v="water" aria-pressed="${st?.solvent === 'water'}" title="Acqua come mezzo continuo polarizzabile (ALPB, ε = 80,2), con GFN2-xTB">acqua implicita</button>
+      </div>
+      <p class="hint">Il solvente implicito ALPB (Ehlert et al. 2021) circonda ogni molecola con un dielettrico che si polarizza: scherma le cariche, stabilizza gli ioni e aggiunge i termini di cavità e di legame a idrogeno con il solvente. Calcolato con GFN2-xTB e verificato su tblite; il cambio di energia è lavoro sul sistema.</p></div>
     ${logSlider('sb-T', `Temperatura del termostato`, 10, 8000, T, v => `${nf(v, 0)} K`)}
     <div class="seg" id="sb-thermo">
       <button type="button" data-v="1" aria-pressed="${thermo}" title="Termostato di Bussi: scambia calore con un bagno a temperatura costante (insieme canonico NVT)">Termostato</button>
@@ -996,6 +1002,7 @@ function renderControls() {
   seg('sb-thermo', (v) => post({ type: 'set', thermostat: v === '1' }));
   seg('sb-ff', (v) => post({ type: 'set', forceField: v }));
   seg('sb-mult', (v) => post({ type: 'set', multiplicity: +v || null }));
+  seg('sb-solv', (v) => post({ type: 'set', solvent: v || null }));
   $('sb-field-on').addEventListener('click', () => {
     const f = ['x', 'y', 'z'].map(c => parseFloat(String($(`sb-E${c}`).value).replace(',', '.')) || 0);
     post({ type: 'set', field: f });
@@ -1092,6 +1099,7 @@ function renderPanelBody() {
       <dt>Carica totale</dt><dd>${chargeText(s.charge ?? 0)}</dd>
       ${s.dipole ? `<dt>Momento di dipolo</dt><dd>${nf(Math.hypot(...s.dipole) * 4.80320, 2)} D${s.charge ? ' (dipende dall\'origine: c\'è una carica netta)' : ''}</dd>` : ''}
       ${s.field ? `<dt>Campo elettrico</dt><dd>(${s.field.map(v => nf(v, 2)).join('; ')}) V/Å</dd>` : ''}
+      ${s.hf.solvation != null ? `<dt>Energia di solvatazione (ALPB)</dt><dd>${nf(s.hf.solvation * KJ_PER_EV, 1)} kJ/mol</dd>` : ''}
       ${s.hf.Hf !== undefined ? `<dt>Calore di formazione ΔfH</dt><dd>${nf(s.hf.Hf * 4.184, 0)} kJ/mol</dd>` : ''}
       <dt>Iterazioni SCF</dt><dd>${s.hf.iterations}${s.hf.converged ? '' : ' (non convergente)'}</dd>
     </dl>

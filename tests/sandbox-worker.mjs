@@ -36,5 +36,14 @@ try {
   assert.equal(frame.stats.hf.method,'GFN2-xTB');assert.equal(frame.stats.hf.converged,true);
   next=wait(m=>m.type==='frame'&&m.stats.t>0);worker.postMessage({type:'set',thermostat:false});worker.postMessage({type:'step',n:20});frame=await next;
   assert.ok(Math.abs(frame.stats.diagnostics.drift)<0.02,`drift ${frame.stats.diagnostics.drift}`);
-  console.log('Sandbox worker: UHF step, clear, immediate molecular census, fixed time step, ions and GFN2-xTB passed.');
+  // HCl in acqua implicita (ALPB): in 0,4 ps il protone passa all'acqua e il cloro diventa cloruro
+  next=wait(m=>m.type==='frame'&&m.N===14&&m.stats.solvent==='water');
+  worker.postMessage({type:'preset',preset:PRESETS.find(p=>p.id==='x-hcl-water')});frame=await next;
+  assert.equal(frame.stats.forceField,'gfn2');assert.ok(frame.stats.hf.solvation<0);
+  next=wait(m=>m.type==='frame'&&m.stats.t>=399);worker.postMessage({type:'set',paused:true});worker.postMessage({type:'step',n:1000});frame=await next;
+  assert.ok(frame.q[0]<-0.8,`carica del cloro ${frame.q[0]}`);
+  // senza solvente: il campo torna al vuoto e il cambio di energia è contato come lavoro
+  next=wait(m=>m.type==='frame'&&m.stats.solvent===null&&m.stats.t>=399);worker.postMessage({type:'set',solvent:null});frame=await next;
+  assert.equal(frame.stats.hf.solvation,null);
+  console.log('Sandbox worker: UHF step, clear, immediate molecular census, fixed time step, ions, GFN2-xTB and ALPB water passed.');
 } finally {await worker.terminate();}

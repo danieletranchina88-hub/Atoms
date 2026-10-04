@@ -80,8 +80,55 @@ function waterLattice() {
   return out;
 }
 
+/** Molecola d'acqua con orientazione k-esima (pseudo-casuale ma fissa) e ossigeno in c. */
+function waterAt(c, k) {
+  const r = 0.957, th = 104.5 * Math.PI / 180, a = 0.9 * k, b = 1.7 * k + 0.4;
+  const u = [Math.cos(a), Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b)];
+  const w0 = [-Math.sin(a), Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b)];
+  const h = (s) => [0, 1, 2].map(i => c[i] + r * (Math.cos(th / 2) * u[i] + s * Math.sin(th / 2) * w0[i]));
+  return [{ Z: 8, pos: c.slice() }, { Z: 1, pos: h(1) }, { Z: 1, pos: h(-1) }];
+}
+
+/** HCl più quattro acque su un reticolo 2×2×2 alla densità del liquido (O–O = 3,1 Å). */
+function hclWater() {
+  const out = [];
+  let k = 0;
+  for (const x of [-1.55, 1.55]) for (const y of [-1.55, 1.55]) for (const z of [-1.55, 1.55]) {
+    if (k === 0) out.push({ Z: 17, pos: [x, y, z] }, { Z: 1, pos: [x, y, z + 1.29] });
+    else if (k <= 4) out.push(...waterAt([x, y, z], k));
+    k++;
+  }
+  return out;
+}
+
+/** Na⁺ e Cl⁻ a 6,4 Å con dieci acque attorno e in mezzo (siti di un reticolo di passo 3,3 Å). */
+function ionsInWater() {
+  const out = [{ Z: 11, pos: [-3.2, 0, 0], formal: 1 }, { Z: 17, pos: [3.2, 0, 0], formal: -1 }];
+  const sites = [];
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let l = -1; l <= 1; l++) {
+    const p = [3.3 * i, 3.3 * j, 3.3 * l];
+    if (Math.hypot(p[0] + 3.2, p[1], p[2]) > 2.6 && Math.hypot(p[0] - 3.2, p[1], p[2]) > 2.9) sites.push(p);
+  }
+  sites.sort((a, b) => Math.hypot(...a) - Math.hypot(...b));
+  sites.slice(0, 10).forEach((c, k) => out.push(...waterAt(c, k + 1)));
+  return out;
+}
+
 // Esperimenti: ogni riga di "add" è [SMILES o simbolo, numero di copie].
 export const PRESETS = [
+  // --- GFN2-xTB: tight binding quantistico per tutti gli elementi, anche in solvente implicito ---
+  {
+    id: 'x-hcl-water', name: 'HCl in acqua: l\'acido forte si dissocia (GFN2-xTB)', forceField: 'gfn2', quantum: true, solvent: 'water',
+    box: 8, T: 300, dt: 0.4, atoms: hclWater(), thermalize: 300, thermostat: true, speed: 20, style: 'ball',
+    text: 'Una molecola di HCl circondata da quattro molecole d\'acqua, immerse a loro volta in acqua descritta come mezzo continuo (solvente implicito ALPB, costante dielettrica 80,2). Le forze vengono a ogni passo da GFN2-xTB, un metodo quantistico tight binding. In circa un decimo di picosecondo il protone passa all\'acqua: HCl + H₂O → H₃O⁺ + Cl⁻, e la carica del cloro scende a circa −0,9 e. Nessuna reazione è programmata: la dissociazione emerge dagli elettroni e dalla polarizzazione del solvente.',
+    tips: ['Togli il solvente implicito (controlli a destra): nel vuoto il protone resta sul cloro, perché senza l\'acqua attorno la separazione delle cariche costa troppo. È lo stesso motivo per cui HCl gassoso non è ionizzato.', 'Colora per carica: Cl⁻ in rosso, la carica positiva si sposta con il protone fra le molecole d\'acqua (meccanismo di Grotthuss).', 'Limite: quattro molecole esplicite più un continuo; nella soluzione vera il protone migra lontano dal cloruro.'],
+  },
+  {
+    id: 'x-nacl-water', name: 'Na⁺ e Cl⁻ in acqua: il solvente li tiene separati (GFN2-xTB)', forceField: 'gfn2', quantum: true, solvent: 'water',
+    box: 16, T: 300, dt: 0.4, atoms: ionsInWater(), thermalize: 300, thermostat: true, speed: 15, style: 'ball',
+    text: 'Uno ione sodio e uno ione cloruro a 6,4 Å, con dieci molecole d\'acqua esplicite e il resto dell\'acqua come continuo dielettrico (ALPB). L\'attrazione fra gli ioni è schermata dal solvente (circa 80 volte più debole che nel vuoto) e ogni ione si circonda di molecole d\'acqua orientate: gli ossigeni verso Na⁺, gli idrogeni verso Cl⁻. Gli ioni restano separati: è la dissoluzione del sale vista dal lato degli ioni.',
+    tips: ['Togli il solvente implicito: nel vuoto Na⁺ e Cl⁻ si attraggono e in circa un picosecondo tornano a formare la coppia ionica a 2,4 Å.', 'Conta le molecole d\'acqua attorno al sodio: 4–6 ossigeni entro 3 Å, come il numero di idratazione misurato (circa 5–6).', 'Partendo dalla coppia a contatto (NaCl da SMILES) anche in acqua resta unita per molti picosecondi: nell\'acqua vera la coppia di contatto è un minimo che vive decine di picosecondi e un cristallo si scioglie in nanosecondi, tempi fuori dalla portata di una dinamica quantistica nel browser.'],
+  },
   // --- dinamica quantistica: a ogni passo una SCF MINDO/3 (elettroni trattati con la meccanica quantistica) ---
   {
     id: 'q-h2-o2', name: 'Combustione dell\'idrogeno', forceField: 'mindo3', quantum: true,

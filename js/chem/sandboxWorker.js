@@ -72,13 +72,13 @@ function physics() {
 }
 
 function snapshot() {
-  return { Z: sim.Z.slice(), formal: sim.formal.slice(), pos: Array.from(sim.pos), vel: Array.from(sim.vel), box: sim.box, T: sim.T, thermostat: sim.thermostat, dt: sim.dt, forceField, barostat: { ...sim.barostat }, field: fieldVec, multiplicity: spinMult };
+  return { Z: sim.Z.slice(), formal: sim.formal.slice(), pos: Array.from(sim.pos), vel: Array.from(sim.vel), box: sim.box, T: sim.T, thermostat: sim.thermostat, dt: sim.dt, forceField, barostat: { ...sim.barostat }, field: fieldVec, multiplicity: spinMult, solvent: solventName };
 }
 
 function restore(d) {
   sim = new Simulation({ box: d.box, T: d.T, dt: d.dt ?? 0.4 });
   sim.addAtoms(d.Z.map((z, i) => ({ Z: z, formal: d.formal?.[i] ?? 0, pos: d.pos.slice(3 * i, 3 * i + 3), vel: d.vel.slice(3 * i, 3 * i + 3) })));
-  fieldVec = d.field ?? null; spinMult = d.multiplicity ?? null;
+  fieldVec = d.field ?? null; spinMult = d.multiplicity ?? null; solventName = d.solvent ?? null;
   sim.thermostat = d.thermostat;
   if (d.barostat) sim.barostat = { ...d.barostat };
   setForceField(d.forceField ?? 'reactive');
@@ -171,6 +171,7 @@ let forceField = 'reactive';
 let fidelity = 'auto';
 let fieldVec = null;   // campo elettrico uniforme [Ex, Ey, Ez] in V/Å (GFN2-xTB o MINDO/3)
 let spinMult = null;   // molteplicità di spin fissata (2S+1) oppure null = libera
+let solventName = null; // solvente implicito ALPB attorno alle molecole ('water') oppure null (vuoto)
 let hfBasis = 'STO-3G';
 let modelWhy = 'Scatola vuota: aggiungi atomi o molecole.';
 
@@ -208,9 +209,9 @@ const GFN2_AUTO_MAX = 40;
 const GFN2_WHY = 'GFN2-xTB a ogni passo: tight binding quantistico con elettrostatica fino ai quadrupoli atomici e dispersione D4, validato su tblite.';
 
 function bestModel(Z) {
-  if (Z.length && (sim.netCharge !== 0 || fieldVec || !classicalOK(Z))) {
+  if (Z.length && (sim.netCharge !== 0 || fieldVec || solventName || !classicalOK(Z))) {
     const q = quantumFor(Z, sim.netCharge);
-    const what = sim.netCharge ? `Carica totale ${sim.netCharge > 0 ? '+' : ''}${sim.netCharge}` : fieldVec ? 'Campo elettrico' : 'Elementi oltre il campo classico';
+    const what = sim.netCharge ? `Carica totale ${sim.netCharge > 0 ? '+' : ''}${sim.netCharge}` : fieldVec ? 'Campo elettrico' : solventName ? 'Solvente implicito' : 'Elementi oltre il campo classico';
     if (q.ok) return { kind: q.kind, why: `${what}: ${GFN2_WHY}` };
     return { kind: 'reactive', why: q.reason };
   }
@@ -235,13 +236,14 @@ function applyModel(kind, basis = hfBasis) {
   if (!['hf', 'reactive', 'mindo3', 'lj', 'gfn2'].includes(kind)) throw new Error('Modello non valido.');
   if (kind !== 'gfn2' && !classicalOK(sim.Z)) throw new Error('Nella scatola ci sono elementi coperti solo da GFN2-xTB (oltre H–Ca, Br, Kr, I, Xe).');
   if ((kind === 'reactive' || kind === 'lj') && sim.netCharge !== 0) throw new Error(`La scatola ha carica ${sim.netCharge > 0 ? '+' : ''}${sim.netCharge}: il campo classico descrive solo frammenti neutri. Usa GFN2-xTB, MINDO/3 o Hartree–Fock.`);
+  if (kind !== 'gfn2' && solventName) throw new Error('Il solvente implicito ALPB è disponibile con GFN2-xTB: toglilo o scegli GFN2-xTB.');
   if (kind !== 'mindo3' && kind !== 'gfn2' && fieldVec) throw new Error('Il campo elettrico esterno è calcolato con GFN2-xTB o MINDO/3: spegnilo o scegli uno dei due.');
   const same = kind === forceField && (kind === 'reactive' || sim.provider);
   forceField = kind;
   if (!same) {
     sim.provider = kind === 'hf' ? makeHFProvider({ basis, fixedMultiplicity: spinMult })
       : kind === 'mindo3' ? makeMindo3Provider({ multiplicity: spinMult, field: fieldVec })
-      : kind === 'gfn2' ? makeGFN2Provider({ multiplicity: spinMult, field: fieldVec })
+      : kind === 'gfn2' ? makeGFN2Provider({ multiplicity: spinMult, field: fieldVec, solvent: solventName })
       : kind === 'lj' ? makeNobleLJProvider()
       : null;
   }
@@ -293,6 +295,29 @@ function setField(f) {
   }
 }
 
+/**
+ * Mette le molecole in un solvente implicito (ALPB, acqua) o le riporta nel vuoto. Il cambio di energia è lavoro esterno,
+ * come per il campo elettrico. Richiede GFN2-xTB.
+ */
+function setSolvent(name) {
+  const v = name ? String(name) : null;
+  if (v && v !== 'water') throw new Error('Solvente implicito disponibile: acqua (ALPB).');
+  const old = solventName;
+  if (!sim.res && sim.N) sim.forces();
+  const before = sim.res?.E ?? 0;
+  solventName = v;
+  try {
+    if (fidelity === 'auto') refreshFidelity();
+    else if (v && forceField !== 'gfn2') throw new Error('Il solvente implicito ALPB è calcolato con GFN2-xTB: sceglilo o usa la fedeltà automatica.');
+    sim.provider?.setSolvent?.(v);
+    sim.res = null;
+    if (sim.N) { sim.forces(); sim.work += sim.res.E - before; }
+  } catch (e) {
+    solventName = old; sim.provider?.setSolvent?.(old); sim.res = null;
+    throw e;
+  }
+}
+
 /** Fissa la molteplicità di spin 2S+1 (null = spin libero, livello di Fermi comune). Il cambio è lavoro esterno. */
 function setMultiplicity(mult) {
   const v = mult === null || mult === 0 ? null : Number(mult);
@@ -324,7 +349,7 @@ function refreshFidelity() {
 
 function loadPreset(p) {
   sim = new Simulation({ box: p.box, T: p.T, dt: p.dt ?? 0.2, seed: p.seed ?? 2024 });
-  fieldVec = p.field ?? null; spinMult = p.multiplicity ?? null;
+  fieldVec = p.field ?? null; spinMult = p.multiplicity ?? null; solventName = p.solvent ?? null;
   censusSent = -1; lastEventSent = 0; mbHist = null;
   stepsPerFrame = p.speed ?? 40;
   if (p.atoms) {
@@ -477,7 +502,7 @@ function frame() {
       heatBath: sim.heatBath, work: sim.work, matterExchange: sim.matterExchange, diagnostics: sim.diagnostics(), P: sim.measurePressure(), dt: sim.dt,
       nMol: sim.frags?.length ?? 0, paused, stepsPerFrame, light, clamped: sim.clamped,
       forceField, fidelity, modelWhy, hf: sim.provider?.info ?? null, phase: cachedPhase(),
-      charge: sim.netCharge, field: fieldVec, multiplicity: spinMult, dipole: sim.provider?.info?.dipole ?? null,
+      charge: sim.netCharge, field: fieldVec, multiplicity: spinMult, solvent: solventName, dipole: sim.provider?.info?.dipole ?? null,
     },
     mb: speedHistogram(),
   };
@@ -554,7 +579,7 @@ onmessage = (ev) => {
         postMessage({ type: 'info', text: placed < (m.count ?? 1) ? `Inserite ${placed} su ${m.count}: non c'è spazio libero. ${modelWhy}` : modelWhy });
         break;
       }
-      case 'clear': sim.clear(); fieldVec = null; spinMult = null; light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
+      case 'clear': sim.clear(); fieldVec = null; spinMult = null; solventName = null; light.on = false; paused = false; censusSent = -1; lastEventSent = 0; mbHist = null; resetAnalysis(); fidelity = 'auto'; refreshFidelity(); break;
       case 'remove': sim.editInventory(() => sim.remove(m.indices)); lastEventSent = sim.eventSerial; refreshFidelity(); break;
       case 'set':
         if (m.T !== undefined) { if (!Number.isFinite(m.T) || m.T < 0) throw new Error('Temperatura non valida.'); sim.T = m.T; }
@@ -568,6 +593,7 @@ onmessage = (ev) => {
         if (m.mbSpecies !== undefined) { mbSpecies = m.mbSpecies; mbHist = null; }
         if (m.forceField !== undefined) setForceField(m.forceField, m.basis ?? hfBasis);
         if (m.field !== undefined) setField(m.field);
+        if (m.solvent !== undefined) setSolvent(m.solvent);
         if (m.multiplicity !== undefined) setMultiplicity(m.multiplicity);
         if (m.barostat) sim.barostat = { ...sim.barostat, ...m.barostat };
         if (m.rdfPair !== undefined) { rdfPairUser = m.rdfPair; rdf.reset(m.rdfPair); physSent = -1; }

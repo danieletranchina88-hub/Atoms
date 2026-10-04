@@ -62,6 +62,15 @@ for (const [name, f] of Object.entries(ref.field)) {
     `|ΔE| ${dE.toExponential(1)} Eh, |Δμ| ${dmu.toExponential(1)} e·bohr, gradiente − differenze finite ${err.toExponential(1)} Eh/bohr`);
 }
 
+// solvente implicito ALPB (acqua): energia, cariche e gradiente contro tblite
+for (const [name, a] of Object.entries(ref.alpb)) {
+  const m = ref.molecules[name];
+  const r = new GFN2xTB({ solvent: 'water' }).compute(m.Z, m.pos.flat(), { charge: m.charge, uhf: m.uhf });
+  const dE = Math.abs(r.energy - a.energy), dq = maxDiff(a.charges, r.charges), dg = maxDiff(a.gradient.flat(), r.gradient);
+  check(`${name} in acqua (ALPB): energia, cariche, gradiente`, r.converged && dE < 1e-9 && dq < 1e-6 && dg < 1e-8,
+    `ΔG_solv = ${(r.parts.solvation * 627.509).toFixed(2)} kcal/mol, |ΔE| ${dE.toExponential(1)}, |Δq| ${dq.toExponential(1)}, |Δg| ${dg.toExponential(1)} Eh/bohr`);
+}
+
 // invarianza per traslazione e rotazione
 {
   const m = ref.molecules['HCl_H2O'];

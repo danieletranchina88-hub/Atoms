@@ -7,6 +7,7 @@
 import { GFN2 as PAR } from './gfn2Data.js';
 import { buildBasis, moleculeIntegrals, nSph, QIDX, shellPair, pairBuffers } from './gto.js';
 import { eigh } from '../linalg.js';
+import { ALPBWater } from './alpb.js';
 
 const KB = 3.166808578545117e-6; // costante di Boltzmann in hartree/K
 const EL = PAR.elements;
@@ -290,8 +291,9 @@ function repulsion(Z, pos, wantGrad) {
 
 export class GFN2xTB {
   /** field: campo elettrico uniforme in unità atomiche (hartree/(e·bohr)), oppure null. */
-  constructor({ Tel = 300, maxIter = 300, etol = 1e-10, ptol = 1e-8, damp = 0.4, field = null } = {}) {
-    Object.assign(this, { Tel, maxIter, etol, ptol, damp, field });
+  /** solvent: 'water' per il solvente implicito ALPB, oppure null (fase gassosa). */
+  constructor({ Tel = 300, maxIter = 300, etol = 1e-10, ptol = 1e-8, damp = 0.4, field = null, solvent = null } = {}) {
+    Object.assign(this, { Tel, maxIter, etol, ptol, damp, field, solvent });
     this.guess = null; // vettore (cariche di shell, dipoli, quadrupoli) dell'ultimo calcolo, per ripartire
   }
   reset() { this.guess = null; }
@@ -380,6 +382,12 @@ export class GFN2xTB {
     const d4 = d4Setup(Z, pos);
     const atm = atmEnergy(Z, pos, d4.cnd, gradient);
     const rep = repulsion(Z, pos, gradient);
+    let solv = null;
+    if (this.solvent) {
+      if (this.solvent !== 'water') throw new Error(`Solvente implicito non disponibile: ${this.solvent}`);
+      solv = this._alpb ??= new ALPBWater();
+      solv.setup(Z, pos);
+    }
 
     // ---- elettroni e occupazioni ----
     let nel = -charge;
@@ -403,13 +411,13 @@ export class GFN2xTB {
     const F = new Float64Array(n * n), P = new Float64Array(n * n);
     let Eel = 0, Eold = 0, converged = false, iter = 0, last = null;
     for (iter = 1; iter <= this.maxIter; iter++) {
-      const pot = this._potentials(x, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos });
+      const pot = this._potentials(x, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos, solv });
       this._fock(F, H0, S, D, Qt, pot, bas, nsh);
       const orb = solveFock(F, X, n);
       const occ = fermiOccupations(orb.e, na, nb, kT);
       density(P, orb, occ.f);
       const xo = this._moments(P, S, D, Qt, bas, n0, N, nsh);
-      Eel = this._electronicEnergy(P, H0, xo, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos }) + occ.ts;
+      Eel = this._electronicEnergy(P, H0, xo, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos, solv }) + occ.ts;
       let diff = 0;
       for (let k = 0; k < nvar; k++) diff = Math.max(diff, Math.abs(xo[k] - x[k]));
       last = { orb, occ, xo };
@@ -425,9 +433,9 @@ export class GFN2xTB {
     const dpat = xo.subarray(nsh, nsh + 3 * N), qpat = xo.subarray(nsh + 3 * N);
     const dipole = [0, 0, 0];
     for (let A = 0; A < N; A++) for (let c = 0; c < 3; c++) dipole[c] += pos[3 * A + c] * qat[A] + dpat[3 * A + c];
-    const energy = Eel + rep.E + atm.E;
+    const energy = Eel + rep.E + atm.E + (solv ? solv.eClassical : 0);
     const res = {
-      energy, parts: { electronic: Eel, repulsion: rep.E, atm: atm.E, ts: occ.ts },
+      energy, parts: { electronic: Eel, repulsion: rep.E, atm: atm.E, ts: occ.ts, solvation: solv ? solv.eClassical + solv.energy(qat) : 0 },
       charges: qat, shellCharges: Float64Array.from(qsh), atomicDipoles: Float64Array.from(dpat), atomicQuadrupoles: Float64Array.from(qpat),
       dipole, converged, iterations: iter, orbitalEnergies: orb.e, occupations: occ.f, nao: n,
       homoLumo: frontier(orb.e, occ.f), cn,
@@ -436,7 +444,7 @@ export class GFN2xTB {
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = P[i * n + k]; if (a) for (let j = 0; j < n; j++) PS[i * n + j] += a * S[k * n + j]; }
     this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), PS, Ct: orb.Ct, nC: orb.nC, e: orb.e, f: occ.f, basis: bas, n };
     if (gradient) {
-      res.gradient = this._gradient({ Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, Qt, derivs, x, eta, gamma, hd, mrad, dk, qk, d4, atm, rep, kT, amSD, amDD, amSQ });
+      res.gradient = this._gradient({ Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, Qt, derivs, x, eta, gamma, hd, mrad, dk, qk, d4, atm, rep, kT, amSD, amDD, amSQ, solv });
     }
     return res;
   }
@@ -478,6 +486,7 @@ export class GFN2xTB {
     // campo elettrico uniforme: φ(r) = −F·r agisce sulle cariche e sui dipoli atomici
     const fld = this.field;
     if (fld) for (let i = 0; i < N; i++) for (let d = 0; d < 3; d++) { vat[i] -= fld[d] * c.pos[3 * i + d]; vd[3 * i + d] -= fld[d]; }
+    if (c.solv) c.solv.potential(qat, vat);
     return { vsh, vat, vd, vq };
   }
 
@@ -549,6 +558,7 @@ export class GFN2xTB {
     E += d4Energy(Z, d4, qat).E;
     const fld = this.field;
     if (fld) for (let i = 0; i < N; i++) for (let d = 0; d < 3; d++) E -= fld[d] * (qat[i] * c.pos[3 * i + d] + dp[3 * i + d]);
+    if (c.solv) E += c.solv.energy(qat);
     return E;
   }
 
@@ -561,6 +571,7 @@ export class GFN2xTB {
     const qsh = xo.subarray(0, nsh), dp = xo.subarray(nsh, nsh + 3 * N), qp = xo.subarray(nsh + 3 * N);
     const qat = new Float64Array(N);
     for (let I = 0; I < nsh; I++) qat[sh[I].atom] += qsh[I];
+    if (c.solv) c.solv.gradient(qat, g);
     // forza del campo esterno sulle cariche atomiche (a cariche fissate)
     if (this.field) for (let i = 0; i < N; i++) for (let d = 0; d < 3; d++) g[3 * i + d] -= qat[i] * this.field[d];
     // matrice densità pesata con le energie orbitali
