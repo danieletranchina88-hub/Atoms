@@ -23,6 +23,7 @@ import { initSandboxMode, activateSandbox, deactivateSandbox, sandboxRedraw } fr
 import { activatePhase, deactivatePhase, phaseRedraw } from './ui/phaseMode.js';
 import { activateBeaker, deactivateBeaker, beakerRedraw } from './ui/beakerMode.js';
 import { activateKinetics, deactivateKinetics, kineticsRedraw } from './ui/kineticsMode.js';
+import { activateFormation, deactivateFormation, formationRedraw, initFormationMode } from './ui/bondFormationMode.js';
 
 const HARTREE_EV = 27.211386245988;
 const BOHR_PM = 52.917721090;
@@ -173,6 +174,7 @@ function onThemeChange() {
   if (state.mode === 'phase') { phaseRedraw(); return; }
   if (state.mode === 'beaker') { beakerRedraw(); return; }
   if (state.mode === 'kinetics') { kineticsRedraw(); return; }
+  if (state.mode === 'formation') { formationRedraw(); return; }
   if (state.atom) { render3D(); drawCharts(); }
 }
 
@@ -187,6 +189,7 @@ new ResizeObserver(() => {
     else if (state.mode === 'phase') phaseRedraw();
     else if (state.mode === 'beaker') beakerRedraw();
     else if (state.mode === 'kinetics') kineticsRedraw();
+    else if (state.mode === 'formation') formationRedraw();
     else if (state.atom) drawCharts();
   }, 120);
 }).observe(document.querySelector('.charts'));
@@ -199,6 +202,7 @@ window.addEventListener('hashchange', () => {
   if (h === 'sandbox' && state.mode !== 'sandbox') { setMode('sandbox'); return; }
   if (h === 'becher' && state.mode !== 'beaker') { setMode('beaker'); return; }
   if (h === 'cinetica' && state.mode !== 'kinetics') { setMode('kinetics'); return; }
+  if (h === 'legame' && state.mode !== 'formation') { setMode('formation'); return; }
   if (h === 'fasi' && state.mode !== 'phase') { setMode('phase'); return; }
   const Z = zFromHash();
   if (Z && Z !== state.Z) selectElement(Z);
@@ -240,7 +244,7 @@ async function selectElement(Z) {
   $('busy').hidden = true;
 }
 
-const CHEM_MODES = new Set(['molecule', 'reaction', 'lab', 'sandbox', 'phase', 'beaker', 'kinetics']);
+const CHEM_MODES = new Set(['molecule', 'reaction', 'lab', 'sandbox', 'phase', 'beaker', 'kinetics', 'formation']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
@@ -257,6 +261,7 @@ function setMode(mode) {
     phase: 'Dinamica Lennard–Jones · gas nobile modello · NVE / NVT · transizioni emergenti',
     beaker: 'Equilibrio in acqua (database MINTEQ v4) · van \'t Hoff per la temperatura · attività Debye–Hückel esteso/Davies, affidabilità limitata ad alta forza ionica · nessuna cinetica',
     kinetics: 'Legge di azione di massa · Arrhenius · integratore implicito per sistemi rigidi · isoterma, a volume costante',
+    formation: 'Equazione di Schrödinger risolta a ogni distanza: Hartree–Fock RHF/UHF, FCI per H₂, GFN2-xTB · nuclei fermi (Born–Oppenheimer), non relativistico · confronto con le costanti spettroscopiche (Huber–Herzberg, NIST)',
   };
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
@@ -267,10 +272,11 @@ function setMode(mode) {
   if (prev === 'phase' && mode !== 'phase') deactivatePhase();
   if (prev === 'beaker' && mode !== 'beaker') deactivateBeaker();
   if (prev === 'kinetics' && mode !== 'kinetics') deactivateKinetics();
+  if (prev === 'formation' && mode !== 'formation') deactivateFormation();
   $('analysis').hidden = !CHEM_MODES.has(mode);
-  const hashes = { molecule: 'molecole', reaction: 'reazioni', lab: 'laboratorio', sandbox: 'sandbox', beaker: 'becher', phase: 'fasi', kinetics: 'cinetica' };
+  const hashes = { molecule: 'molecole', reaction: 'reazioni', lab: 'laboratorio', sandbox: 'sandbox', beaker: 'becher', phase: 'fasi', kinetics: 'cinetica', formation: 'legame' };
   try { history.replaceState(null, '', CHEM_MODES.has(mode) ? `#${hashes[mode]}` : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
-  if (mode !== 'lab' && mode !== 'beaker' && mode !== 'kinetics') viewer.renderer.domElement.style.visibility = '';
+  if (mode !== 'lab' && mode !== 'beaker' && mode !== 'kinetics' && mode !== 'formation') viewer.renderer.domElement.style.visibility = '';
   if (mode === 'molecule') { activateMolecule(); return; }
   if (mode === 'reaction') { activateReaction(); return; }
   if (mode === 'lab') { viewer.clear(); activateLab(); return; }
@@ -278,6 +284,7 @@ function setMode(mode) {
   if (mode === 'phase') { viewer.clear(); activatePhase(); return; }
   if (mode === 'beaker') { viewer.clear(); activateBeaker(); return; }
   if (mode === 'kinetics') { viewer.clear(); activateKinetics(); return; }
+  if (mode === 'formation') { viewer.clear(); activateFormation(); return; }
   document.body.dataset.mode = 'atom';
   viewer.setAxesVisible(true);
   $('busy').hidden = true;
@@ -1128,13 +1135,14 @@ function drawSliceChart() {
 viewer.setAutoRotate(true);
 initMoleculeMode(viewer);
 initReactionMode(viewer);
+initFormationMode();
 initSandboxMode(viewer, {
   openMolecule: (smiles, name) => { setMode('molecule'); openMoleculeSmiles(smiles, name); },
 });
 document.body.dataset.mode = 'atom';
 {
   const h = location.hash.slice(1);
-  const startMode = { molecole: 'molecule', reazioni: 'reaction', laboratorio: 'lab', sandbox: 'sandbox', becher: 'beaker', fasi: 'phase', cinetica: 'kinetics' }[h] ?? null;
+  const startMode = { molecole: 'molecule', reazioni: 'reaction', laboratorio: 'lab', sandbox: 'sandbox', becher: 'beaker', fasi: 'phase', cinetica: 'kinetics', legame: 'formation' }[h] ?? null;
   if (startMode) state.mode = startMode;
   selectElement(zFromHash() ?? 6);
   if (startMode) { state.mode = 'atom'; setMode(startMode); }

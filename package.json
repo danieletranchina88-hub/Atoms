@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "npx http-server -c-1 -p 8080 .",
-    "test": "node tests/scf-reference.mjs && node tests/scrlda-reference.mjs && node tests/wavefunction.mjs && node tests/hf-reference.mjs && node tests/gradient.mjs && node tests/properties.mjs && node tests/chemistry.mjs && node tests/reactive.mjs && node tests/ffthermo.mjs && node tests/mindo3.mjs && node tests/aqueous.mjs && node tests/kinetics.mjs && node tests/mdphys.mjs && node tests/simulation-invariants.mjs && node tests/sandbox-worker.mjs && node tests/materials.mjs && node tests/lj-noble.mjs && node tests/structure.mjs && node tests/gfn2.mjs && node tests/electrons.mjs && node tests/reaction-trace.mjs",
+    "test": "node tests/scf-reference.mjs && node tests/scrlda-reference.mjs && node tests/wavefunction.mjs && node tests/hf-reference.mjs && node tests/gradient.mjs && node tests/properties.mjs && node tests/chemistry.mjs && node tests/reactive.mjs && node tests/ffthermo.mjs && node tests/mindo3.mjs && node tests/aqueous.mjs && node tests/kinetics.mjs && node tests/mdphys.mjs && node tests/simulation-invariants.mjs && node tests/sandbox-worker.mjs && node tests/materials.mjs && node tests/lj-noble.mjs && node tests/structure.mjs && node tests/gfn2.mjs && node tests/electrons.mjs && node tests/bond-formation.mjs && node tests/reaction-trace.mjs",
     "test:all": "node tests/all-elements.mjs"
   }
 }

@@ -32,6 +32,7 @@
       <button type="button" role="tab" id="mode-atom" data-mode="atom" aria-selected="true">Atomo</button>
       <button type="button" role="tab" id="mode-orbital" data-mode="orbital" aria-selected="false">Orbitale</button>
       <button type="button" role="tab" id="mode-bond" data-mode="bond" aria-selected="false">Legami σ π</button>
+      <button type="button" role="tab" id="mode-formation" data-mode="formation" aria-selected="false">Come nasce un legame</button>
       <button type="button" role="tab" id="mode-molecule" data-mode="molecule" aria-selected="false">Molecole</button>
       <button type="button" role="tab" id="mode-reaction" data-mode="reaction" aria-selected="false">Reazioni</button>
       <button type="button" role="tab" id="mode-lab" data-mode="lab" aria-selected="false">Laboratorio</button>
@@ -102,6 +103,7 @@
       <figcaption>
         <span id="radial-title">Distribuzione radiale di probabilità</span>
         <label class="mini-toggle atom-only"><input type="checkbox" id="radial-log"> scala log</label>
+        <label class="mini-toggle fm-only"><input type="checkbox" id="fm-gfn2"> GFN2-xTB</label>
         <select id="sb-chart1" class="sb-only" aria-label="Grandezza nel tempo">
           <option value="energy">energia</option>
           <option value="temperature">temperatura</option>
@@ -132,6 +134,10 @@
           <option value="xz">piano xz</option>
           <option value="xy">piano xy</option>
           <option value="yz">piano yz</option>
+        </select>
+        <select id="fm-chart3" class="fm-only" aria-label="Grafico">
+          <option value="tv">cinetica e potenziale</option>
+          <option value="eps">energie degli orbitali</option>
         </select>
       </figcaption>
       <canvas id="chart-slice" aria-label="Sezione piana della funzione d'onda"></canvas>
