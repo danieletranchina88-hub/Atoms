@@ -694,7 +694,7 @@ onmessage = (ev) => {
         // funzione d'onda corrente per il disegno della densità e degli orbitali
         const sample = m.traceId !== undefined ? recorder.get(m.traceId) : null;
         if (m.traceId !== undefined && !sample) throw new Error('Fotogramma non più nel buffer.');
-        const w = sample ? sample.wave : sim.provider?.wavefunction?.() ?? null;
+        const w = sample ? sample.wave : sim.provider?.wavefunction?.({ occupied: !!m.occupied }) ?? null;
         postMessage({ type: 'wave', reqId: m.reqId, purpose: m.purpose, epoch: recorder.epoch, t: sample?.stats.t ?? sim.time, box: sample?.stats.box ?? sim.box, Z: sample?.Z ?? sim.Z.slice(), pos: sample?.pos ?? Float64Array.from(sim.pos), wave: w, forceField: sample?.stats.forceField ?? forceField });
         break;
       }

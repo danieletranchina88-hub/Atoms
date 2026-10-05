@@ -159,6 +159,169 @@ function tql2(V, d, e, n) {
   }
 }
 
+/**
+ * Come eigh, ma lavora sulla trasposta (i cicli interni scorrono la memoria in modo contiguo: circa 2–3 volte più
+ * veloce per n ≳ 100) e restituisce gli autovettori per righe: rows[k*n + i] = componente i dell'autovettore k.
+ * Con inPlace = true A viene sovrascritta dagli autovettori (nessuna copia).
+ */
+export function eighRows(A, n, inPlace = false) {
+  const V = inPlace ? A : new Float64Array(A);
+  const d = new Float64Array(n);
+  const e = new Float64Array(n);
+  tred2T(V, d, e, n);
+  tql2T(V, d, e, n);
+  return { values: d, rows: V };
+}
+
+// Stesso algoritmo (Householder + QL implicito) con gli indici di V scambiati: V[c·n + r] sta per V(r, c).
+function tred2T(V, d, e, n) {
+  for (let j = 0; j < n; j++) d[j] = V[(j) * n + (n - 1)];
+  for (let i = n - 1; i > 0; i--) {
+    let scale = 0;
+    let h = 0;
+    for (let k = 0; k < i; k++) scale += Math.abs(d[k]);
+    if (scale === 0) {
+      e[i] = d[i - 1];
+      for (let j = 0; j < i; j++) {
+        d[j] = V[(j) * n + (i - 1)];
+        V[(j) * n + i] = 0;
+        V[(i) * n + j] = 0;
+      }
+    } else {
+      for (let k = 0; k < i; k++) {
+        d[k] /= scale;
+        h += d[k] * d[k];
+      }
+      let f = d[i - 1];
+      let g = Math.sqrt(h);
+      if (f > 0) g = -g;
+      e[i] = scale * g;
+      h -= f * g;
+      d[i - 1] = f - g;
+      for (let j = 0; j < i; j++) e[j] = 0;
+      for (let j = 0; j < i; j++) {
+        f = d[j];
+        V[(i) * n + j] = f;
+        g = e[j] + V[(j) * n + j] * f;
+        for (let k = j + 1; k <= i - 1; k++) {
+          g += V[(j) * n + k] * d[k];
+          e[k] += V[(j) * n + k] * f;
+        }
+        e[j] = g;
+      }
+      f = 0;
+      for (let j = 0; j < i; j++) {
+        e[j] /= h;
+        f += e[j] * d[j];
+      }
+      const hh = f / (h + h);
+      for (let j = 0; j < i; j++) e[j] -= hh * d[j];
+      for (let j = 0; j < i; j++) {
+        f = d[j];
+        g = e[j];
+        for (let k = j; k <= i - 1; k++) V[(j) * n + k] -= (f * e[k] + g * d[k]);
+        d[j] = V[(j) * n + (i - 1)];
+        V[(j) * n + i] = 0;
+      }
+    }
+    d[i] = h;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    V[(i) * n + (n - 1)] = V[(i) * n + i];
+    V[(i) * n + i] = 1;
+    const h = d[i + 1];
+    if (h !== 0) {
+      for (let k = 0; k <= i; k++) d[k] = V[(i + 1) * n + k] / h;
+      for (let j = 0; j <= i; j++) {
+        let g = 0;
+        for (let k = 0; k <= i; k++) g += V[(i + 1) * n + k] * V[(j) * n + k];
+        for (let k = 0; k <= i; k++) V[(j) * n + k] -= g * d[k];
+      }
+    }
+    for (let k = 0; k <= i; k++) V[(i + 1) * n + k] = 0;
+  }
+  for (let j = 0; j < n; j++) {
+    d[j] = V[(j) * n + (n - 1)];
+    V[(j) * n + (n - 1)] = 0;
+  }
+  V[(n - 1) * n + (n - 1)] = 1;
+  e[0] = 0;
+}
+
+function tql2T(V, d, e, n) {
+  for (let i = 1; i < n; i++) e[i - 1] = e[i];
+  e[n - 1] = 0;
+  let f = 0;
+  let tst1 = 0;
+  const eps = 2 ** -52;
+  for (let l = 0; l < n; l++) {
+    tst1 = Math.max(tst1, Math.abs(d[l]) + Math.abs(e[l]));
+    let m = l;
+    while (m < n) {
+      if (Math.abs(e[m]) <= eps * tst1) break;
+      m++;
+    }
+    if (m > l) {
+      let iter = 0;
+      do {
+        iter++;
+        let g = d[l];
+        let p = (d[l + 1] - g) / (2 * e[l]);
+        let r = Math.hypot(p, 1);
+        if (p < 0) r = -r;
+        d[l] = e[l] / (p + r);
+        d[l + 1] = e[l] * (p + r);
+        const dl1 = d[l + 1];
+        let h = g - d[l];
+        for (let i = l + 2; i < n; i++) d[i] -= h;
+        f += h;
+        p = d[m];
+        let c = 1, c2 = c, c3 = c;
+        const el1 = e[l + 1];
+        let s = 0, s2 = 0;
+        for (let i = m - 1; i >= l; i--) {
+          c3 = c2;
+          c2 = c;
+          s2 = s;
+          g = c * e[i];
+          h = c * p;
+          r = Math.hypot(p, e[i]);
+          e[i + 1] = s * r;
+          s = e[i] / r;
+          c = p / r;
+          p = c * d[i] - s * g;
+          d[i + 1] = h + s * (c * g + s * d[i]);
+          for (let k = 0; k < n; k++) {
+            h = V[(i + 1) * n + k];
+            V[(i + 1) * n + k] = s * V[(i) * n + k] + c * h;
+            V[(i) * n + k] = c * V[(i) * n + k] - s * h;
+          }
+        }
+        p = -s * s2 * c3 * el1 * e[l] / dl1;
+        e[l] = s * p;
+        d[l] = c * p;
+      } while (Math.abs(e[l]) > eps * tst1 && iter < 60);
+    }
+    d[l] += f;
+    e[l] = 0;
+  }
+  // ordina gli autovalori in senso crescente
+  for (let i = 0; i < n - 1; i++) {
+    let k = i;
+    let p = d[i];
+    for (let j = i + 1; j < n; j++) if (d[j] < p) { k = j; p = d[j]; }
+    if (k !== i) {
+      d[k] = d[i];
+      d[i] = p;
+      for (let j = 0; j < n; j++) {
+        const t = V[(i) * n + j];
+        V[(i) * n + j] = V[(k) * n + j];
+        V[(k) * n + j] = t;
+      }
+    }
+  }
+}
+
 /** C = A·B (n×n) */
 export function matmul(A, B, n) {
   const C = new Float64Array(n * n);
