@@ -40,10 +40,15 @@ try {
   next=wait(m=>m.type==='frame'&&m.N===14&&m.stats.solvent==='water');
   worker.postMessage({type:'preset',preset:PRESETS.find(p=>p.id==='x-hcl-water')});frame=await next;
   assert.equal(frame.stats.forceField,'gfn2');assert.ok(frame.stats.hf.solvation<0);
-  next=wait(m=>m.type==='frame'&&m.stats.t>=399);worker.postMessage({type:'set',paused:true});worker.postMessage({type:'step',n:1000});frame=await next;
-  assert.ok(frame.q[0]<-0.8,`carica del cloro ${frame.q[0]}`);
+  // il protone passa all'acqua e poi oscilla nel legame a idrogeno Cl⁻···H–O⁺: si media la carica del cloro su
+  // otto istanti fra 100 e 800 fs (HCl molecolare: −0,42 e; cloruro: circa −0,9 e)
+  worker.postMessage({type:'set',paused:true});
+  const qs=[];
+  for(let k=1;k<=8;k++){next=wait(m=>m.type==='frame'&&m.stats.t>=100*k-1);worker.postMessage({type:'step',n:250});frame=await next;qs.push(frame.q[0]);}
+  const qmean=qs.reduce((a,b)=>a+b,0)/qs.length;
+  assert.ok(qmean<-0.75&&Math.max(...qs)<-0.55,`carica del cloro ${qs.map(q=>q.toFixed(2)).join(' ')}`);
   // senza solvente: il campo torna al vuoto e il cambio di energia è contato come lavoro
-  next=wait(m=>m.type==='frame'&&m.stats.solvent===null&&m.stats.t>=399);worker.postMessage({type:'set',solvent:null});frame=await next;
+  next=wait(m=>m.type==='frame'&&m.stats.solvent===null&&m.stats.t>=799);worker.postMessage({type:'set',solvent:null});frame=await next;
   assert.equal(frame.stats.hf.solvation,null);
   console.log('Sandbox worker: UHF step, clear, immediate molecular census, fixed time step, ions, GFN2-xTB and ALPB water passed.');
 } finally {await worker.terminate();}

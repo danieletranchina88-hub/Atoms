@@ -6,7 +6,7 @@
 
 import { GFN2 as PAR } from './gfn2Data.js';
 import { buildBasis, moleculeIntegrals, nSph, QIDX, shellPair, pairBuffers } from './gto.js';
-import { eigh } from '../linalg.js';
+import { eigh, eighRows } from '../linalg.js';
 import { ALPBWater } from './alpb.js';
 
 const KB = 3.166808578545117e-6; // costante di Boltzmann in hartree/K
@@ -210,47 +210,57 @@ function atmEnergy(Z, pos, cnd, wantGrad) {
     C6[i * N + j] = c; dC6[i * N + j] = d;
   }
   const r4r2 = D4.r4r2, s9 = DSP.s9, alp = 16 / 3;
-  const r0 = (i, j) => DSP.a1 * Math.sqrt(3 * r4r2[Z[i] - 1] * r4r2[Z[j] - 1]) + DSP.a2;
-  const vec = (i, j) => [pos[3 * j] - pos[3 * i], pos[3 * j + 1] - pos[3 * i + 1], pos[3 * j + 2] - pos[3 * i + 2]];
+  // matrici di coppia precalcolate: distanze al quadrato, vettori R_j − R_i e raggi di smorzamento
+  const R2 = new Float64Array(N * N), RV = new Float64Array(3 * N * N), RR = new Float64Array(N * N);
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = pos[3 * j] - pos[3 * i], y = pos[3 * j + 1] - pos[3 * i + 1], z = pos[3 * j + 2] - pos[3 * i + 2];
+    const o = i * N + j;
+    R2[o] = x * x + y * y + z * z; RV[3 * o] = x; RV[3 * o + 1] = y; RV[3 * o + 2] = z;
+    RR[o] = DSP.a1 * Math.sqrt(3 * r4r2[Z[i] - 1] * r4r2[Z[j] - 1]) + DSP.a2;
+  }
   const cut2 = DISP3_CUTOFF * DISP3_CUTOFF;
   let E = 0;
   const grad = wantGrad ? new Float64Array(3 * N) : null;
   const dEdcn = new Float64Array(N);
+  // ∂e/∂a per la distanza al quadrato a, con b e c le altre due
+  const dda = (a, b, c, s, r3, r5, ang, fdmp, tt) => {
+    const u = a + b - c, v = a - b + c, x = -a + b + c;
+    const ds = v * x + u * x - u * v;
+    const dangda = 0.375 * (ds / r5 - 2.5 * s / (r5 * a)) - 1.5 / (r3 * a);
+    const dfda = fdmp * fdmp * 6 * tt * alp / (2 * a); // fdmp = 1/(1+6 (R0/r1)^alp), r1 = √(a b c)
+    return dangda * fdmp + ang * dfda;
+  };
+  const push = (p, q, f) => {
+    const o = 3 * (p * N + q);
+    for (let d = 0; d < 3; d++) { const v = 2 * f * RV[o + d]; grad[3 * p + d] -= v; grad[3 * q + d] += v; }
+  };
   for (let i = 0; i < N; i++) for (let j = 0; j < i; j++) {
-    const vij = vec(i, j), r2ij = vij[0] ** 2 + vij[1] ** 2 + vij[2] ** 2;
+    const r2ij = R2[i * N + j];
     if (r2ij > cut2) continue;
+    const cij = C6[i * N + j], r0ij = RR[i * N + j];
     for (let k = 0; k < j; k++) {
-      const vik = vec(i, k), vjk = vec(j, k);
-      const r2ik = vik[0] ** 2 + vik[1] ** 2 + vik[2] ** 2, r2jk = vjk[0] ** 2 + vjk[1] ** 2 + vjk[2] ** 2;
+      const r2ik = R2[i * N + k], r2jk = R2[j * N + k];
       if (r2ik > cut2 || r2jk > cut2) continue;
-      const cij = C6[i * N + j], cik = C6[i * N + k], cjk = C6[j * N + k];
+      const cik = C6[i * N + k], cjk = C6[j * N + k];
       const c9 = Math.sqrt(Math.abs(cij * cik * cjk));
-      const R0 = r0(i, j) * r0(i, k) * r0(j, k);
+      const R0 = r0ij * RR[i * N + k] * RR[j * N + k];
       const r2 = r2ij * r2ik * r2jk, r1 = Math.sqrt(r2), r3 = r1 * r2, r5 = r3 * r2;
-      const tt = (R0 / r1) ** alp, fdmp = 1 / (1 + 6 * tt);
+      const tt = Math.pow(R0 / r1, alp), fdmp = 1 / (1 + 6 * tt);
       const s = (r2ij + r2jk - r2ik) * (r2ij - r2jk + r2ik) * (-r2ij + r2jk + r2ik);
       const ang = 0.375 * s / r5 + 1 / r3;
       const e = s9 * c9 * ang * fdmp;
       E += e;
       if (!grad) continue;
-      // derivate rispetto ai quadrati delle distanze a = r²ij, r²ik, r²jk
-      const de = [0, 1, 2].map(w => {
-        const [a, b, c] = w === 0 ? [r2ij, r2jk, r2ik] : w === 1 ? [r2ik, r2jk, r2ij] : [r2jk, r2ij, r2ik];
-        const u = a + b - c, v = a - b + c, x = -a + b + c;
-        const ds = v * x + u * x - u * v;
-        const dangda = 0.375 * (ds / r5 - 2.5 * s / (r5 * a)) - 1.5 / (r3 * a);
-        // fdmp = 1/(1+6 (R0/r1)^alp), r1 = √(a b c): ∂fdmp/∂a = fdmp² · 6 tt · alp /(2a)
-        const dfda = fdmp * fdmp * 6 * tt * alp / (2 * a);
-        return s9 * c9 * (dangda * fdmp + ang * dfda);
-      });
-      const add = (p, q, v, f) => { for (let d = 0; d < 3; d++) { grad[3 * p + d] -= 2 * f * v[d]; grad[3 * q + d] += 2 * f * v[d]; } };
-      add(i, j, vij, de[0]); add(i, k, vik, de[1]); add(j, k, vjk, de[2]);
+      const f = s9 * c9;
+      push(i, j, f * dda(r2ij, r2jk, r2ik, s, r3, r5, ang, fdmp, tt));
+      push(i, k, f * dda(r2ik, r2jk, r2ij, s, r3, r5, ang, fdmp, tt));
+      push(j, k, f * dda(r2jk, r2ij, r2ik, s, r3, r5, ang, fdmp, tt));
       // dipendenza di C9 dai CN: ∂c9/∂C6ij = c9/(2 C6ij)
       if (c9 > 0) {
-        const f = e / 2;
-        dEdcn[i] += f * (dC6[i * N + j] / cij + dC6[i * N + k] / cik);
-        dEdcn[j] += f * (dC6[j * N + i] / cij + dC6[j * N + k] / cjk);
-        dEdcn[k] += f * (dC6[k * N + i] / cik + dC6[k * N + j] / cjk);
+        const h = e / 2;
+        dEdcn[i] += h * (dC6[i * N + j] / cij + dC6[i * N + k] / cik);
+        dEdcn[j] += h * (dC6[j * N + i] / cij + dC6[j * N + k] / cjk);
+        dEdcn[k] += h * (dC6[k * N + i] / cik + dC6[k * N + j] / cjk);
       }
     }
   }
@@ -296,7 +306,7 @@ export class GFN2xTB {
     Object.assign(this, { Tel, maxIter, etol, ptol, damp, field, solvent });
     this.guess = null; // vettore (cariche di shell, dipoli, quadrupoli) dell'ultimo calcolo, per ripartire
   }
-  reset() { this.guess = null; }
+  reset() { this.guess = null; this.guessPrev = null; }
 
   /**
    * Z: numeri atomici; pos: coordinate in bohr (3N); charge: carica totale; uhf: elettroni spaiati (Nα − Nβ).
@@ -306,7 +316,7 @@ export class GFN2xTB {
     const N = Z.length;
     if (!gfn2Supports(Z)) throw new Error('GFN2-xTB è parametrizzato solo da H a Rn');
     const key = Z.join(',');
-    if (this.basisKey !== key) { this.basis = buildBasis(Z, EL); this.basisKey = key; this.guess = null; }
+    if (this.basisKey !== key) { this.basis = buildBasis(Z, EL); this.basisKey = key; this.guess = null; this.guessPrev = null; }
     const bas = this.basis, n = bas.nao, sh = bas.shells, nsh = sh.length;
     const { S, D, Q, derivs } = moleculeIntegrals(bas, pos, { withGrad: gradient });
     // quadrupoli a traccia nulla: 1,5 r_a r_b − ½ δ_ab r²
@@ -396,35 +406,47 @@ export class GFN2xTB {
     if (na < 0 || nb < 0) throw new Error('numero di elettroni e spin incompatibili');
     const kT = Math.max(KB * this.Tel, 1e-12);
 
-    // ortogonalizzazione di Löwdin X = S^{−1/2}
-    const es = eigh(S, n);
-    const X = new Float64Array(n * n);
-    for (let k = 0; k < n; k++) {
-      const f = 1 / Math.sqrt(Math.max(es.values[k], 1e-10));
-      for (let i = 0; i < n; i++) { const v = es.vectors[i * n + k] * f; if (v) for (let j = 0; j < n; j++) X[i * n + j] += v * es.vectors[j * n + k]; }
-    }
+    // ortogonalizzazione: Cholesky S = L Lᵀ (metà dei prodotti di Löwdin); Löwdin se S è quasi singolare
+    const X = orthogonalizer(S, n);
 
     // ---- ciclo autoconsistente ----
     const nvar = nsh + 3 * N + 6 * N;
-    let x = this.guess && this.guess.length === nvar ? Float64Array.from(this.guess) : new Float64Array(nvar);
-    const mixer = new Broyden(nvar, this.damp);
+    // partenza: estrapolazione lineare delle ultime due soluzioni (dinamica), altrimenti l'ultima, altrimenti zero
+    let x;
+    const g1 = this.guess, g0 = this.guessPrev;
+    if (g1 && g1.length === nvar && g0 && g0.length === nvar) { x = new Float64Array(nvar); for (let k = 0; k < nvar; k++) x[k] = 2 * g1[k] - g0[k]; }
+    else x = g1 && g1.length === nvar ? Float64Array.from(g1) : new Float64Array(nvar);
     const F = new Float64Array(n * n), P = new Float64Array(n * n);
-    let Eel = 0, Eold = 0, converged = false, iter = 0, last = null;
-    for (iter = 1; iter <= this.maxIter; iter++) {
-      const pot = this._potentials(x, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos, solv });
-      this._fock(F, H0, S, D, Qt, pot, bas, nsh);
-      const orb = solveFock(F, X, n);
-      const occ = fermiOccupations(orb.e, na, nb, kT);
-      density(P, orb, occ.f);
-      const xo = this._moments(P, S, D, Qt, bas, n0, N, nsh);
-      Eel = this._electronicEnergy(P, H0, xo, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos, solv }) + occ.ts;
-      let diff = 0;
-      for (let k = 0; k < nvar; k++) diff = Math.max(diff, Math.abs(xo[k] - x[k]));
-      last = { orb, occ, xo };
-      if (iter > 1 && diff < this.ptol && Math.abs(Eel - Eold) < this.etol) { converged = true; x = xo; break; }
-      Eold = Eel;
-      x = mixer.next(x, xo);
+    let Eel = 0, converged = false, iter = 0, last = null;
+    // tentativi di miscelamento: lo smorzamento predefinito converge in fretta nelle molecole; nei sistemi quasi
+    // metallici (gap di pochi centesimi di eV) gli elettroni oscillano fra gli atomi e serve uno smorzamento più forte.
+    // Si riparte sempre dalla soluzione con il residuo più piccolo; la temperatura elettronica non viene toccata.
+    const attempts = [[this.damp, Math.min(this.maxIter, 80)], [0.2, 200], [0.1, 300]];
+    let best = { diff: Infinity, x: Float64Array.from(x) };
+    for (const [damp, maxIt] of attempts) {
+      const mixer = new Broyden(nvar, damp);
+      x = Float64Array.from(best.x);
+      let Eold = 0;
+      for (let it = 1; it <= maxIt; it++) {
+        iter++;
+        const pot = this._potentials(x, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos, solv });
+        this._fock(F, H0, S, D, Qt, pot, bas, nsh);
+        const orb = solveFock(F, X, n);
+        const occ = fermiOccupations(orb.e, na, nb, kT);
+        density(P, orb, occ.f);
+        const xo = this._moments(P, S, D, Qt, bas, n0, N, nsh);
+        Eel = this._electronicEnergy(P, H0, xo, { N, nsh, sh, gamma, hd, amSD, amDD, amSQ, dk, qk, Z, d4, pos, solv }) + occ.ts;
+        let diff = 0;
+        for (let k = 0; k < nvar; k++) diff = Math.max(diff, Math.abs(xo[k] - x[k]));
+        last = { orb, occ, xo };
+        if (it > 1 && diff < this.ptol && Math.abs(Eel - Eold) < this.etol) { converged = true; x = xo; break; }
+        if (diff < best.diff) best = { diff, x: Float64Array.from(x) };
+        Eold = Eel;
+        x = mixer.next(x, xo);
+      }
+      if (converged) break;
     }
+    this.guessPrev = this.guess && this.guess.length === nvar ? this.guess : null;
     this.guess = Float64Array.from(last.xo);
     const { orb, occ, xo } = last;
     const qsh = xo.subarray(0, nsh);
@@ -440,9 +462,7 @@ export class GFN2xTB {
       dipole, converged, iterations: iter, orbitalEnergies: orb.e, occupations: occ.f, nao: n,
       homoLumo: frontier(orb.e, occ.f), cn,
     };
-    const PS = new Float64Array(n * n);
-    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = P[i * n + k]; if (a) for (let j = 0; j < n; j++) PS[i * n + j] += a * S[k * n + j]; }
-    this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), PS, S, Ct: orb.Ct, nC: orb.nC, e: orb.e, f: occ.f, fa: occ.fa, fb: occ.fb, basis: bas, n };
+    this.last = { Z: Z.slice(), pos: Float64Array.from(pos), P: Float64Array.from(P), S, Ct: orb.Ct, nC: orb.nC, e: orb.e, f: occ.f, fa: occ.fa, fb: occ.fb, basis: bas, n };
     if (gradient) {
       res.gradient = this._gradient({ Z, pos, N, n, nsh, sh, bas, P, orb, occ, xo, cng, se, hfac, pk, dpk, S, D, Qt, derivs, x, eta, gamma, hd, mrad, dk, qk, d4, atm, rep, kT, amSD, amDD, amSQ, solv });
     }
@@ -679,25 +699,93 @@ export class GFN2xTB {
 /* algebra della funzione d'onda                                       */
 /* ------------------------------------------------------------------ */
 
-function solveFock(F, X, n) {
-  // F' = X F X (simmetrica: si calcola solo il triangolo superiore), poi autovalori e autovettori di F'
-  const T = new Float64Array(n * n), Fp = new Float64Array(n * n);
-  for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = X[i * n + k]; if (a) for (let j = 0; j < n; j++) T[i * n + j] += a * F[k * n + j]; }
-  for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = T[i * n + k]; if (a) for (let j = i; j < n; j++) Fp[i * n + j] += a * X[k * n + j]; }
-  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) Fp[i * n + j] = Fp[j * n + i];
-  const { values, vectors } = eigh(Fp, n);
-  return { e: values, V: vectors, X, n, Ct: null, nC: 0 };
+/**
+ * Matrice di ortogonalizzazione. Di norma l'inversa del fattore di Cholesky (triangolare inferiore, S = L Lᵀ,
+ * F' = L⁻¹ F L⁻ᵀ, C = L⁻ᵀ V); se S è mal condizionata (atomi quasi sovrapposti) Löwdin canonico S^(−1/2).
+ */
+function orthogonalizer(S, n) {
+  const L = new Float64Array(n * n);
+  let ok = true;
+  for (let j = 0; j < n && ok; j++) {
+    let d = S[j * n + j];
+    for (let k = 0; k < j; k++) d -= L[j * n + k] * L[j * n + k];
+    if (!(d > 1e-8)) { ok = false; break; }
+    const ljj = Math.sqrt(d);
+    L[j * n + j] = ljj;
+    for (let i = j + 1; i < n; i++) {
+      let v = S[i * n + j];
+      const ri = i * n, rj = j * n;
+      for (let k = 0; k < j; k++) v -= L[ri + k] * L[rj + k];
+      L[ri + j] = v / ljj;
+    }
+  }
+  if (ok) {
+    // inversa di una triangolare inferiore per sostituzione in avanti, riga per riga
+    const Li = new Float64Array(n * n);
+    for (let i = 0; i < n; i++) {
+      const ri = i * n, inv = 1 / L[ri + i];
+      Li[ri + i] = inv;
+      for (let j = 0; j < i; j++) {
+        let v = 0;
+        for (let k = j; k < i; k++) v += L[ri + k] * Li[k * n + j];
+        Li[ri + j] = -v * inv;
+      }
+    }
+    return { kind: 'chol', M: Li };
+  }
+  const es = eigh(S, n), X = new Float64Array(n * n);
+  for (let k = 0; k < n; k++) {
+    const f = 1 / Math.sqrt(Math.max(es.values[k], 1e-10));
+    for (let i = 0; i < n; i++) { const v = es.vectors[i * n + k] * f; if (v) for (let j = 0; j < n; j++) X[i * n + j] += v * es.vectors[j * n + k]; }
+  }
+  return { kind: 'sym', M: X };
 }
 
-/** Coefficienti degli orbitali 0 … m−1 nella base atomica, per righe: Ct[k·n + μ] = C_μk = Σ_m X_μm V_mk. */
+// spazio di lavoro riutilizzato fra le iterazioni (niente allocazioni nel ciclo SCF)
+let work = { n: 0, T: null, Fp: null };
+function scratch(n) {
+  if (work.n !== n) work = { n, T: new Float64Array(n * n), Fp: new Float64Array(n * n) };
+  return work;
+}
+
+function solveFock(F, X, n) {
+  // F' = X F Xᵀ (simmetrica: si calcola solo il triangolo superiore), poi autovalori e autovettori di F'
+  const { T, Fp } = scratch(n), M = X.M;
+  T.fill(0);
+  if (X.kind === 'chol') {
+    for (let i = 0; i < n; i++) {
+      const ri = i * n;
+      for (let k = 0; k <= i; k++) { const a = M[ri + k]; if (a) { const rk = k * n; for (let j = 0; j < n; j++) T[ri + j] += a * F[rk + j]; } }
+    }
+    for (let i = 0; i < n; i++) {
+      const ri = i * n;
+      for (let j = i; j < n; j++) {
+        const rj = j * n;
+        let v = 0;
+        for (let k = 0; k <= j; k++) v += T[ri + k] * M[rj + k];
+        Fp[ri + j] = v;
+      }
+    }
+  } else {
+    Fp.fill(0);
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = M[i * n + k]; if (a) for (let j = 0; j < n; j++) T[i * n + j] += a * F[k * n + j]; }
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) { const a = T[i * n + k]; if (a) for (let j = i; j < n; j++) Fp[i * n + j] += a * M[k * n + j]; }
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) Fp[i * n + j] = Fp[j * n + i];
+  // diagonalizzazione sul posto: Fp è spazio di lavoro e diventa la matrice degli autovettori (letta subito dopo)
+  const { values, rows } = eighRows(Fp, n, true);
+  return { e: values, V: rows, X, n, Ct: null, nC: 0 };
+}
+
+/** Coefficienti degli orbitali 0 … m−1 nella base atomica, per righe: Ct[k·n + μ] = C_μk = Σ_q Xᵀ_μq V_qk (V per righe). */
 function backTransform(orb, m) {
-  const { X, V, n } = orb;
+  const { X, V, n } = orb, M = X.M, tri = X.kind === 'chol';
   const Ct = new Float64Array(m * n);
   for (let k = 0; k < m; k++) for (let q = 0; q < n; q++) {
-    const v = V[q * n + k];
+    const v = V[k * n + q];
     if (!v) continue;
-    const row = k * n, xr = q * n;
-    for (let i = 0; i < n; i++) Ct[row + i] += X[xr + i] * v;
+    const row = k * n, xr = q * n, top = tri ? q + 1 : n;
+    for (let i = 0; i < top; i++) Ct[row + i] += M[xr + i] * v;
   }
   orb.Ct = Ct; orb.nC = m;
 }
@@ -765,7 +853,8 @@ const fermi = (x) => x > 0 ? Math.exp(-x) / (1 + Math.exp(-x)) : 1 / (1 + Math.e
 function density(P, orb, f) {
   let m = 0;
   for (let k = 0; k < f.length; k++) if (f[k] > 1e-14) m = k + 1;
-  backTransform(orb, Math.min(f.length, m + 1));
+  // occupati più sei virtuali (LUMO … LUMO+5) per il disegno e il diagramma dei livelli
+  backTransform(orb, Math.min(f.length, m + 6));
   const w = new Float64Array(orb.nC);
   for (let k = 0; k < orb.nC; k++) w[k] = f[k] > 1e-14 ? f[k] : 0;
   weightedSum(P, orb, w);

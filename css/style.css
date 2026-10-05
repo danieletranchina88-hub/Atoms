@@ -869,3 +869,13 @@ body[data-mode="beaker"] #analysis .data-table th:nth-child(4) { width: 15%; }
 .sb-rx.dim { border-left-color: var(--line); color: var(--muted); }
 .sb-rx span { color: #9ab; font-variant-numeric: tabular-nums; }
 body[data-mode="sandbox"] .viewport-title { z-index: 4; }
+
+/* pannello "Elettroni" della sandbox: coppie localizzate e diagramma dei livelli */
+.lmo-list { list-style: none; margin: 4px 0 10px; padding: 0; font-size: 0.86rem; line-height: 1.55; }
+.lmo-list li { padding: 2px 0; border-bottom: 1px dashed var(--line); }
+.lmo-list .linkish { font-weight: 600; margin-right: 6px; }
+.lmo-list .linkish[aria-pressed="true"] { color: var(--accent); }
+.lmo-list .swatch { margin-right: 5px; }
+#sb-elec h4 { margin: 10px 0 2px; font-size: 0.86rem; letter-spacing: 0.02em; color: var(--muted); }
+.mo-diagram { width: 100%; max-width: 320px; height: auto; display: block; margin: 6px 0; font-family: var(--font-mono); }
+.mo-diagram g[data-mo]:hover line { stroke: var(--accent); }

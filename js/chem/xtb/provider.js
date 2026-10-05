@@ -26,7 +26,8 @@ export function gfn2Feasible(Z) {
  * field: campo elettrico uniforme [Ex, Ey, Ez] in V/Å; solvent: 'water' (solvente implicito ALPB) oppure null.
  */
 export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null, solvent = null } = {}) {
-  const calc = new GFN2xTB({ Tel, etol: 1e-9, ptol: 1e-6, solvent });
+  // tolleranza SCF per la dinamica: con 1e-5 la deriva NVE è la stessa che con 1e-6 (domina l'integratore), con il 30 % di iterazioni in meno
+  const calc = new GFN2xTB({ Tel, etol: 1e-9, ptol: 1e-5, solvent });
   let charge = 0, uhfUsed = null, fieldVA = null;
   const setField = (f) => {
     fieldVA = f && f.some(v => v) ? f.slice() : null;
@@ -41,6 +42,7 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null,
     setField,
     get field() { return fieldVA; },
     setSolvent(sv) { calc.solvent = sv || null; calc.reset(); },
+    _setTol(ptol, etol = Math.min(1e-9, ptol * ptol * 10)) { calc.ptol = ptol; calc.etol = etol; },
     get solvent() { return calc.solvent; },
     compute(Z, pos, F, ctx = {}) {
       if ((ctx.charge ?? 0) !== charge) { charge = ctx.charge ?? 0; calc.reset(); }
@@ -70,7 +72,11 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null,
       return { E: r.energy * HARTREE_EV, parts, q: Float64Array.from(r.charges), bonds, hbonds: [], spin };
     },
     /** Funzione d'onda per il disegno: densità di valenza, HOMO e LUMO nella base STO-nG di GFN2. */
-    wavefunction() {
+    /**
+     * Funzione d'onda per il disegno. Con { occupied: true } aggiunge gli orbitali doppiamente occupati (per la
+     * localizzazione); levels contiene sempre tutte le energie orbitali e le occupazioni (diagramma dei livelli).
+     */
+    wavefunction({ occupied = false } = {}) {
       const w = calc.last;
       if (!w) return null;
       const n = w.n;
@@ -80,24 +86,39 @@ export function makeGFN2Provider({ Tel = 300, multiplicity = null, field = null,
       const { Ps } = spinDensity(w, w.Z.length);
       const orbitals = [];
       for (let k = Math.max(0, ho - 5); k < Math.min(w.nC, ho + 7); k++) orbitals.push({ ...vec(k), id: `MO:${k}`, index: k, occ: w.f[k] });
-      return { kind: 'xtb', Ps, orbitals, Z: w.Z.slice(), pos: Float64Array.from(w.pos, v => v * BOHR_ANG), n, P: w.P, homo: vec(ho), lumo: vec(lu), eUnit: HARTREE_EV };
+      const levels = { e: Float64Array.from(w.e), f: Float64Array.from(w.f), homo: ho };
+      let occ = null;
+      if (occupied) {
+        let m = 0;
+        while (m < w.nC && w.f[m] > 1.5) m++;
+        occ = { n, m, Ct: w.Ct.slice(0, m * n) };
+      }
+      return { kind: 'xtb', Ps, orbitals, levels, occ, Z: w.Z.slice(), pos: Float64Array.from(w.pos, v => v * BOHR_ANG), n, P: w.P, homo: vec(ho), lumo: vec(lu), eUnit: HARTREE_EV };
     },
   };
   return provider;
 }
 
-/** Ordini di legame di Mayer B_AB = Σ_{μ∈A, ν∈B} (PS)_μν (PS)_νμ. */
+/**
+ * Ordini di legame di Mayer B_AB = Σ_{μ∈A, ν∈B} (PS)_μν (PS)_νμ, solo per le coppie entro 4,5 Å
+ * (oltre l'ordine di legame è trascurabile): costa O(coppie vicine · n) invece del prodotto completo P·S.
+ */
 function mayerBonds(w, N) {
-  if (!w?.PS) return [];
-  const { PS, n, basis } = w;
-  const B = new Float64Array(N * N), at = basis.aoAtom;
-  for (let mu = 0; mu < n; mu++) for (let nu = 0; nu < n; nu++) {
-    const A = at[mu], C = at[nu];
-    if (A >= C) continue;
-    B[A * N + C] += PS[mu * n + nu] * PS[nu * n + mu];
-  }
+  if (!w?.P || !w.S) return [];
+  const { P, S, n, basis, pos } = w;
+  const first = new Int32Array(N + 1);
+  for (let mu = 0; mu < n; mu++) first[basis.aoAtom[mu] + 1] = mu + 1;
+  for (let A = 1; A <= N; A++) first[A] = Math.max(first[A], first[A - 1]);
+  const cut2 = (4.5 / BOHR_ANG) ** 2;
+  const ps = (mu, nu) => { let v = 0; const r = mu * n; for (let k = 0; k < n; k++) v += P[r + k] * S[k * n + nu]; return v; };
   const bonds = [];
-  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) if (B[i * N + j] > 0.1) bonds.push({ i, j, n: B[i * N + j], w: 1 });
+  for (let A = 0; A < N; A++) for (let C = A + 1; C < N; C++) {
+    const dx = pos[3 * A] - pos[3 * C], dy = pos[3 * A + 1] - pos[3 * C + 1], dz = pos[3 * A + 2] - pos[3 * C + 2];
+    if (dx * dx + dy * dy + dz * dz > cut2) continue;
+    let b = 0;
+    for (let mu = first[A]; mu < first[A + 1]; mu++) for (let nu = first[C]; nu < first[C + 1]; nu++) b += ps(mu, nu) * ps(nu, mu);
+    if (b > 0.1) bonds.push({ i: A, j: C, n: b, w: 1 });
+  }
   return bonds;
 }
 
