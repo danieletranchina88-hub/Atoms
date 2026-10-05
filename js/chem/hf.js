@@ -63,7 +63,7 @@ function dot(a, b) {
 /**
  * Calcolo Hartree–Fock.
  * @param atoms [{Z, xyz (bohr)}]
- * @param opts { basis, charge, multiplicity, maxIter, conv, eri (riuso), onProgress }
+ * @param opts { basis, charge, multiplicity, maxIter, conv, eri (riuso), onProgress, bias: {a, b} aggiunte alle Fock α e β }
  */
 export function runHF(atoms, opts = {}) {
   const basisName = opts.basis ?? 'STO-3G';
@@ -140,6 +140,9 @@ export function runHF(atoms, opts = {}) {
     let Eel = 0;
     for (let i = 0; i < n * n; i++) Eel += 0.5 * (Pa[i] * (H[i] + Fa[i]) + Pb[i] * (H[i] + Fb[i]));
     E = Eel + Enuc;
+    // polarizzazione di spin imposta (solo per preparare una stima iniziale a simmetria rotta): entra nella Fock da
+    // diagonalizzare, non nell'energia
+    if (opts.bias) for (let i = 0; i < n * n; i++) { Fa[i] += opts.bias.a[i]; Fb[i] += opts.bias.b[i]; }
 
     const ea = diisError(Fa, Pa, S, X, n);
     const eb = unrestricted ? diisError(Fb, Pb, S, X, n) : null;

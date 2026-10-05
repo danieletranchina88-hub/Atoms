@@ -25,6 +25,26 @@ Il reattore è un bilancio per una sola reazione bilanciata a T,V fissi:
 - Non è una simulazione del tempo: nessuna velocità è dedotta da ΔG. Reazioni concorrenti, condensazione e non idealità escluse.
 - Per K estremi l'equilibrio può essere indistinguibile numericamente dal limite stechiometrico. Il programma dichiara questo limite.
 
+## Come nasce un legame
+
+Per ogni molecola biatomica la distanza R fra i nuclei viene variata da circa 2,4 r<sub>e</sub> (o r<sub>e</sub> + 3,4 Å) fino a 0,6 r<sub>e</sub>; a ogni R l'hamiltoniano elettronico non relativistico con nuclei fissi viene risolto nella base gaussiana scelta (STO-3G, 6-31G, 6-31G\*\*):
+
+- **RHF** e **UHF** (Hartree–Fock ristretto e non ristretto, DIIS). Ogni distanza parte dalla densità della distanza vicina già risolta. Per UHF di singoletto si fanno due passate e si tiene a ogni R l'energia più bassa: una dagli atomi separati verso l'interno, con le densità UHF degli atomi liberi e lo spin dell'atomo B invertito (più una breve SCF con un termine che spinge α verso A e β verso B, che non entra nell'energia); l'altra dall'equilibrio verso l'esterno, ruotando l'HOMO α verso il LUMO e l'HOMO β in verso opposto. La distanza più grande a cui UHF coincide con RHF (⟨S²⟩ < 0,01) è il punto di Coulson–Fischer.
+- **FCI per due elettroni** (H₂): Ψ = Σ c<sub>pq</sub> φ<sub>p</sub>(1) φ<sub>q</sub>(2) con c simmetrica negli orbitali RHF; (Hc)<sub>pq</sub> = Σ h<sub>pr</sub> c<sub>rq</sub> + Σ c<sub>ps</sub> h<sub>sq</sub> + Σ (pr|qs) c<sub>rs</sub>, diagonalizzata nello spazio delle coppie p ≥ q. Matrice densità γ = 2 c c, occupazioni naturali dai suoi autovalori.
+- **GFN2-xTB** con atomi liberi calcolati con lo stesso metodo (anche H⁺).
+
+Analisi della funzione d'onda:
+
+- *Orbitali atomici di riferimento*: per ogni atomo libero (UHF ad alto spin nella stessa base) si costruisce la Fock degli elettroni α con le densità di spin mediate sfericamente, F = H + J[P̄<sub>α</sub> + P̄<sub>β</sub>] − K[P̄<sub>α</sub>], e la si diagonalizza separatamente nelle classi di parità (x, y, z) delle funzioni cartesiane: si ottengono 1s, 2s, 2p<sub>x</sub>, 2p<sub>y</sub>, 2p<sub>z</sub>… con ε ≈ −energia di ionizzazione (Koopmans). Insieme coprono esattamente la base dell'atomo.
+- *Composizione*: un orbitale molecolare c viene riscritto in questa base, d<sub>a</sub> = u<sub>a</sub>ᵀ S<sub>AA</sub> c<sub>A</sub>, e il peso dell'orbitale atomico a è la popolazione di Mulliken d<sub>a</sub>(Uᵀ S c)<sub>a</sub>.
+- *Simmetria*: σ, π, δ dal peso delle componenti cartesiane dispari in x e y; g/u dal segno di ⟨φ|î φ⟩ (solo se |⟨φ|î φ⟩| > 0,8: nelle soluzioni UHF a simmetria rotta gli orbitali sono localizzati).
+- *Carattere*: popolazione di sovrapposizione 2 Σ<sub>μ∈A,ν∈B</sub> c<sub>μ</sub> c<sub>ν</sub> S<sub>μν</sub> (> 0,03 legante, < −0,03 antilegante). Ordine di legame di Mayer, cariche e spin di Mulliken.
+- *Densità di legame*: Δρ = ρ − ρ<sub>pro</sub>, con ρ<sub>pro</sub> la somma delle densità sferiche degli atomi liberi alla stessa distanza.
+- *Energia cinetica e potenziale*: teorema del viriale molecolare 2T + V = −R dE/dR (Slater 1933), che con E = T + V dà ΔT = −ΔE − R dE/dR e ΔV = 2ΔE + R dE/dR rispetto agli atomi (per i quali T = −E). dE/dR con differenze finite di Lagrange a tre punti sulla griglia non uniforme. Si usa la curva e non ⟨T⟩ della funzione d'onda perché, con gaussiane non riscalate, −⟨V⟩/⟨T⟩ differisce da 2 di qualche millesimo: un errore di alcuni eV sull'energia cinetica totale di N₂, più grande delle variazioni dovute al legame. Il rapporto della funzione d'onda è comunque mostrato come controllo.
+- *Costanti dalla curva*: cubica per i quattro punti attorno al minimo → r<sub>e</sub>, curvatura k, ω<sub>e</sub> = √(k/μ)/(2πc) con le masse isotopiche; D<sub>e</sub> rispetto agli atomi liberi. Un minimo meno profondo di un decimo di D<sub>e</sub> sperimentale è indicato come "non legato".
+
+Esperimento (js/chem/diatomicData.js): ω<sub>e</sub>, ω<sub>e</sub>x<sub>e</sub>, B<sub>e</sub>, r<sub>e</sub> dello stato X da Huber e Herzberg (1979) tramite il NIST Chemistry WebBook; D<sub>0</sub> dalle fonti citate per ogni molecola, D<sub>e</sub> = D<sub>0</sub> + ω<sub>e</sub>/2 − ω<sub>e</sub>x<sub>e</sub>/4. Verifica: per H₂ e H₂⁺ questo D<sub>e</sub> coincide entro 1 meV con i valori teorici esatti. La curva sperimentale è il potenziale di Morse V = D<sub>e</sub>(1 − e<sup>−β(R−r<sub>e</sub>)</sup>)² − D<sub>e</sub>, β = ω<sub>e</sub>√(μ/2D<sub>e</sub>).
+
 ## Elettrochimica
 
 [IUPAC: equazione di Nernst](https://goldbook.iupac.org/terms/view/09068): E = E° − RT/(nF) Σνᵢ ln aᵢ. Ogni semireazione possiede stechiometria esplicita: include H⁺ per H₂, O₂ e MnO₄⁻, le specie ridotte solubili e le pressioni dei gas.
