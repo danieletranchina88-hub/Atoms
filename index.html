@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Atlante Orbitale</title>
-<meta name="description" content="Simulazione quantistica degli atomi: orbitali s, p, d, f di tutti i 118 elementi calcolati con un metodo autoconsistente (DFT-LDA), legami σ e π e orbitali ibridi.">
+<title>Atoms · Tavola periodica e Sandbox</title>
+<meta name="description" content="Tavola periodica con visualizzazione 3D di atomi e orbitali (DFT-LDA) e sandbox di dinamica molecolare reattiva.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
@@ -24,22 +24,13 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">ψ</span>
       <div>
-        <h1>Atlante Orbitale</h1>
-        <p class="brand-sub">Simulazioni di chimica · modelli, misure, verifiche</p>
+        <h1>Atoms</h1>
+        <p class="brand-sub">Tavola periodica · Atomi e orbitali · Sandbox quantistica</p>
       </div>
     </div>
     <nav class="modes" role="tablist" aria-label="Modalità">
-      <button type="button" role="tab" id="mode-atom" data-mode="atom" aria-selected="true">Atomo</button>
-      <button type="button" role="tab" id="mode-orbital" data-mode="orbital" aria-selected="false">Orbitale</button>
-      <button type="button" role="tab" id="mode-bond" data-mode="bond" aria-selected="false">Legami σ π</button>
-      <button type="button" role="tab" id="mode-formation" data-mode="formation" aria-selected="false">Come nasce un legame</button>
-      <button type="button" role="tab" id="mode-molecule" data-mode="molecule" aria-selected="false">Molecole</button>
-      <button type="button" role="tab" id="mode-reaction" data-mode="reaction" aria-selected="false">Reazioni</button>
-      <button type="button" role="tab" id="mode-lab" data-mode="lab" aria-selected="false">Laboratorio</button>
+      <button type="button" role="tab" id="mode-atom" data-mode="atom" aria-selected="true">Atomo · Orbitali</button>
       <button type="button" role="tab" id="mode-sandbox" data-mode="sandbox" aria-selected="false">Sandbox</button>
-      <button type="button" role="tab" id="mode-phase" data-mode="phase" aria-selected="false">Fasi · MD</button>
-      <button type="button" role="tab" id="mode-beaker" data-mode="beaker" aria-selected="false">Becher</button>
-      <button type="button" role="tab" id="mode-kinetics" data-mode="kinetics" aria-selected="false">Cinetica</button>
     </nav>
     <button type="button" class="icon-btn" id="theme-toggle" aria-label="Cambia tema chiaro/scuro">◐</button>
   </header>
@@ -174,84 +165,18 @@
         <p>Il colore indica il segno (fase) di ψ, che conta quando gli orbitali si combinano nei legami.</p>
       </article>
       <article>
-        <h3>4 · Legami: LCAO e ibridazione</h3>
-        <p>Gli orbitali molecolari sono combinazioni lineari degli orbitali atomici calcolati (LCAO), con i due nuclei alla distanza di legame sperimentale:</p>
-        <p class="eq">σ = φ<sub>A</sub> + φ<sub>B</sub>,&nbsp;&nbsp; σ* = φ<sub>A</sub> − φ<sub>B</sub>,&nbsp;&nbsp; π = p<sub>x,A</sub> + p<sub>x,B</sub></p>
-        <p>Gli ibridi sono combinazioni matematiche di orbitali atomici. Le etichette sp³d e sp³d² non dimostrano il coinvolgimento di orbitali d nei legami ipervalenti. Poiché s, p e d sono autostati dello stesso hamiltoniano, l'energia di un ibrido è esattamente la media pesata Σ c²ε.</p>
-      </article>
-      <article>
-        <h3>5 · Molecole: Hartree–Fock ab initio</h3>
-        <p>Per le molecole si risolvono le equazioni di Roothaan–Hall su basi di gaussiane contratte (STO-3G, 3-21G, 6-31G, 6-31G*, 6-31G**) del Basis Set Exchange:</p>
-        <p class="eq">F C = S C ε,&nbsp;&nbsp; F<sub>μν</sub> = H<sub>μν</sub> + Σ P<sub>λσ</sub>[(μν|λσ) − ½(μλ|νσ)]</p>
-        <p>Gli integrali sono calcolati con lo schema di McMurchie–Davidson e la funzione di Boys; la convergenza è accelerata con DIIS. Le molecole con elettroni spaiati usano UHF. Alcuni casi di test concordano con PySCF entro 10⁻¹¹ hartree; questo verifica l’implementazione, non l’esattezza sperimentale del modello HF.</p>
-      </article>
-      <article>
-        <h3>6 · Geometria, vibrazioni, correlazione</h3>
-        <p>Le forze sui nuclei vengono dal gradiente analitico dell'energia; la geometria si ottimizza con un metodo quasi-Newton (Hessiana di Lindh, BFGS, RFO). Le frequenze vengono dalle derivate seconde, con i modi normali e le intensità IR:</p>
-        <p class="eq">ν̃<sub>k</sub> = √λ<sub>k</sub> / 2πc,&nbsp;&nbsp; I<sub>k</sub> ∝ |∂μ/∂Q<sub>k</sub>|²</p>
-        <p>La correlazione elettronica si aggiunge con la teoria perturbativa di Møller–Plesset al secondo ordine (MP2).</p>
-      </article>
-      <article>
-        <h3>7 · Chimica classica dalla struttura</h3>
-        <p>Dal grafo della molecola (letto da SMILES) si cercano tutte le strutture di Lewis che minimizzano cariche formali e ottetti incompleti, cioè le strutture di risonanza. Da lì: cariche formali, numeri di ossidazione (elettroni di legame all'atomo più elettronegativo, scala di Pauling), notazione VSEPR AX<sub>n</sub>E<sub>m</sub> e ibridazione.</p>
-        <p class="eq">CF = V − N<sub>non leg.</sub> − ½ N<sub>leg.</sub>,&nbsp;&nbsp; % ionico = 1 − e<sup>−(Δχ)²/4</sup></p>
-        <p>La geometria di partenza nasce dalla repulsione dei domini elettronici (Gillespie). Il confronto con l'ordine di legame di Mayer, calcolato dalla funzione d'onda, mostra dove il modello di Lewis funziona e dove no.</p>
-      </article>
-      <article>
-        <h3>8 · Termodinamica statistica e reazioni</h3>
-        <p>Dalle frequenze e dai momenti d'inerzia si costruiscono le funzioni di partizione (gas ideale, rotore rigido, oscillatore armonico):</p>
-        <p class="eq">S = R[ln q + T ∂ln q/∂T],&nbsp;&nbsp; H = E<sub>el</sub> + ZPE + E<sub>term</sub> + RT</p>
-        <p class="eq">ΔG° = ΔH° − TΔS°,&nbsp;&nbsp; K = e<sup>−ΔG°/RT</sup></p>
-        <p>Il numero di simmetria σ viene dal gruppo puntuale, riconosciuto automaticamente dagli elementi di simmetria della molecola.</p>
-      </article>
-      <article>
-        <h3>9 · Cinetica: teoria dello stato di transizione</h3>
-        <p>Lo stato di transizione è un punto di sella della superficie di energia potenziale: un massimo lungo la coordinata di reazione e un minimo in tutte le altre direzioni. Ha esattamente una frequenza immaginaria. Si trova con il metodo partitioned-RFO di Baker; la costante di velocità viene dall'equazione di Eyring:</p>
-        <p class="eq">k = κ (k<sub>B</sub>T/h) e<sup>−ΔG‡/RT</sup>,&nbsp;&nbsp; κ = 1 + (hν‡/k<sub>B</sub>T)²/24</p>
-        <p>κ è la correzione di Wigner per l'effetto tunnel, importante quando si sposta un atomo di idrogeno.</p>
-      </article>
-      <article>
-        <h3>10 · Laboratorio: le leggi della chimica fisica</h3>
-        <p>Gas reali con l'equazione di van der Waals e la costruzione di Maxwell. pH esatto dal bilancio di carica per acidi mono- e poliprotici. Pile galvaniche con l'equazione di Nernst. Leggi cinetiche integrate e reazioni consecutive.</p>
-        <p class="eq">(P + a/V²)(V − b) = RT,&nbsp;&nbsp; E = E° − (RT/nF) ln Q</p>
-        <p>Ogni curva è calcolata punto per punto dalle equazioni, senza formule approssimate dei casi limite.</p>
-      </article>
-      <article>
         <h3>11 · Sandbox: dinamica molecolare reattiva</h3>
         <p>Nel modello classico qualitativo della sandbox gli atomi si muovono secondo F = ma (algoritmo velocity Verlet). L'energia potenziale è un campo di forze reattivo: l'ordine di legame nasce dalla valenza libera degli atomi, e lunghezza ed energia seguono la relazione di Pauling con i dati tabulati. Le cariche vengono dall'equalizzazione dell'elettronegatività.</p>
         <p class="eq">r(n) = r₁ − c ln n,&nbsp;&nbsp; D(n) = D₁ nᵖ,&nbsp;&nbsp; cos θ = −1/λ</p>
         <p>Il termostato di Bussi riproduce l'insieme canonico; la pressione è la forza media sulle pareti. I cambi di connettività vengono registrati; formula molecolare e soglia di legame non identificano univocamente una specie o un meccanismo.</p>
-        <p>Con il motore <b>quantistico MINDO/3</b> (Bingham, Dewar, Lo 1975) a ogni passo si risolvono le equazioni di Roothaan–Hall non ristrette per tutti gli elettroni di valenza: forze, cariche, spin e reazioni vengono dalla funzione d'onda. La <b>nuvola elettronica</b> è la densità ρ(r) calcolata, disegnata a 0,002, 0,05 e 0,3 e/bohr³; gli <b>orbitali</b> HOMO e LUMO si deformano durante le reazioni.</p>
-      </article>
-      <article>
-        <h3>12 · Becher: equilibri in soluzione</h3>
-        <p>Nel becher ogni specie in soluzione obbedisce alla legge di azione di massa, con le costanti del database MINTEQ v4 (EPA/USGS) e attività di Debye–Hückel esteso o di Davies, e ogni componente, compresi H⁺ ed elettroni, al suo bilancio di massa. Il sistema si risolve con il metodo di Newton. I precipitati compaiono quando il prodotto ionico supera K<sub>sp</sub>; i metalli reagiscono finché la f.e.m. di Nernst si annulla. Le costanti seguono la temperatura con l'equazione di van 't Hoff.</p>
-        <p class="eq">c<sub>s</sub> = β<sub>s</sub> Π {c<sub>i</sub>}<sup>a</sup>/γ<sub>s</sub>,&nbsp;&nbsp; A(λ) = Σ ε(λ) c ℓ</p>
-        <p>Calore dalla legge di Hess con le entalpie di reazione del database; colore dalla legge di Lambert–Beer e dalle funzioni colorimetriche CIE.</p>
-      </article>
-      <article>
-        <h3>13 · Cinetica: meccanismi e sistemi rigidi</h3>
-        <p>Nella modalità Cinetica si scrive un meccanismo qualsiasi. Ogni passo ha la velocità della legge di azione di massa e una costante che segue Arrhenius (anche nella forma k₀(T/300)ⁿ delle valutazioni IUPAC/JPL). Le equazioni differenziali si integrano con il metodo di Rosenbrock ROS2, implicito e L-stabile, con passo adattivo: così anche il ciclo di Chapman e l'Oregonator, in cui convivono tempi dai millisecondi ai mesi, restano stabili.</p>
-        <p class="eq">dc<sub>i</sub>/dt = Σ<sub>j</sub> ν<sub>ij</sub> k<sub>j</sub> Π c<sup>o</sup>,&nbsp;&nbsp; k = A e<sup>−E<sub>a</sub>/RT</sup> = (k<sub>B</sub>T/h) e<sup>ΔS‡/R</sup> e<sup>−ΔH‡/RT</sup></p>
-        <p>L'ordine apparente si ricava dalle leggi integrate; il tempo di dimezzamento si misura sulla curva.</p>
+        <p>Con il motore <b>quantistico GFN2-xTB</b> (e MINDO/3 o Hartree–Fock a scelta) a ogni passo si risolvono le equazioni per gli elettroni di valenza: forze, cariche, spin e reazioni vengono dalla funzione d'onda.</p>
       </article>
       <article>
         <h3>Limiti del modello</h3>
-        <p>Gli atomi sono calcolati senza relatività e senza polarizzazione di spin: per l'oro l'energia di ionizzazione calcolata è 7,6 eV contro 9,2 eV misurati. Hartree–Fock trascura la correlazione elettronica; MP2 ne recupera gran parte, ma con basi piccole restano errori di decine di kJ/mol. Le molecole sono isolate, in fase gassosa, e le basi arrivano fino al kripton. Le vibrazioni sono armoniche.</p>
-      </article>
-      <article>
-        <h3>Regole di Slater e di Hund</h3>
-        <p>Per confronto con i metodi del corso di chimica generale, la tabella degli orbitali riporta anche la carica nucleare efficace delle regole di Slater:</p>
-        <p class="eq">Z<sub>eff</sub> = Z − σ</p>
-        <p>Il termine spettroscopico <sup>2S+1</sup>L<sub>J</sub> mostrato nella scheda è quello previsto dalle regole di Hund. Con più gusci aperti (alcuni lantanidi e attinidi) può differire da quello misurato.</p>
+        <p>Gli atomi sono calcolati con DFT-LDA relativistico scalare. Hartree–Fock e GFN2-xTB sono modelli approssimati. La sandbox usa dinamiche di Born–Oppenheimer.</p>
       </article>
     </div>
-    <p class="source-links"><a href="https://goldbook.iupac.org/terms/view/09068" target="_blank" rel="noopener">IUPAC · Nernst</a> · <a href="https://www.nist.gov/pml/atomic-reference-data-electronic-structure-calculations" target="_blank" rel="noopener">NIST · riferimento DFT</a> · <a href="https://cccbdb.nist.gov/" target="_blank" rel="noopener">NIST · confronto molecole</a> · <a href="https://doi.org/10.1063/1.2408420" target="_blank" rel="noopener">Bussi · termostato CSVR</a></p>
   </details>
-
-  <footer class="foot">
-    <p>Unità: 1 a₀ = 52,918 pm · 1 hartree = 27,211 eV. Dati sperimentali: NIST Atomic Spectra Database, IUPAC.</p>
-  </footer>
 </div>
 <script type="module" src="js/main.js"></script>
 </body>
