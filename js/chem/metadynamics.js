@@ -181,7 +181,8 @@ export class CollectiveVariable {
         } else {
           // Derivata completa: d/dr [(1-x^n)/(1-x^m)]
           // = (1/r0) * [n*x^(n-1)*(1-x^m) - (1-x^n)*m*x^(m-1)] / (1-x^m)^2
-          const numerator = n * Math.pow(x, n-1) * (1 - xm) - (1 - xn) * m * Math.pow(x, m-1);
+          // Derivata corretta: d/dx[(1-x^n)/(1-x^m)] = [-n*x^(n-1)*(1-x^m) + m*x^(m-1)*(1-x^n)] / (1-x^m)^2
+          const numerator = -n * Math.pow(x, n-1) * (1 - xm) + m * Math.pow(x, m-1) * (1 - xn);
           const dcn_dr = numerator / (r0 * denom * denom);
           const inv_r = 1.0 / r;
           for (let a = 0; a < 3; a++) {
