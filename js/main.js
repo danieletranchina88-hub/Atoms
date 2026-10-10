@@ -698,16 +698,16 @@ function render3D() {
     if (parts.length) {
       const res = sampleAtom(parts, state.points, 11);
       const palette = state.atomView === 'density'
-        ? [colorToRGB(cssVar('--scene-mode') === 'light' ? '#3d6ea8' : '#d7e6ff')]
+        ? [colorToRGB(cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4')]
         : visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
       const colors = new Float32Array(res.count * 3);
       for (let i = 0; i < res.count; i++) colors.set(palette[state.atomView === 'density' ? 0 : res.groups[i]], 3 * i);
-      viewer.addPoints(res.positions, colors, { size: state.atomView === 'density' ? 1.15 : 0.9, opacity: cssVar('--scene-mode') === 'light' ? 0.45 : 0.62 });
+      viewer.addPoints(res.positions, colors, { size: state.atomView === 'density' ? 0.85 : 0.7, opacity: cssVar('--scene-mode') === 'light' ? 0.32 : 0.42 });
     }
     viewer.addNucleus();
     setTitle(`${el.name}`, state.atomView === 'orbitals' ? 'scomposizione in orbitali occupati, non l’aspetto' : 'densità di probabilità elettronica');
     setLegend(state.atomView === 'density'
-      ? [[cssVar('--scene-mode') === 'light' ? '#3d6ea8' : '#d7e6ff', 'ρ = Σ nᵢ|ψᵢ|²']]
+      ? [[cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4', 'ρ = Σ nᵢ|ψᵢ|²']]
       : visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
     note.textContent = state.atomView === 'density'
       ? `Ogni punto è campionato con la regola di Born, probabilità ∝ |ψ|² degli orbitali Kohn–Sham occupati. Il nucleo è disegnato circa 100 000 volte più grande del reale: il raggio nucleare è dell’ordine dei fm, la nube degli Å. Tacche ogni ${formatPm(viewer.tickPm)}.`
@@ -785,11 +785,11 @@ function drawTerms(terms, extent, { phase, color, seed = 1, points = state.point
     const colors = new Float32Array(pts.count * 3);
     for (let i = 0; i < pts.count; i++) colors.set(pts.signs[i] > 0 ? cp : cn, 3 * i);
     const both = state.render === 'both';
-    viewer.addPoints(pts.positions, colors, { size: both ? 0.7 : 1, opacity: both ? 0.35 : (light ? 0.6 : 0.55) });
+    viewer.addPoints(pts.positions, colors, { size: both ? 0.55 : 0.8, opacity: both ? 0.28 : (light ? 0.45 : 0.4) });
   }
   if (state.render !== 'cloud') {
     const g = sampleGrid(terms, quality, extent, enclosed);
-    const opacity = state.render === 'both' ? 0.6 : 0.9;
+    const opacity = state.render === 'both' ? 0.45 : 0.75;
     viewer.addSurface(g, g.iso, 1, posColor, { opacity });
     viewer.addSurface(g, g.iso, -1, negColor, { opacity });
   }

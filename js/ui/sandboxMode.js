@@ -418,7 +418,7 @@ function ensureCapacity(N, NB) {
   if (!scene.atoms || scene.cap < N) {
     if (scene.atoms) { scene.group.remove(scene.atoms); scene.atoms.geometry.dispose(); scene.atoms.material.dispose(); }
     scene.cap = Math.max(256, 2 * N);
-    scene.atoms = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.05 }), scene.cap);
+    scene.atoms = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshStandardMaterial({ roughness: 0.72, metalness: 0.02 }), scene.cap);
     scene.atoms.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * scene.cap), 3);
     scene.atoms.frustumCulled = false;
     scene.group.add(scene.atoms);
@@ -427,7 +427,7 @@ function ensureCapacity(N, NB) {
     if (scene.bonds) { scene.group.remove(scene.bonds); scene.bonds.geometry.dispose(); scene.bonds.material.dispose(); }
     scene.bcap = Math.max(512, 2 * NB);
     const light = cssVar('--scene-mode') === 'light';
-    scene.bonds = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 10, 1, false), new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.04 }), scene.bcap);
+    scene.bonds = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 10, 1, false), new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0.01 }), scene.bcap);
     scene.bonds.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * scene.bcap), 3);
     scene.bonds.frustumCulled = false;
     scene.group.add(scene.bonds);

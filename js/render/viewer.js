@@ -69,8 +69,8 @@ export class Viewer {
     this.controls.dampingFactor = 0.08;
     this.controls.autoRotateSpeed = 1.2;
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 1.4));
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    this.scene.add(new THREE.HemisphereLight(0xf0f0f0, 0x606060, 0.9));
+    const key = new THREE.DirectionalLight(0xffffff, 0.85);
     key.position.set(3, -4, 6);
     this.camera.add(key);
     this.scene.add(this.camera);
@@ -245,10 +245,10 @@ export class Viewer {
   }
 
   addNucleus(position = [0, 0, 0], label = null) {
-    const r = this.extent * 0.012;
+    const r = this.extent * 0.006;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(r, 20, 14),
-      new THREE.MeshStandardMaterial({ color: cssVar('--nucleus') || '#f0b429', emissive: cssVar('--nucleus') || '#f0b429', emissiveIntensity: 0.5 }),
+      new THREE.MeshStandardMaterial({ color: cssVar('--nucleus') || '#c9a227', emissive: 0x000000, emissiveIntensity: 0, roughness: 0.6 }),
     );
     mesh.position.set(...position);
     this.nuclei.add(mesh);
@@ -273,7 +273,7 @@ export class Viewer {
       transparent: true,
       opacity,
       depthWrite: false,
-      blending: this.dark ? THREE.AdditiveBlending : THREE.NormalBlending,
+      blending: THREE.NormalBlending,
       clippingPlanes: this.clipping ? [this.clipPlane] : [],
     });
     const pts = new THREE.Points(geo, mat);
