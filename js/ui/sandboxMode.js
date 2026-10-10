@@ -50,7 +50,7 @@ const SB = {
   add: { kind: 'mol', id: 'H2O', symbol: 'C' },
   count: 5,
   color: 'element',
-  style: 'ball',
+  style: 'orbital',
   chart1: 'energy',
   lambda: 400,
   info: '',
@@ -353,7 +353,7 @@ function loadPreset(p) {
   SB.selected = -1;
   SB.info = '';
   if (p.color) SB.color = p.color;
-  SB.style = p.style ?? (ELECTRONIC.includes(SB.style) ? 'ball' : SB.style);
+  SB.style = p.style ?? (ELECTRONIC.includes(SB.style) ? SB.style : 'orbital');
   SB.lmo = null; SB.lmoFocus = null; SB.levels = null;
   clearCloud();
   if (p.light) SB.lambda = p.light.lambda;
@@ -438,7 +438,7 @@ function atomRadius(Z) {
   // raggio di van der Waals: dal campo classico se c'è, altrimenti stimato dal raggio covalente (r_vdW ≈ r_cov + 0,8 Å)
   if (SB.style === 'vdw') return ATOM_PARAMS[Z] ? 0.5 * ATOM_PARAMS[Z][5] * 0.82 : 0.82 * (covalentRadius(Z) / 100 + 0.8);
   // nella nuvola si vedono solo i nuclei (puntiformi alla scala degli elettroni)
-  if (ELECTRONIC.includes(SB.style)) return Z === 1 ? 0.07 : 0.11;
+  if (ELECTRONIC.includes(SB.style)) return Z === 1 ? 0.09 : 0.14;
   const cov = ATOM_PARAMS[Z]?.[0] === 0 ? 0.5 * ATOM_PARAMS[Z][5] * 100 * 0.5 : covalentRadius(Z);
   return 0.12 + 0.0034 * cov;
 }
@@ -604,7 +604,7 @@ function clearCloud() {
 function pumpCloud(now) {
   if (!ELECTRONIC.includes(SB.style)) { if (cloud.group) clearCloud(); return; }
   // intervallo adattivo: mai più spesso di 1,3 volte il tempo dell'ultimo calcolo (il worker resta libero)
-  if (cloud.busy || now - cloud.last < Math.max(120, 1.3 * (cloud.cost ?? 0)) || !SB.frame?.N) return;
+  if (cloud.busy || now - cloud.last < Math.max(80, 1.1 * (cloud.cost ?? 0)) || !SB.frame?.N) return;
   const key = `${observatory.epoch}|${observatory.replay ? observatory.cursor : SB.frame.stats.t}|${SB.style}|${SB.orbital}|${cloud.id}`;
   if (key === cloud.requestKey) return;
   cloud.requestKey = key;
@@ -780,7 +780,7 @@ function onGrid(g) {
       geo.setAttribute('position', new THREE.BufferAttribute(sf.positions, 3));
       geo.setAttribute('normal', new THREE.BufferAttribute(sf.normals, 3));
       const on = (!focus || focus === sf.key) && (!SB.lmoKind || sf.key.startsWith(SB.lmoKind + ':'));
-      const mat = new THREE.MeshStandardMaterial({ color: lmoColor(sf.key, sf.sign), roughness: 0.35, metalness: 0, transparent: true, opacity: on ? (focus ? 0.85 : 0.55) : 0.05, side: THREE.DoubleSide, depthWrite: false });
+      const mat = new THREE.MeshStandardMaterial({ color: lmoColor(sf.key, sf.sign), roughness: 0.55, metalness: 0, transparent: true, opacity: on ? (focus ? 0.85 : 0.55) : 0.05, side: THREE.DoubleSide, depthWrite: false });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = on ? 3 : 2;
       mesh.userData.lmo = sf.key;
@@ -802,8 +802,8 @@ function onGrid(g) {
       const orb = g.what !== 'density';
       const flowCol = meta.what === 'flow' || meta.what === 'deformation' ? (sf.sign > 0 ? '#ff6a3d' : '#3d8bff') : null;
       const mat = new THREE.MeshStandardMaterial({
-        color: sf.colors ? '#ffffff' : flowCol ?? (sf.sign > 0 ? pos : neg), vertexColors: !!sf.colors, roughness: 0.35, metalness: 0,
-        transparent: true, opacity: orb ? (signed ? 0.6 : 0.8) : OPAC[sf.iso] ?? 0.3, side: THREE.DoubleSide, depthWrite: false,
+        color: sf.colors ? '#ffffff' : flowCol ?? (sf.sign > 0 ? pos : neg), vertexColors: !!sf.colors, roughness: 0.55, metalness: 0,
+        transparent: true, opacity: orb ? (signed ? 0.72 : 0.88) : OPAC[sf.iso] ?? 0.35, side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 2;
