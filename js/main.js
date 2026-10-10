@@ -29,7 +29,7 @@ const state = {
   atom: null,
   mode: 'atom',
   relativistic: true,       // equazione di Koelling–Harmon (ScRLDA del NIST); false: Schrödinger (LDA)
-  atomView: 'density',      // 'density' | 'orbitals' — la densità totale è |ψ|², non un colore di sottolivello
+  atomView: 'density',      // 'density' | 'orbitals' | 'all'
   render: 'both',            // 'cloud' | 'surface' | 'both'
   enclosed: 0.9,
   points: 60000,
@@ -87,7 +87,28 @@ function colorToRGB(color) {
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
 }
 
+function orbitalColor(i) {
+  const hue = Math.round((i * 137.508) % 360);
+  const light = cssVar('--scene-mode') === 'light';
+  return `hsl(${hue} ${light ? 58 : 68}% ${light ? 40 : 60}%)`;
+}
+
 const HYBRID_COLORS = ['#ff6b57', '#3fa7ff', '#62d48f', '#f0b429', '#c77dff', '#4dd6c9'];
+
+/** Ogni orbitale reale occupato (regola di Hund): 2pₓ, 2pᵧ… non il sottolivello intero. */
+function occupiedRealOrbitals(atom) {
+  const list = [];
+  for (const o of atom.orbitals) {
+    if (state.hidden.has(o.label)) continue;
+    const ms = mOrder(o.l);
+    hundBoxes(o.l, o.occ).forEach((b, i) => {
+      const e = b.up + b.down;
+      if (!e) return;
+      list.push({ n: o.n, l: o.l, m: ms[i], radial: o.radial, occ: e, subshell: o.label });
+    });
+  }
+  return list;
+}
 const SET_ENCLOSED = 0.55;
 
 // ---------------------------------------------------------------------------
@@ -373,11 +394,17 @@ function renderControls() {
     c.innerHTML = `
       ${theoryCtl}
       <div class="ctl"><span class="lbl">Rappresentazione dell'atomo</span>
-        ${segHTML('atom-view', [{ v: 'orbitals', label: 'Orbitali occupati' }, { v: 'density', label: 'Densità totale' }], state.atomView)}
+        ${segHTML('atom-view', [
+          { v: 'density', label: 'Densità totale' },
+          { v: 'orbitals', label: 'Per sottolivello' },
+          { v: 'all', label: 'Tutti gli orbitali' },
+        ], state.atomView)}
       </div>
       ${pointsCtl}
-      <p class="desc-muted">${state.atomView === 'orbitals'
-        ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Visualizzazione nella base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempito secondo la regola di Hund. Colori per sottolivello.'
+      <p class="desc-muted">${state.atomView === 'all'
+        ? 'Ogni orbitale reale occupato (1s, 2s, 2p<sub>x</sub>, 2p<sub>y</sub>…) è una superficie a parte, con il proprio colore. Il lobo scuro è ψ < 0. Non è l’aspetto dell’atomo: quello è la densità totale, somma di tutti.'
+        : state.atomView === 'orbitals'
+        ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempimento di Hund. Stesso colore per tutto il sottolivello.'
         : 'Densità elettronica totale a simmetria sferica: si vedono i gusci K, L, M… Un sottolivello pieno è sempre sferico (teorema di Unsöld).'}</p>`;
     bindSeg('atom-view', v => { state.atomView = v; renderControls(); render3D(); drawCharts(); });
   } else if (mode === 'orbital') {
@@ -681,6 +708,30 @@ function render3D() {
 
   if (mode === 'atom') {
     const visible = atom.orbitals.filter(o => !state.hidden.has(o.label));
+    if (state.atomView === 'all') {
+      const list = occupiedRealOrbitals(atom);
+      const extent = Math.max(...(list.length ? list : visible).map(o => o.radial.radiusEnclosing(0.985)), 0.05) * 1.05;
+      viewer.frame(extent, true);
+      const nOrb = list.length;
+      const enclosed = nOrb <= 1 ? state.enclosed : nOrb <= 6 ? 0.62 : nOrb <= 14 ? 0.48 : 0.4;
+      const quality = nOrb <= 6 ? Math.min(state.quality, 56) : nOrb <= 14 ? 40 : 28;
+      list.forEach((o, i) => {
+        drawTerms([term(o.radial, o.l, o.m)], extent, {
+          phase: false,
+          color: orbitalColor(i),
+          seed: 40 + i * 17,
+          points: Math.max(1200, Math.round(state.points / Math.max(1, nOrb))),
+          quality,
+          enclosed,
+          render: nOrb > 10 ? 'surface' : 'both',
+        });
+      });
+      viewer.addNucleus([0, 0, 0], null, el.mass);
+      setTitle(`${el.name}`, `${nOrb} orbitali reali occupati, sovrapposti`);
+      setLegend(list.map((o, i) => [orbitalColor(i), `${orbitalHTML(o.n, o.l, o.m)}<sup>${o.occ}</sup>`]));
+      note.textContent = `Ogni colore è un orbitale reale occupato, calcolato con la DFT-LDA dell’atomo (regola di Hund). Il lobo più scuro è il segno opposto di ψ, non un colore osservato. La superficie è stretta al ${Math.round(enclosed * 100)}% così i lobi non si coprono. La somma di tutti è la densità totale. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.`;
+      return;
+    }
     const parts = [];
     visible.forEach((o, gi) => {
       if (state.atomView === 'density') {
@@ -772,24 +823,24 @@ function render3D() {
 }
 
 /** Disegna una funzione d'onda (somma di termini) come nuvola e/o superficie. */
-function drawTerms(terms, extent, { phase, color, seed = 1, points = state.points, quality = state.quality, enclosed = state.enclosed }) {
+function drawTerms(terms, extent, { phase, color, seed = 1, points = state.points, quality = state.quality, enclosed = state.enclosed, render = state.render }) {
   const pos = cssVar('--phase-pos');
   const neg = cssVar('--phase-neg');
   const light = cssVar('--scene-mode') === 'light';
   const posColor = phase ? pos : color;
   const negColor = phase ? neg : shade(color, light ? 0.45 : 0.32);
-  if (state.render !== 'surface') {
+  if (render !== 'surface') {
     const pts = samplePoints(terms, points, seed);
     const cp = colorToRGB(posColor);
     const cn = colorToRGB(negColor);
     const colors = new Float32Array(pts.count * 3);
     for (let i = 0; i < pts.count; i++) colors.set(pts.signs[i] > 0 ? cp : cn, 3 * i);
-    const both = state.render === 'both';
+    const both = render === 'both';
     viewer.addPoints(pts.positions, colors, { size: both ? 0.55 : 0.8, opacity: both ? 0.28 : (light ? 0.45 : 0.4) });
   }
-  if (state.render !== 'cloud') {
+  if (render !== 'cloud') {
     const g = sampleGrid(terms, quality, extent, enclosed);
-    const opacity = state.render === 'both' ? 0.45 : 0.75;
+    const opacity = render === 'both' ? 0.45 : 0.72;
     viewer.addSurface(g, g.iso, 1, posColor, { opacity });
     viewer.addSurface(g, g.iso, -1, negColor, { opacity });
   }
