@@ -229,3 +229,59 @@ Il metodo `reconstructFES(gridSize)` ricostruisce la FES su una griglia regolare
 **Esempio applicativo** (`examples/metadynamics-water-dissociation.js`): dissociazione H₂O → OH + H con CV = distanza O-H, dimostrazione del superamento della barriera di attivazione e ricostruzione della FES.
 
 **Limitazioni**: la convergenza della FES richiede simulazioni sufficientemente lunghe (tipicamente > 10000 step MD). Per sistemi con più di 2-3 CV, la ricostruzione della FES diventa computazionalmente proibitiva (maledizione della dimensionalità). Il metodo non fornisce direttamente le velocità di reazione, ma solo le energie libere.
+
+
+## Metadinamica Well-Tempered
+
+Per superare il problema degli eventi rari nella dinamica molecolare standard, è implementato l'algoritmo di metadinamica well-tempered (Barducci, Bussi, Parrinello, Phys. Rev. Lett. 100, 020603, 2008).
+
+### Variabili Collettive
+
+Le variabili collettive (CV) `s` parametrizzano il progresso della reazione chimica:
+
+- **Distanza**: `s = |R_i - R_j|` per rottura/formazione di legami
+- **Angolo**: `s = ∠(R_i, R_j, R_k)` per cambiamenti conformazionali
+- **Coordinazione**: `s = Σ_j (1-(r_ij/r0)^n)/(1-(r_ij/r0)^m)` con esponenti `n=6, m=12` per transizioni di fase o reazioni complesse
+
+Ogni CV ha gradiente analitico `∇_R s` verificato contro differenze finite con tolleranza ≤10⁻⁷.
+
+### Potenziale di Bias
+
+Il bias si accumula come somma di gaussiane nello spazio delle CV:
+
+`V(s,t) = Σ_{t'<t} W(t') exp(-Σ_k (s_k - s_k(t'))²/(2σ_k²))`
+
+dove l'altezza delle gaussiane decade esponenzialmente secondo il fattore well-tempered:
+
+`W(t') = W₀ exp(-V(s(t'),t')/(kB ΔT))`
+
+con `ΔT = (γ-1)T` e `γ = T_bias/T` il bias factor. Valori tipici: `W₀ = 0.002` Ha, `γ = 10-20`, `σ = 0.1-0.2` Å.
+
+### Forze di Bias
+
+Le forze atomiche ricevono un contributo dal gradiente del bias:
+
+`F_bias_i = -∇_{R_i} V(s,t) = -Σ_k (∂V/∂s_k)(∂s_k/∂R_i)`
+
+Il gradiente `∂V/∂s_k` è calcolato analiticamente dalla somma delle gaussiane accumulate.
+
+### Superficie di Energia Libera
+
+A convergenza, il bias ricostruisce la superficie di energia libera di Gibbs:
+
+`F(s) ≈ -(1 + T/ΔT) V(s) + const = -(γ/(γ-1)) V(s) + const`
+
+I minimi di `F(s)` corrispondono agli stati stabili, i massimi agli stati di transizione. La barriera di energia libera `ΔG‡` è letta direttamente dalla differenza `F(TS) - F(reattivi)`.
+
+### Convergenza
+
+La convergenza asintotica è garantita dal decadimento esponenziale delle altezze gaussiane. In pratica, la convergenza si valuta monitorando la riduzione dell'altezza media delle ultime gaussiane rispetto alle prime. Una riduzione >50% dopo 5000-10000 step indica esplorazione adeguata dello spazio delle CV.
+
+### Limiti e Avvertenze
+
+- La metadinamica accelera l'esplorazione ma non garantisce campionamento ergodico completo in tempi finiti.
+- La scelta delle CV è critica: CV inadeguate portano a FES inaccurate.
+- Per reazioni con più di 2-3 CV rilevanti, il metodo diventa computazionalmente costoso.
+- Le FES ricostruite sono accurate solo lungo le CV scelte; gradi di libertà ortogonali non sono campionati.
+
+L'implementazione è verificata dai test in `tests/metadynamics.mjs` e applicata nell'esempio `examples/metadynamics-water-dissociation.js` per la dissociazione H₂O → OH + H.
