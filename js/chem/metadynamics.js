@@ -13,7 +13,7 @@
 //   W(t') = W0 * exp(-V(s(t'),t') / (kB * DeltaT))
 //   DeltaT = (biasFactor - 1) * T
 //
-// La forza di bias e calcolata analiticamente come gradiente:
+// La forza di bias è calcolata analiticamente come gradiente:
 //   F_bias_i = -grad_{R_i} V(s,t) = -sum_k (dV/ds_k) * (ds_k/dR_i)
 //
 // La superficie di energia libera si ricostruisce asintoticamente:
@@ -34,7 +34,7 @@ export class CollectiveVariable {
     this.type = type;
     this.indices = indices;
     this.params = params;
-    this.sigma = params.sigma || 0.1; // Larghezza gaussiana in unita della CV
+    this.sigma = params.sigma || 0.1; // Larghezza gaussiana in unità della CV
   }
 
   /**
@@ -72,7 +72,16 @@ export class CollectiveVariable {
         const r = Math.sqrt(dx*dx + dy*dy + dz*dz);
         if (r < 1e-10) continue;
         const x = r/r0;
-        cn += (1 - Math.pow(x, n)) / (1 - Math.pow(x, m));
+        // Evita divisione per zero quando x^m → 1
+        const xn = Math.pow(x, n);
+        const xm = Math.pow(x, m);
+        const denom = 1 - xm;
+        if (Math.abs(denom) < 1e-10) {
+          // Limite per x → 1: (1-x^n)/(1-x^m) → n/m
+          cn += n / m;
+        } else {
+          cn += (1 - xn) / denom;
+        }
       }
       return cn;
     }
@@ -111,22 +120,35 @@ export class CollectiveVariable {
       const v2 = [pos[3*k]-pos[3*j], pos[3*k+1]-pos[3*j+1], pos[3*k+2]-pos[3*j+2]];
       const n1 = Math.sqrt(v1[0]*v1[0] + v1[1]*v1[1] + v1[2]*v1[2]);
       const n2 = Math.sqrt(v2[0]*v2[0] + v2[1]*v2[1] + v2[2]*v2[2]);
+      
+      if (n1 < 1e-10 || n2 < 1e-10) return grad;
+      
       const dot = v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2];
-      const cos_t = dot / (n1 * n2);
-      const sin_t = Math.sqrt(Math.max(1e-12, 1 - cos_t*cos_t));
+      const cos_t = Math.max(-1, Math.min(1, dot / (n1 * n2)));
+      const sin_t = Math.sqrt(Math.max(1e-10, 1 - cos_t*cos_t));
 
-      if (sin_t < 1e-10) return grad;
-
-      const inv_sin = 1.0 / sin_t;
+      // Formula corretta per il gradiente dell'angolo
+      // θ = arccos(v1·v2 / (|v1||v2|))
+      // dθ/dR = -1/sin(θ) * d(cos θ)/dR
+      
       const n1_sq = n1 * n1;
       const n2_sq = n2 * n2;
       const n1n2 = n1 * n2;
+      const inv_sin = 1.0 / sin_t;
 
-      // d(angle)/dR_i e d(angle)/dR_k
+      // d(cos θ)/dR_i = (v2/(n1*n2) - cos(θ)*v1/n1²)
+      // d(cos θ)/dR_k = (v1/(n1*n2) - cos(θ)*v2/n2²)
+      // d(cos θ)/dR_j = -d(cos θ)/dR_i - d(cos θ)/dR_k
+      
       for (let a = 0; a < 3; a++) {
-        grad[3*i+a] = (v2[a] / n1n2 - cos_t * v1[a] / n1_sq) * inv_sin;
-        grad[3*k+a] = (v1[a] / n1n2 - cos_t * v2[a] / n2_sq) * inv_sin;
-        grad[3*j+a] = -grad[3*i+a] - grad[3*k+a]; // conservazione momento
+        const dcos_dRi = v2[a] / n1n2 - cos_t * v1[a] / n1_sq;
+        const dcos_dRk = v1[a] / n1n2 - cos_t * v2[a] / n2_sq;
+        const dcos_dRj = -dcos_dRi - dcos_dRk;
+        
+        // dθ/dR = -1/sin(θ) * d(cos θ)/dR
+        grad[3*i+a] = -inv_sin * dcos_dRi;
+        grad[3*k+a] = -inv_sin * dcos_dRk;
+        grad[3*j+a] = -inv_sin * dcos_dRj;
       }
     }
 
@@ -140,18 +162,33 @@ export class CollectiveVariable {
         const dz = pos[3*i+2] - pos[3*j+2];
         const r = Math.sqrt(dx*dx + dy*dy + dz*dz);
         if (r < 1e-10) continue;
+        
         const x = r / r0;
         const xn = Math.pow(x, n);
         const xm = Math.pow(x, m);
         const denom = 1 - xm;
-        if (Math.abs(denom) < 1e-12) continue;
-        // d(cn)/dr = (1/r0) * [n*x^(n-1)*(1-x^m) - (1-x^n)*m*x^(m-1)] / (1-x^m)^2
-        const dcn_dr = (1.0/r0) * (n*Math.pow(x,n-1)*(1-xm) - m*Math.pow(x,m-1)*(1-xn)) / (denom*denom);
-        const inv_r = 1.0 / r;
-        for (let a = 0; a < 3; a++) {
-          const d = [dx, dy, dz][a];
-          grad[3*i+a] += dcn_dr * d * inv_r;
-          grad[3*j+a] -= dcn_dr * d * inv_r;
+        
+        // Evita instabilità numerica quando x ≈ 1
+        if (Math.abs(denom) < 1e-8) {
+          // Per x ≈ 1, la derivata è circa (n-m)/(m*r0)
+          const dcn_dr = (n - m) / (m * r0);
+          const inv_r = 1.0 / r;
+          for (let a = 0; a < 3; a++) {
+            const d = [dx, dy, dz][a];
+            grad[3*i+a] += dcn_dr * d * inv_r;
+            grad[3*j+a] -= dcn_dr * d * inv_r;
+          }
+        } else {
+          // Derivata completa: d/dr [(1-x^n)/(1-x^m)]
+          // = (1/r0) * [n*x^(n-1)*(1-x^m) - (1-x^n)*m*x^(m-1)] / (1-x^m)^2
+          const numerator = n * Math.pow(x, n-1) * (1 - xm) - (1 - xn) * m * Math.pow(x, m-1);
+          const dcn_dr = numerator / (r0 * denom * denom);
+          const inv_r = 1.0 / r;
+          for (let a = 0; a < 3; a++) {
+            const d = [dx, dy, dz][a];
+            grad[3*i+a] += dcn_dr * d * inv_r;
+            grad[3*j+a] -= dcn_dr * d * inv_r;
+          }
         }
       }
     }
@@ -227,7 +264,7 @@ export class WellTemperedMetaDynamics {
 
   /**
    * Calcola e aggiunge le forze di bias alle forze atomiche.
-   * Questa e la funzione principale da chiamare ad ogni step MD.
+   * Questa è la funzione principale da chiamare ad ogni step MD.
    *
    * @param {number[]} Z - Numeri atomici
    * @param {Float64Array} pos - Posizioni atomiche
@@ -241,7 +278,7 @@ export class WellTemperedMetaDynamics {
       s[k] = this.cvs[k].evaluate(Z, pos);
     }
 
-    // Deposita nuova gaussiana se e il momento
+    // Deposita nuova gaussiana se è il momento
     if (this.timestep > 0 && this.timestep % this.depositionStride === 0) {
       const V_curr = this.evaluateBias(s);
       const weight = this.W0 * Math.exp(-V_curr / (this.kB * this.DeltaT));
@@ -268,7 +305,7 @@ export class WellTemperedMetaDynamics {
   /**
    * Ricostruisci la superficie di energia libera (FES) dalla storia del bias.
    * Formula: F(s) = -(gamma / (gamma - 1)) * V(s) + cost
-   * Supportato solo per 1 CV (per semplicita di visualizzazione).
+   * Supportato solo per 1 CV (per semplicità di visualizzazione).
    *
    * @param {number} gridSize - Numero di punti della griglia
    * @param {number[]} range - [s_min, s_max] opzionale
@@ -277,6 +314,21 @@ export class WellTemperedMetaDynamics {
   reconstructFES(gridSize = 100, range = null) {
     if (this.cvs.length !== 1) {
       throw new Error('FES 1D supportata solo per 1 CV. Per 2 CV usare reconstructFES2D().');
+    }
+
+    if (this.history.length === 0) {
+      // Nessuna gaussiana depositata, ritorna FES piatta
+      const cv = this.cvs[0];
+      const s_min = range ? range[0] : -2;
+      const s_max = range ? range[1] : 2;
+      const ds = (s_max - s_min) / (gridSize - 1);
+      const s_grid = [];
+      const F_grid = [];
+      for (let i = 0; i < gridSize; i++) {
+        s_grid.push(s_min + i * ds);
+        F_grid.push(0);
+      }
+      return { s: s_grid, F: F_grid };
     }
 
     const cv = this.cvs[0];
@@ -317,6 +369,10 @@ export class WellTemperedMetaDynamics {
   reconstructFES2D(gridSize = 50) {
     if (this.cvs.length !== 2) {
       throw new Error('FES 2D richiede esattamente 2 CV.');
+    }
+
+    if (this.history.length === 0) {
+      throw new Error('Nessuna gaussiana depositata per FES 2D.');
     }
 
     const cv1 = this.cvs[0], cv2 = this.cvs[1];
