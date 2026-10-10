@@ -89,9 +89,10 @@ function colorToRGB(color) {
 }
 
 function orbitalColor(i) {
+  // tinta d'oro: colori saturi e ben separati
   const hue = Math.round((i * 137.508) % 360);
   const light = cssVar('--scene-mode') === 'light';
-  return `hsl(${hue} ${light ? 58 : 68}% ${light ? 40 : 60}%)`;
+  return `hsl(${hue} ${light ? 78 : 92}% ${light ? 46 : 62}%)`;
 }
 
 const HYBRID_COLORS = ['#ff6b57', '#3fa7ff', '#62d48f', '#f0b429', '#c77dff', '#4dd6c9'];
@@ -396,14 +397,14 @@ function renderControls() {
       ${theoryCtl}
       <div class="ctl"><span class="lbl">Rappresentazione dell'atomo</span>
         ${segHTML('atom-view', [
-          { v: 'density', label: 'Densità totale' },
+          { v: 'density', label: 'Nuvola elettronica' },
           { v: 'orbitals', label: 'Per sottolivello' },
           { v: 'all', label: 'Tutti gli orbitali' },
         ], state.atomView)}
       </div>
       ${pointsCtl}
       <p class="desc-muted">${state.atomView === 'all'
-        ? 'Ogni orbitale reale occupato sta in un riquadro, con la propria forma (1s, 2p<sub>x</sub>, 3d<sub>xy</sub>…). Le dimensioni sono normalizzate: si confrontano le forme, non i raggi veri. Il lobo scuro è ψ < 0.'
+        ? 'Tutti gli orbitali reali occupati sovrapposti sullo stesso nucleo, ciascuno con un colore saturo. Il lobo scuro è ψ < 0. Usa <b>Densità totale</b> per la nuvola elettronica.'
         : state.atomView === 'orbitals'
         ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempimento di Hund. Stesso colore per tutto il sottolivello.'
         : 'Densità elettronica totale a simmetria sferica: si vedono i gusci K, L, M… Un sottolivello pieno è sempre sferico (teorema di Unsöld).'}</p>`;
@@ -713,46 +714,26 @@ function render3D() {
     if (state.atomView === 'all') {
       const list = occupiedRealOrbitals(atom);
       const nOrb = list.length;
-      const cols = Math.max(1, Math.ceil(Math.sqrt(nOrb * 1.15)));
-      const rows = Math.max(1, Math.ceil(nOrb / cols));
-      const pitchX = 1.42;
-      const pitchZ = 1.72;
-      const extent = Math.max(cols * pitchX, rows * pitchZ) * 0.62;
-      viewer.frame(extent, false);
-      viewer.setAxesVisible(false);
-      const quality = nOrb <= 8 ? 48 : nOrb <= 20 ? 36 : 30;
+      const extent = Math.max(...(list.length ? list : visible).map(o => o.radial.radiusEnclosing(0.985)), 0.05) * 1.05;
+      viewer.frame(extent, true);
+      const quality = nOrb > 24 ? 40 : 56;
+      // superfici più strette e trasparenti così i lobi colorati restano leggibili uno sull'altro
+      const enclosed = nOrb > 20 ? 0.42 : 0.55;
       list.forEach((o, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const x = (col - (cols - 1) / 2) * pitchX;
-        const z = ((rows - 1) / 2 - row) * pitchZ;
-        const reach = Math.max(o.radial.radiusEnclosing(0.92), 0.08);
-        const before = viewer.content.children.length;
-        drawTerms([term(o.radial, o.l, o.m)], reach * 1.2, {
+        drawTerms([term(o.radial, o.l, o.m)], extent, {
           phase: false,
           color: orbitalColor(i),
           seed: 40 + i * 17,
           quality,
-          enclosed: 0.72,
+          enclosed,
           render: 'surface',
+          opacity: nOrb > 20 ? 0.28 : 0.45,
         });
-        const g = new THREE.Group();
-        for (const obj of viewer.content.children.slice(before)) {
-          viewer.content.remove(obj);
-          g.add(obj);
-        }
-        g.scale.setScalar(0.46 / reach);
-        g.position.set(x, 0, z);
-        viewer.add(g);
-        const label = textSprite(orbitalNameText(o.n, o.l, o.m), orbitalColor(i), 42);
-        const h = 0.2;
-        label.position.set(x, 0, z - 0.62);
-        label.scale.set(h * label.userData.aspect, h, 1);
-        viewer.add(label);
       });
-      setTitle(`${el.name}`, `${nOrb} orbitali, uno per riquadro`);
-      setLegend([]);
-      note.textContent = `Ogni riquadro è un orbitale reale occupato (regola di Hund, DFT-LDA). La forma è in scala propria, così 1s e gli orbitali esterni si vedono entrambi: i raggi veri sono diversi. Il lobo scuro è il segno opposto di ψ, non un colore osservato. Ruota e ingrandisci un riquadro.`;
+      viewer.addNucleus([0, 0, 0], null, el.mass);
+      setTitle(`${el.name}`, `${nOrb} orbitali sovrapposti`);
+      setLegend(list.slice(0, 12).map((o, i) => [orbitalColor(i), orbitalHTML(o.n, o.l, o.m)]));
+      note.textContent = `Tutti gli orbitali reali occupati sullo stesso nucleo, colori saturi e superfici trasparenti. Il lobo più scuro è ψ < 0. Per la nuvola elettronica (densità totale |ψ|²) premi il bottone «Densità totale». Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.`;
       return;
     }
     const parts = [];
@@ -846,7 +827,7 @@ function render3D() {
 }
 
 /** Disegna una funzione d'onda (somma di termini) come nuvola e/o superficie. */
-function drawTerms(terms, extent, { phase, color, seed = 1, points = state.points, quality = state.quality, enclosed = state.enclosed, render = state.render }) {
+function drawTerms(terms, extent, { phase, color, seed = 1, points = state.points, quality = state.quality, enclosed = state.enclosed, render = state.render, opacity = null }) {
   const pos = cssVar('--phase-pos');
   const neg = cssVar('--phase-neg');
   const light = cssVar('--scene-mode') === 'light';
@@ -863,9 +844,9 @@ function drawTerms(terms, extent, { phase, color, seed = 1, points = state.point
   }
   if (render !== 'cloud') {
     const g = sampleGrid(terms, quality, extent, enclosed);
-    const opacity = render === 'both' ? 0.45 : 0.72;
-    viewer.addSurface(g, g.iso, 1, posColor, { opacity });
-    viewer.addSurface(g, g.iso, -1, negColor, { opacity });
+    const op = opacity ?? (render === 'both' ? 0.45 : 0.72);
+    viewer.addSurface(g, g.iso, 1, posColor, { opacity: op });
+    viewer.addSurface(g, g.iso, -1, negColor, { opacity: op * 0.75 });
   }
 }
 
