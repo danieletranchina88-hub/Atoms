@@ -221,7 +221,7 @@ function setMode(mode) {
   const models = {
     atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
-    sandbox: 'Modello scelto per la scatola: Lennard–Jones per i gas nobili · GFN2-xTB quantistico per tutti gli elementi fino al radon (fino a 120 atomi), anche in acqua implicita · MINDO/3 e Hartree–Fock a scelta · campo classico qualitativo solo su scelta esplicita · verifica la deriva energetica',
+    sandbox: 'Dinamica Born–Oppenheimer con forze dalla funzione d\'onda (GFN2-xTB predefinito fino a 120 atomi, anche in acqua implicita ALPB). Vista predefinita: orbitali HOMO/LUMO e densità elettronica calcolata. Lennard–Jones solo per nobili. Verifica la deriva energetica.',
   };
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
