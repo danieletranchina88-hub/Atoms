@@ -29,7 +29,7 @@ let observatory = null;
 let densityReference = null;
 
 // viste calcolate dalla funzione d'onda (nuvola, orbitali, elettroni campionati, coppie localizzate…)
-const ELECTRONIC = ['cloud', 'orbital', 'difference', 'spin', 'electrons', 'lmo', 'deformation', 'flow'];
+const ELECTRONIC = ['real', 'cloud', 'orbital', 'difference', 'spin', 'electrons', 'lmo', 'deformation', 'flow'];
 
 const SB = {
   preset: PRESETS.find(p => p.id === 'empty') ?? PRESETS[0],
@@ -50,7 +50,7 @@ const SB = {
   add: { kind: 'mol', id: 'H2O', symbol: 'C' },
   count: 5,
   color: 'element',
-  style: 'orbital',
+  style: 'real',
   chart1: 'energy',
   lambda: 400,
   info: '',
@@ -434,9 +434,26 @@ function ensureCapacity(N, NB) {
   }
 }
 
+// Bondi, J. Phys. Chem. 68, 441 (1964). Å.
+const BONDI_A = {
+  1: 1.20, 2: 1.40, 3: 1.82, 6: 1.70, 7: 1.55, 8: 1.52, 9: 1.47, 10: 1.54,
+  11: 2.27, 12: 1.73, 14: 2.10, 15: 1.80, 16: 1.80, 17: 1.75, 18: 1.88,
+  19: 2.75, 28: 1.63, 29: 1.40, 30: 1.39, 31: 1.87, 33: 1.85, 34: 1.90,
+  35: 1.85, 36: 2.02, 46: 1.63, 47: 1.72, 48: 1.62, 49: 1.93, 50: 2.17,
+  52: 2.06, 53: 1.98, 54: 2.16, 78: 1.72, 79: 1.66, 80: 1.70, 81: 1.96, 82: 2.02,
+};
+// Superficie molecolare: 0,0016 e/bohr³ (Rahm et al., Nat. Commun. 2024; vicino a Bader 0,002).
+// Densità di legame visibile: 0,08 e/bohr³ (intervallo 0,05–0,15 usato nei visualizzatori QM).
+// Orbitale di frontiera: |ψ| = 0,03 bohr^{−3/2} (convenzione GaussView / Avogadro).
+const RHO_SURFACE = 0.0016;
+const RHO_BOND = 0.08;
+const RHO_CORE = 0.2;
+const ORB_ISO = 0.03;
+
 function atomRadius(Z) {
-  // raggio di van der Waals: dal campo classico se c'è, altrimenti stimato dal raggio covalente (r_vdW ≈ r_cov + 0,8 Å)
-  if (SB.style === 'vdw') return ATOM_PARAMS[Z] ? 0.5 * ATOM_PARAMS[Z][5] * 0.82 : 0.82 * (covalentRadius(Z) / 100 + 0.8);
+  // Raggi di van der Waals di Bondi, J. Phys. Chem. 68, 441 (1964), in Å.
+  // Dove Bondi non dà un valore: r_cov (Pyykkö) + 0,80 Å.
+  if (SB.style === 'vdw') return BONDI_A[Z] ?? (covalentRadius(Z) / 100 + 0.80);
   // nella nuvola si vedono solo i nuclei (puntiformi alla scala degli elettroni)
   if (ELECTRONIC.includes(SB.style)) return Z === 1 ? 0.09 : 0.14;
   const cov = ATOM_PARAMS[Z]?.[0] === 0 ? 0.5 * ATOM_PARAMS[Z][5] * 100 * 0.5 : covalentRadius(Z);
@@ -661,6 +678,27 @@ function onWave(m) {
     cloud.worker.postMessage({ id: m.reqId, what: 'points', fit: true, box, ...base, noCore: cloud.meta.valence, count: Math.round(Math.min(45000, Math.max(9000, 900 * nval))), seed: (cloud.id * 7919 + Math.round(m.t * 1000)) >>> 0 });
     return;
   }
+  const frontier = w ? (SB.orbital === 'lumo' ? w.lumo : SB.orbital === 'homo' ? w.homo : w.orbitals?.find(o => o.id === SB.orbital) ?? w.homo) : null;
+  if (style === 'real') {
+    if (!w || !frontier?.c) return fail('<b>Densità + orbitale</b> si calcolano dalla funzione d\'onda: scegli GFN2-xTB, MINDO/3 o Hartree–Fock.');
+    cloud.meta.orbital = frontier;
+    cloud.meta.what = 'real';
+    const colors = Float32Array.from(Array.from(base.Z).flatMap(z => { const c = new THREE.Color(cpkColor(z)); return [0.35 + 0.65 * c.r, 0.35 + 0.65 * c.g, 0.35 + 0.65 * c.b]; }));
+    cloud.worker.postMessage({
+      id: m.reqId, fit: true, box, ...base, colors,
+      layers: [
+        { role: 'density', what: 'density', colorByAtom: true, surfaces: [
+          { iso: RHO_SURFACE, sign: 1, colorByAtom: true },
+          { iso: RHO_BOND, sign: 1, colorByAtom: true },
+        ] },
+        { role: 'orbital', what: 'orbital', orb: frontier.c, surfaces: [
+          { iso: ORB_ISO, sign: 1 },
+          { iso: ORB_ISO, sign: -1 },
+        ] },
+      ],
+    });
+    return;
+  }
   const orbital = wantOrb && w ? (SB.orbital === 'lumo' ? w.lumo : SB.orbital === 'homo' ? w.homo : w.orbitals?.find(o => o.id === SB.orbital)) : null;
   if (wantOrb && !orbital) return fail('Orbitale non presente in questo campione: scegli HOMO, LUMO o un livello del diagramma.');
   cloud.meta.orbital = orbital;
@@ -689,9 +727,9 @@ function onWave(m) {
   const signed = ['difference', 'spin', 'deformation', 'flow'].includes(style);
   req.slice = { axis: observatory.sliceAxis ?? 'z', offset: observatory.sliceOffset ?? 0 };
   req.surfaces = signed ? [{ iso, sign: 1 }, { iso, sign: -1 }] : wantOrb
-    ? [{ iso: 0.05, sign: 1 }, { iso: 0.05, sign: -1 }]
-    // tre superfici di densità costante: confine di van der Waals (0,002 e/bohr³), regione dei legami, gusci interni
-    : [{ iso: 0.002, sign: 1, colorByAtom: true }, { iso: 0.05, sign: 1, colorByAtom: true }, { iso: 0.3, sign: 1, colorByAtom: true }];
+    ? [{ iso: ORB_ISO, sign: 1 }, { iso: ORB_ISO, sign: -1 }]
+    // superficie molecolare 0,0016 (Rahm 2024), densità di legame 0,08, guscio interno 0,2 e/bohr³
+    : [{ iso: RHO_SURFACE, sign: 1, colorByAtom: true }, { iso: RHO_BOND, sign: 1, colorByAtom: true }, { iso: RHO_CORE, sign: 1, colorByAtom: true }];
   if (!wantOrb && !signed) req.colors = Float32Array.from(Array.from(req.Z).flatMap(z => { const c = new THREE.Color(cpkColor(z)); return [0.35 + 0.65 * c.r, 0.35 + 0.65 * c.g, 0.35 + 0.65 * c.b]; }));
   cloud.worker.postMessage(req);
 }
@@ -787,28 +825,34 @@ function onGrid(g) {
       grp.add(mesh);
     }
     const count = (k) => g.orbitals.filter(o => o.kind === k).length;
-    SB.cloudNote = `<b>Coppie di elettroni</b>: ${g.orbitals.length} orbitali localizzati di Pipek–Mezey, ciascuno con 2 elettroni (${count('sigma')} legami σ, ${count('pi')} π, ${count('lone')} doppietti solitari${count('multi') ? `, ${count('multi')} a più centri` : ''}). Sono una rotazione degli orbitali molecolari che non cambia la densità né l'energia: mostrano dove stanno le coppie di Lewis. Isosuperfici |ψ| = 0,1 bohr<sup>−3/2</sup>, un colore per orbitale (tono scuro = segno negativo). Clicca un orbitale nell'elenco per isolarlo.`;
+    SB.cloudNote = `<b>Coppie di elettroni</b>: ${g.orbitals.length} orbitali localizzati di Pipek–Mezey, ciascuno con 2 elettroni (${count('sigma')} legami σ, ${count('pi')} π, ${count('lone')} doppietti solitari${count('multi') ? `, ${count('multi')} a più centri` : ''}). Sono una rotazione degli orbitali molecolari che non cambia la densità né l'energia: mostrano dove stanno le coppie di Lewis. Isosuperfici |ψ| = 0,05 bohr<sup>−3/2</sup>, un colore per orbitale (tono scuro = segno negativo). Clicca un orbitale nell'elenco per isolarlo.`;
     renderElectronic();
   } else {
-    const OPAC = { 0.002: 0.13, 0.05: 0.24, 0.3: 0.5 };
+    const OPAC = { 0.0016: 0.18, 0.002: 0.16, 0.08: 0.38, 0.05: 0.28, 0.2: 0.55, 0.3: 0.55 };
     const pos = cssVar('--phase-pos'), neg = cssVar('--phase-neg');
     const signed = ['difference', 'spin', 'deformation', 'flow'].includes(meta.what);
-    for (const sf of g.meshes) {
-      if (!sf.positions.length) continue;
+    const drawMesh = (sf, role) => {
+      if (!sf.positions.length) return;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(sf.positions, 3));
       geo.setAttribute('normal', new THREE.BufferAttribute(sf.normals, 3));
       if (sf.colors) geo.setAttribute('color', new THREE.BufferAttribute(sf.colors, 3));
-      const orb = g.what !== 'density';
+      const isOrb = role === 'orbital' || (role == null && g.what !== 'density');
       const flowCol = meta.what === 'flow' || meta.what === 'deformation' ? (sf.sign > 0 ? '#ff6a3d' : '#3d8bff') : null;
       const mat = new THREE.MeshStandardMaterial({
         color: sf.colors ? '#ffffff' : flowCol ?? (sf.sign > 0 ? pos : neg), vertexColors: !!sf.colors, roughness: 0.55, metalness: 0,
-        transparent: true, opacity: orb ? (signed ? 0.72 : 0.88) : OPAC[sf.iso] ?? 0.35, side: THREE.DoubleSide, depthWrite: false,
+        transparent: true, opacity: isOrb ? (signed ? 0.72 : 0.82) : OPAC[sf.iso] ?? 0.35, side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.renderOrder = 2;
+      mesh.renderOrder = isOrb ? 4 : 2;
       grp.add(mesh);
-    }
+    };
+    if (g.what === 'layers') {
+      for (const sf of g.meshes) drawMesh(sf, sf.role);
+      const o = meta.orbital;
+      SB.cloudNote = `Vista reale: superficie molecolare a <b>${RHO_SURFACE}</b> e/bohr³ (Rahm et al., Nat. Commun. 2024; racchiude quasi tutta la densità, come il raggio termodinamico) e densità di legame a <b>${RHO_BOND}</b> e/bohr³. Sopra, l'orbitale di frontiera ${SB.orbital === 'lumo' ? 'LUMO' : 'HOMO'}${o ? ` (ε = ${nf(o.e * meta.eUnit, 2)} eV)` : ''} a |ψ| = ${ORB_ISO} bohr<sup>−3/2</sup>. Il colore dell'orbitale è il segno di ψ, non un colore osservato.`;
+    } else {
+    for (const sf of g.meshes) drawMesh(sf, null);
     if (meta.what === 'flow') {
       SB.cloudNote = meta.deform
         ? `<b>Flusso degli elettroni</b> fra t = ${nf(meta.t - meta.dt, 1)} e ${nf(meta.t, 1)} fs: variazione della densità di legame (ρ meno gli atomi sferici che seguono i nuclei), quindi solo gli elettroni che si ridistribuiscono fra legami, doppietti e atomi. Arancio: elettroni in arrivo; blu: in partenza (±${nf(meta.iso * 1000, 1)}·10⁻³ e/bohr³). Durante una reazione si vede la coppia che passa da un legame all'altro. Non è la traiettoria di singoli elettroni.`
@@ -822,17 +866,18 @@ function onGrid(g) {
     } else if (g.what === 'density') {
       SB.cloudNote = meta.mode === 'promolecular'
         ? 'Nuvola elettronica <b>promolecolare</b>: somma delle densità degli atomi isolati (calcolate con la DFT del sito). Con il campo classico gli elettroni non si ridistribuiscono nei legami: per la densità vera scegli il motore quantistico.'
-        : `Densità elettronica ρ(r) calcolata dalla funzione d'onda ${meta.mode === 'sto' ? 'MINDO/3 (valenza) più il core atomico' : meta.mode === 'xtb' ? 'GFN2-xTB (valenza) più il core atomico' : 'Hartree–Fock (tutti gli elettroni)'}: superfici a 0,002 e/bohr³ (confine di van der Waals), 0,05 (legami) e 0,3 (vicino ai nuclei).`;
+        : `Densità elettronica ρ(r) dalla funzione d'onda ${meta.mode === 'sto' ? 'MINDO/3 (valenza) più il core' : meta.mode === 'xtb' ? 'GFN2-xTB (valenza) più il core' : 'Hartree–Fock'}: ${RHO_SURFACE} e/bohr³ (superficie, Rahm 2024), ${RHO_BOND} (legami) e ${RHO_CORE} (guscio interno).`;
     } else {
       const o = meta.orbital;
-      SB.cloudNote = o ? `${SB.orbital === 'lumo' ? 'LUMO' : SB.orbital === 'homo' ? 'HOMO' : `MO ${(o.index ?? 0) + 1}`} (spin ${o.spin}), ε = ${nf(o.e * meta.eUnit, 2)} eV: isosuperficie |ψ| = 0,05 bohr<sup>−3/2</sup>, in colore il segno della funzione d'onda.` : 'Orbitale non disponibile.';
+      SB.cloudNote = o ? `${SB.orbital === 'lumo' ? 'LUMO' : SB.orbital === 'homo' ? 'HOMO' : `MO ${(o.index ?? 0) + 1}`} (spin ${o.spin}), ε = ${nf(o.e * meta.eUnit, 2)} eV: isosuperficie |ψ| = ${String(ORB_ISO).replace('.', ',')} bohr<sup>−3/2</sup>. Il colore è il segno di ψ, non un colore osservato.` : 'Orbitale non disponibile.';
+    }
     }
   }
   SB.cloudNote += ` Calcolo a t = ${nf(meta.t, 2)} fs (${nf(cloud.cost, 0)} ms).`;
   if (cloud.group) { cloud.group.traverse(x => { x.geometry?.dispose(); x.material?.dispose(); }); scene.group.remove(cloud.group); }
   cloud.group = grp;
   renderLegend();
-  if (SB.style === 'orbital') renderElectronic();
+  if (SB.style === 'orbital' || SB.style === 'real') renderElectronic();
   scene.group.add(grp);
 }
 
@@ -1195,6 +1240,7 @@ function renderControls() {
       <div class="range-row"><label for="sb-rdf">g(r) fra</label><select id="sb-rdf">${rdfOptions()}</select><button type="button" class="btn" id="sb-reset-an" title="Azzera g(r), spostamento quadratico medio e fluttuazioni di energia">Azzera</button></div></div>
     <div class="ctl"><span class="lbl">Vista microscopica</span></div>
     <div class="seg" id="sb-style" style="margin-top:4px">
+      <button type="button" data-v="real" aria-pressed="${SB.style === 'real'}" title="Densità elettronica reale (0,0016 e/bohr³) più l'orbitale di frontiera">densità + orbitale</button>
       <button type="button" data-v="ball" aria-pressed="${SB.style === 'ball'}">sfere e bastoncini</button>
       <button type="button" data-v="vdw" aria-pressed="${SB.style === 'vdw'}">van der Waals</button>
       <button type="button" data-v="cloud" aria-pressed="${SB.style === 'cloud'}" title="La densità degli elettroni ρ(r): come appaiono davvero atomi e molecole">nuvola elettronica</button>
@@ -1209,7 +1255,7 @@ function renderControls() {
       <button type="button" data-v="deformation" aria-pressed="${SB.style === 'deformation'}" title="Dove si accumulano gli elettroni nei legami rispetto agli atomi isolati (GFN2-xTB)">densità di legame</button>
       <button type="button" data-v="flow" aria-pressed="${SB.style === 'flow'}" title="Dove gli elettroni arrivano e da dove partono fra due istanti della dinamica">flusso degli elettroni</button>
     </div>
-    ${SB.style === 'orbital' ? `<div class="seg" id="sb-orb" style="margin-top:4px">
+    ${SB.style === 'orbital' || SB.style === 'real' ? `<div class="seg" id="sb-orb" style="margin-top:4px">
       <button type="button" data-v="homo" aria-pressed="${SB.orbital === 'homo'}">HOMO</button>
       <button type="button" data-v="lumo" aria-pressed="${SB.orbital === 'lumo'}">LUMO</button>
     </div>` : ''}

@@ -343,7 +343,7 @@ export function samplePoints(g, pos, K, seed = 1) {
  * Orbitali localizzati di Pipek–Mezey dalla funzione d'onda GFN2 (orbitali doppiamente occupati) e loro
  * isosuperfici, ciascuna su una piccola griglia attorno ai suoi centri.
  */
-export function localizedOrbitals({ Z, pos, occ, iso = 0.1, maxOrbitals = 80 }) {
+export function localizedOrbitals({ Z, pos, occ, iso = 0.05, maxOrbitals = 80 }) {
   const b = xtbBasis(Z, GFN2.elements), n = b.nao;
   if (!occ || occ.n !== n) throw new Error('Orbitali occupati non disponibili per questo fotogramma.');
   const { S } = moleculeIntegrals(b, Float64Array.from(pos, v => v / BOHR));
@@ -385,7 +385,23 @@ if (typeof self !== 'undefined') self.onmessage = (ev) => {
       postMessage({ id: m.id, what: 'lmo', ...r }, transfer);
       return;
     }
-    // griglia limitata alla zona delle molecole (con il margine della superficie a 0,002 e/bohr³)
+    if (Array.isArray(m.layers)) {
+      if (m.fit) Object.assign(m, fitGrid(m.pos, { margin: 3.6, maxHalf: (m.box ?? 40) / 2 + 1.2 }));
+      const meshes = [];
+      const transfer = [];
+      for (const layer of m.layers) {
+        const g = computeGrid({ ...m, what: layer.what, orb: layer.orb });
+        for (const sf of computeSurfaces(g, layer.surfaces, m.pos, layer.colorByAtom ? m.colors : null)) {
+          sf.role = layer.role;
+          meshes.push(sf);
+          transfer.push(sf.positions.buffer, sf.normals.buffer);
+          if (sf.colors) transfer.push(sf.colors.buffer);
+        }
+      }
+      postMessage({ id: m.id, what: 'layers', meshes }, transfer);
+      return;
+    }
+    // griglia limitata alla zona delle molecole (con il margine della superficie a 0,0016 e/bohr³)
     if (m.fit) Object.assign(m, fitGrid(m.pos, { maxHalf: m.box / 2 + 1.2 }));
     if (m.what === 'points') {
       const g = computeGrid({ ...m, what: 'density' });

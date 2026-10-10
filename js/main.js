@@ -221,7 +221,7 @@ function setMode(mode) {
   const models = {
     atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
-    sandbox: 'Dinamica Born–Oppenheimer con forze dalla funzione d\'onda (GFN2-xTB predefinito fino a 120 atomi, anche in acqua implicita ALPB). Vista predefinita: orbitali HOMO/LUMO e densità elettronica calcolata. Lennard–Jones solo per nobili. Verifica la deriva energetica.',
+    sandbox: 'Dinamica di Born–Oppenheimer. Vista predefinita: densità a 0,0016 e/bohr³ (superficie molecolare, Rahm et al. 2024) più orbitale di frontiera. Forze da GFN2-xTB. Il colore dell\'orbitale è il segno di ψ, non un colore osservato.',
   };
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
@@ -704,13 +704,13 @@ function render3D() {
       for (let i = 0; i < res.count; i++) colors.set(palette[state.atomView === 'density' ? 0 : res.groups[i]], 3 * i);
       viewer.addPoints(res.positions, colors, { size: state.atomView === 'density' ? 0.85 : 0.7, opacity: cssVar('--scene-mode') === 'light' ? 0.32 : 0.42 });
     }
-    viewer.addNucleus();
+    viewer.addNucleus([0, 0, 0], null, el.mass);
     setTitle(`${el.name}`, state.atomView === 'orbitals' ? 'scomposizione in orbitali occupati, non l’aspetto' : 'densità di probabilità elettronica');
     setLegend(state.atomView === 'density'
       ? [[cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4', 'ρ = Σ nᵢ|ψᵢ|²']]
       : visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
     note.textContent = state.atomView === 'density'
-      ? `Ogni punto è campionato con la regola di Born, probabilità ∝ |ψ|² degli orbitali Kohn–Sham occupati. Il nucleo è disegnato circa 100 000 volte più grande del reale: il raggio nucleare è dell’ordine dei fm, la nube degli Å. Tacche ogni ${formatPm(viewer.tickPm)}.`
+      ? `Ogni punto è un campione della regola di Born: probabilità ∝ |ψ|² degli orbitali Kohn–Sham occupati (DFT-LDA). Il nucleo è ingrandito ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} rispetto a R = 1,25 A^{1/3} fm: alla scala vera sarebbe invisibile. Tacche ogni ${formatPm(viewer.tickPm)}.`
       : `Scomposizione negli orbitali occupati, colori per sottolivello: non è l’aspetto dell’atomo. La densità totale è la somma. Nucleo non in scala. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }

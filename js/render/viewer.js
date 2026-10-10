@@ -244,8 +244,13 @@ export class Viewer {
     this.tickPm = stepPm;
   }
 
-  addNucleus(position = [0, 0, 0], label = null) {
-    const r = this.extent * 0.006;
+  addNucleus(position = [0, 0, 0], label = null, massU = 12) {
+    // R = r0 A^{1/3}, r0 = 1,25 fm (raggio di carica nucleare). 1 fm = 1/52917,7 bohr.
+    const A = Math.max(1, Number(massU) || 1);
+    const rBohr = 1.25 * Math.cbrt(A) / 52917.721;
+    const shown = this.extent * 0.0045;
+    this.nucleusScale = Math.max(1, shown / rBohr);
+    const r = rBohr * this.nucleusScale;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(r, 20, 14),
       new THREE.MeshStandardMaterial({ color: cssVar('--nucleus') || '#c9a227', emissive: 0x000000, emissiveIntensity: 0, roughness: 0.6 }),
