@@ -287,7 +287,7 @@ export class Viewer {
   }
 
   /** Isosuperficie dal campo campionato su griglia. */
-  addSurface(gridField, iso, sign, color, { opacity = 0.82 } = {}) {
+  addSurface(gridField, iso, sign, color, { opacity = 0.82, emissive = 0 } = {}) {
     const { positions, normals } = marchingCubes(gridField, iso, sign);
     if (positions.length === 0) return null;
     const geo = new THREE.BufferGeometry();
@@ -295,8 +295,10 @@ export class Viewer {
     geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     const mat = new THREE.MeshStandardMaterial({
       color,
-      roughness: 0.38,
-      metalness: 0.05,
+      emissive: color,
+      emissiveIntensity: emissive,
+      roughness: 0.55,
+      metalness: 0,
       transparent: opacity < 1,
       opacity,
       side: THREE.DoubleSide,

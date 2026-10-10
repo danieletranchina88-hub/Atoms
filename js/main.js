@@ -727,7 +727,7 @@ function render3D() {
           quality,
           enclosed,
           render: 'surface',
-          opacity: nOrb > 20 ? 0.28 : 0.45,
+          opacity: nOrb > 20 ? 0.42 : 0.78,
         });
       });
       viewer.addNucleus([0, 0, 0], null, el.mass);
@@ -832,7 +832,7 @@ function drawTerms(terms, extent, { phase, color, seed = 1, points = state.point
   const neg = cssVar('--phase-neg');
   const light = cssVar('--scene-mode') === 'light';
   const posColor = phase ? pos : color;
-  const negColor = phase ? neg : shade(color, light ? 0.45 : 0.32);
+  const negColor = phase ? neg : shade(color, light ? 0.62 : 0.55);
   if (render !== 'surface') {
     const pts = samplePoints(terms, points, seed);
     const cp = colorToRGB(posColor);
@@ -845,8 +845,8 @@ function drawTerms(terms, extent, { phase, color, seed = 1, points = state.point
   if (render !== 'cloud') {
     const g = sampleGrid(terms, quality, extent, enclosed);
     const op = opacity ?? (render === 'both' ? 0.45 : 0.72);
-    viewer.addSurface(g, g.iso, 1, posColor, { opacity: op });
-    viewer.addSurface(g, g.iso, -1, negColor, { opacity: op * 0.75 });
+    viewer.addSurface(g, g.iso, 1, posColor, { opacity: op, emissive: 0.35 });
+    viewer.addSurface(g, g.iso, -1, negColor, { opacity: op * 0.85, emissive: 0.2 });
   }
 }
 
