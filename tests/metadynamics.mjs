@@ -154,21 +154,17 @@ const check = (name, ok, detail) => {
   const fes = metad.reconstructFES(50);
   
   // Verifica che FES abbia due minimi vicino a x = ±1
-  let min1 = -1, min2 = 1;
-  let idx1 = fes.s.findIndex(s => s > -1.2 && s < -0.8);
-  let idx2 = fes.s.findIndex(s => s > 0.8 && s < 1.2);
-  
   let F_min1 = Infinity, F_min2 = Infinity;
-  for (let i = Math.max(0, idx1-5); i < Math.min(fes.F.length, idx1+5); i++) {
-    F_min1 = Math.min(F_min1, fes.F[i]);
-  }
-  for (let i = Math.max(0, idx2-5); i < Math.min(fes.F.length, idx2+5); i++) {
-    F_min2 = Math.min(F_min2, fes.F[i]);
+  for (let i = 0; i < fes.s.length; i++) {
+    if (fes.s[i] > -1.2 && fes.s[i] < -0.8) F_min1 = Math.min(F_min1, fes.F[i]);
+    if (fes.s[i] > 0.8 && fes.s[i] < 1.2) F_min2 = Math.min(F_min2, fes.F[i]);
   }
   
   // F(barriera) > F(minimo) di almeno 0.5 kcal/mol
-  const barrier_idx = fes.s.findIndex(s => s > -0.2 && s < 0.2);
-  const F_barrier = barrier_idx >= 0 ? fes.F[barrier_idx] : Infinity;
+  let F_barrier = -Infinity;
+  for (let i = 0; i < fes.s.length; i++) {
+    if (fes.s[i] > -0.2 && fes.s[i] < 0.2) F_barrier = Math.max(F_barrier, fes.F[i]);
+  }
   
   check('Ricostruzione FES doppio pozzo', 
     F_barrier > Math.max(F_min1, F_min2) + 0.5,
