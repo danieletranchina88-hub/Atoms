@@ -1,4 +1,17 @@
-# Atlante Orbitale
+# Atoms
+
+Simulatore didattico nel browser focalizzato su due strumenti:
+
+1. **Tavola periodica + visualizzazione di atomi e orbitali**  
+   Tutti i 118 elementi con calcolo autoconsistente DFT-LDA relativistico scalare (Koelling–Harmon).  
+   Densità |ψ|², orbitali individuali, sezioni, livelli energetici, configurazione elettronica.
+
+2. **Sandbox di dinamica molecolare reattiva**  
+   Atomi e molecole in una scatola. Motori: Lennard–Jones, GFN2-xTB (fino a 120 atomi, anche con solvente implicito ALPB), MINDO/3, Hartree–Fock.  
+   Viste elettroniche dalla funzione d’onda, reazioni emergenti, microscopio di reazione, grafici di energia/temperatura/g(r).
+
+Le altre modalità (molecole complete, reazioni, becher, cinetica, laboratorio, fasi, formazione del legame) sono state rimosse per concentrare l’interfaccia su questi due nuclei.
+
 
 Un simulatore didattico di chimica nel browser. Calcola orbitali, molecole e grandezze termodinamiche con **modelli espliciti e approssimati**. L’accordo con un altro programma verifica l’implementazione dello stesso modello, non rende esatti i risultati fisici.
 
