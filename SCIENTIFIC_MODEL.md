@@ -192,3 +192,40 @@ Unità ridotte; mappatura **approssimata** all'argon con σ = 3,405 Å, ε/kB = 
 `tests/structure.mjs` verifica Q₆ dell'FCC, invarianza per rotazione, cristallo, liquido e gas, e le equazioni nette bilanciate del becher. `tests/materials.mjs` verifica il gradiente del potenziale, continuità al cutoff, conservazione NVE, bilancio NVT e lavoro del volume, fusione emergente, simmetria/stechiometria/volume della cella sperimentale, precipitazione e dissoluzione della malachite, controllo Cu/HCl, rollback e 99 miscele diluite tra reagenti. La suite controlla implementazione e invarianti; non costituisce validazione sperimentale di tutti i prodotti e di tutte le condizioni.
 
 La suite MINTEQ esamina inoltre le 588 ricette catione × anione: 587 convergono; rame/ioduro viene rifiutato esplicitamente perché manca la redox di I₂. Questi numeri descrivono copertura numerica, non certificazione sperimentale di tutte le ricette. Sono preservate le modalità MINDO/3, cinetica e analisi MD introdotte separatamente su main.
+
+
+## Metadinamica Well-Tempered
+
+Estensione della dinamica molecolare per l'esplorazione accelerata di reazioni chimiche con barriere energetiche elevate. Implementazione dell'algoritmo di Barducci, Bussi e Parrinello (Physical Review Letters 100, 020603, 2008).
+
+**Variabili Collettive (CV)**: grandezze macroscopiche che descrivono il progresso della reazione. Il modulo `js/chem/metadynamics.js` implementa tre tipi di CV con gradienti analitici:
+
+- **Distanza**: s = |R_i − R_j| per monitorare rottura/formazione di legami chimici
+- **Angolo**: s = ∠(R_i, R_j, R_k) per cambiamenti conformazionali e riarrangiamenti
+- **Numero di coordinazione**: s = Σ_j (1 − (r_ij/r₀)^n) / (1 − (r_ij/r₀)^m) con n = 6, m = 12 per reazioni complesse con cambiamento di coordinazione
+
+**Potenziale di bias**: somma di gaussiane depositate nello spazio delle CV durante la simulazione:
+
+V(s,t) = Σ_{t'<t} W₀ exp(−V(s(t'),t')/(kB ΔT)) exp(−Σ_k (s_k − s_k(t'))²/(2σ_k²))
+
+dove W₀ è l'altezza iniziale della gaussiana, σ_k la larghezza lungo la k-esima CV, e ΔT = (γ − 1)T controlla la convergenza asintotica con γ = T_bias/T (bias factor).
+
+**Forze di bias**: calcolate analiticamente come gradiente del potenziale di bias rispetto alle coordinate atomiche:
+
+F^bias_i = −∇_{R_i} V(s,t) = −Σ_k (∂V/∂s_k)(∂s_k/∂R_i)
+
+Le forze di bias vengono sommate vettorialmente alle forze del campo reattivo (`ReactiveFF`) a ogni passo di integrazione Velocity Verlet, accelerando termodinamicamente l'esplorazione dello spazio delle fasi.
+
+**Superficie di Energia Libera (FES)**: a convergenza, il bias accumulato fornisce direttamente l'energia libera di Gibbs della reazione:
+
+F(s) ≈ −(1 + T/ΔT) V(s) + costante = −(γ/(γ − 1)) V(s) + costante
+
+Il metodo `reconstructFES(gridSize)` ricostruisce la FES su una griglia regolare nello spazio delle CV, permettendo di identificare stati di transizione (massimi locali) e intermedi di reazione (minimi locali).
+
+**Parametri tipici**: W₀ = 0.001–0.01 Hartree, γ = 10–20, σ = 0.1–0.2 Å per distanze, 0.1–0.3 rad per angoli. Il deposition stride (tipicamente 50–100 step MD) controlla la frequenza di deposizione delle gaussiane.
+
+**Test di verifica** (`tests/metadynamics.mjs`): gradienti analitici verificati contro differenze finite (tolleranza 1e-7), esplorazione di doppio pozzo armonico, ricostruzione FES con corretta topologia (minimi e barriere).
+
+**Esempio applicativo** (`examples/metadynamics-water-dissociation.js`): dissociazione H₂O → OH + H con CV = distanza O-H, dimostrazione del superamento della barriera di attivazione e ricostruzione della FES.
+
+**Limitazioni**: la convergenza della FES richiede simulazioni sufficientemente lunghe (tipicamente > 10000 step MD). Per sistemi con più di 2-3 CV, la ricostruzione della FES diventa computazionalmente proibitiva (maledizione della dimensionalità). Il metodo non fornisce direttamente le velocità di reazione, ma solo le energie libere.
