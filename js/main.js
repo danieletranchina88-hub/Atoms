@@ -6,8 +6,9 @@ import {
 } from './physics/configuration.js';
 import { loadAtom, getOrbital } from './physics/atomStore.js';
 import { term, samplePoints, sampleGrid, sampleAtom, evaluate, RadialFunction } from './physics/wavefunction.js';
-import { orbitalName, mOrder, angularNodesDescription } from './physics/harmonics.js';
-import { Viewer, formatPm } from './render/viewer.js';
+import { orbitalName, orbitalNameText, mOrder, angularNodesDescription } from './physics/harmonics.js';
+import { Viewer, formatPm, textSprite } from './render/viewer.js';
+import * as THREE from 'three';
 import { buildPeriodicTable, blockOf, ramp } from './ui/periodicTable.js';
 import { ATOM_SUMMARY } from './physics/atomSummary.js';
 import { PAULING, ALLEN, ELECTRON_AFFINITY, OXIDATION_STATES } from './chem/elementData.js';
@@ -402,7 +403,7 @@ function renderControls() {
       </div>
       ${pointsCtl}
       <p class="desc-muted">${state.atomView === 'all'
-        ? 'Ogni orbitale reale occupato (1s, 2s, 2p<sub>x</sub>, 2p<sub>y</sub>…) è una superficie a parte, con il proprio colore. Il lobo scuro è ψ < 0. Non è l’aspetto dell’atomo: quello è la densità totale, somma di tutti.'
+        ? 'Ogni orbitale reale occupato sta in un riquadro, con la propria forma (1s, 2p<sub>x</sub>, 3d<sub>xy</sub>…). Le dimensioni sono normalizzate: si confrontano le forme, non i raggi veri. Il lobo scuro è ψ < 0.'
         : state.atomView === 'orbitals'
         ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempimento di Hund. Stesso colore per tutto il sottolivello.'
         : 'Densità elettronica totale a simmetria sferica: si vedono i gusci K, L, M… Un sottolivello pieno è sempre sferico (teorema di Unsöld).'}</p>`;
@@ -703,6 +704,7 @@ function render3D() {
   const { atom, mode } = state;
   if (!atom) return;
   viewer.clear();
+  viewer.setAxesVisible(true);
   const el = element(atom.Z);
   const note = $('viewport-note');
 
@@ -710,26 +712,47 @@ function render3D() {
     const visible = atom.orbitals.filter(o => !state.hidden.has(o.label));
     if (state.atomView === 'all') {
       const list = occupiedRealOrbitals(atom);
-      const extent = Math.max(...(list.length ? list : visible).map(o => o.radial.radiusEnclosing(0.985)), 0.05) * 1.05;
-      viewer.frame(extent, true);
       const nOrb = list.length;
-      const enclosed = nOrb <= 1 ? state.enclosed : nOrb <= 6 ? 0.62 : nOrb <= 14 ? 0.48 : 0.4;
-      const quality = nOrb <= 6 ? Math.min(state.quality, 56) : nOrb <= 14 ? 40 : 28;
+      const cols = Math.max(1, Math.ceil(Math.sqrt(nOrb * 1.15)));
+      const rows = Math.max(1, Math.ceil(nOrb / cols));
+      const pitchX = 1.42;
+      const pitchZ = 1.72;
+      const extent = Math.max(cols * pitchX, rows * pitchZ) * 0.62;
+      viewer.frame(extent, false);
+      viewer.setAxesVisible(false);
+      const quality = nOrb <= 8 ? 48 : nOrb <= 20 ? 36 : 30;
       list.forEach((o, i) => {
-        drawTerms([term(o.radial, o.l, o.m)], extent, {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = (col - (cols - 1) / 2) * pitchX;
+        const z = ((rows - 1) / 2 - row) * pitchZ;
+        const reach = Math.max(o.radial.radiusEnclosing(0.92), 0.08);
+        const before = viewer.content.children.length;
+        drawTerms([term(o.radial, o.l, o.m)], reach * 1.2, {
           phase: false,
           color: orbitalColor(i),
           seed: 40 + i * 17,
-          points: Math.max(1200, Math.round(state.points / Math.max(1, nOrb))),
           quality,
-          enclosed,
-          render: nOrb > 10 ? 'surface' : 'both',
+          enclosed: 0.72,
+          render: 'surface',
         });
+        const g = new THREE.Group();
+        for (const obj of viewer.content.children.slice(before)) {
+          viewer.content.remove(obj);
+          g.add(obj);
+        }
+        g.scale.setScalar(0.46 / reach);
+        g.position.set(x, 0, z);
+        viewer.add(g);
+        const label = textSprite(orbitalNameText(o.n, o.l, o.m), orbitalColor(i), 42);
+        const h = 0.2;
+        label.position.set(x, 0, z - 0.62);
+        label.scale.set(h * label.userData.aspect, h, 1);
+        viewer.add(label);
       });
-      viewer.addNucleus([0, 0, 0], null, el.mass);
-      setTitle(`${el.name}`, `${nOrb} orbitali reali occupati, sovrapposti`);
-      setLegend(list.map((o, i) => [orbitalColor(i), `${orbitalHTML(o.n, o.l, o.m)}<sup>${o.occ}</sup>`]));
-      note.textContent = `Ogni colore è un orbitale reale occupato, calcolato con la DFT-LDA dell’atomo (regola di Hund). Il lobo più scuro è il segno opposto di ψ, non un colore osservato. La superficie è stretta al ${Math.round(enclosed * 100)}% così i lobi non si coprono. La somma di tutti è la densità totale. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.`;
+      setTitle(`${el.name}`, `${nOrb} orbitali, uno per riquadro`);
+      setLegend([]);
+      note.textContent = `Ogni riquadro è un orbitale reale occupato (regola di Hund, DFT-LDA). La forma è in scala propria, così 1s e gli orbitali esterni si vedono entrambi: i raggi veri sono diversi. Il lobo scuro è il segno opposto di ψ, non un colore osservato. Ruota e ingrandisci un riquadro.`;
       return;
     }
     const parts = [];

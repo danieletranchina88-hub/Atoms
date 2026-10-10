@@ -305,11 +305,17 @@ button, select, input { font: inherit; color: inherit; }
 .viewport-legend {
   position: absolute; bottom: 12px; left: 14px;
   display: flex; flex-wrap: wrap; gap: 4px 12px;
-  max-width: 70%;
+  max-width: min(70%, 420px);
+  max-height: 22%;
+  overflow: auto;
   font-size: 12px;
-  pointer-events: none;
+  pointer-events: auto;
   text-shadow: 0 1px 6px var(--scene-bg);
+  background: color-mix(in srgb, var(--scene-bg) 72%, transparent);
+  border-radius: 8px;
+  padding: 2px 6px;
 }
+.viewport-legend:empty { display: none; }
 .viewport-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .viewport-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .viewport-tools {
@@ -643,7 +649,7 @@ body[data-mode="reaction"] .workspace { grid-template-columns: 330px minmax(0, 1
 .heat-bar { width: 160px; height: 10px; border-radius: 2px; display: inline-block; }
 @media (max-width: 640px) {
   .viewport-tools { top: auto; bottom: 10px; right: 10px; }
-  .viewport-legend { bottom: 48px; max-width: 90%; }
+  .viewport-legend { bottom: 48px; max-width: min(92%, 280px); max-height: 18%; }
   .viewport-title { right: 14px; font-size: 17px; }
 }
 
