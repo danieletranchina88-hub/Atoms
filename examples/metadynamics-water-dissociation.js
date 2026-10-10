@@ -1,121 +1,180 @@
-// Esempio di utilizzo della metadinamica well-tempered nella sandbox
-// Caso studio: dissociazione di H₂O → OH + H
+// Esempio di utilizzo della metadinamica well-tempered nella sandbox.
+// Caso studio: dissociazione di H2O -> OH + H
 //
 // Questo esempio mostra come:
 // 1. Definire variabili collettive appropriate per la reazione
 // 2. Inizializzare il bias metadinamico
-// 3. Integrare con il simulatore esistente
+// 3. Integrare con il campo di forze reattivo
 // 4. Ricostruire la superficie di energia libera
+// 5. Identificare lo stato di transizione e la barriera di energia libera
+//
+// Riferimento teorico:
+//   A. Barducci, G. Bussi, M. Parrinello, Phys. Rev. Lett. 100, 020603 (2008)
+//
+// Esecuzione:
+//   node examples/metadynamics-water-dissociation.js
 
-import { Simulation } from './md.js';
-import { ReactiveFF } from './reactive.js';
-import { CollectiveVariable, WellTemperedMetaDynamics } from './metadynamics.js';
+import { CollectiveVariable, WellTemperedMetaDynamics, estimateSigma } from '../js/chem/metadynamics.js';
+import { ReactiveFF } from '../js/chem/reactive.js';
 
-// Configurazione iniziale: molecola di H₂O
+// ─── Configurazione iniziale: molecola di H2O ───
+// Geometria di equilibrio sperimentale (r_OH = 0.957 A, angolo HOH = 104.5 gradi)
 const atoms = [
-  {Z: 8, pos: [0, 0, 0]},        // O
-  {Z: 1, pos: [0.96, 0, 0]},     // H1
-  {Z: 1, pos: [-0.24, 0.93, 0]}  // H2
+  { Z: 8, mass: 15.999, pos: [0.000,  0.000,  0.000] },   // O
+  { Z: 1, mass: 1.008,  pos: [0.957,  0.000,  0.000] },   // H1 (legame che si rompe)
+  { Z: 1, mass: 1.008,  pos: [-0.240,  0.927,  0.000] }   // H2 (legame spettatore)
 ];
 
+const N = atoms.length;
 const Z = atoms.map(a => a.Z);
+const masses = new Float64Array(N);
+atoms.forEach((a, i) => { masses[i] = a.mass * 1822.888; }); // amu -> massa elettronica
 const pos = new Float64Array(atoms.flatMap(a => a.pos));
-const vel = new Float64Array(pos.length); // velocità iniziali nulle
+const vel = new Float64Array(pos.length);
 
-// Definizione delle variabili collettive per la dissociazione
+// Inizializza velocita con distribuzione di Maxwell-Boltzmann a T = 300 K
+const kB = 3.166808578e-6; // Hartree/K
+const T_init = 300;
+let seed = 42;
+const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const gauss = () => { const u1 = rng(), u2 = rng(); return Math.sqrt(-2*Math.log(u1+1e-10))*Math.cos(2*Math.PI*u2); };
+for (let i = 0; i < N; i++) {
+  const sigma_v = Math.sqrt(kB * T_init / masses[i]);
+  vel[3*i] = gauss() * sigma_v;
+  vel[3*i+1] = gauss() * sigma_v;
+  vel[3*i+2] = gauss() * sigma_v;
+}
+
+// ─── Definizione delle variabili collettive ───
 // CV1: distanza O-H1 (il legame che si rompe)
-const cv_OH1 = new CollectiveVariable('distance', [0, 1], {sigma: 0.15});
+const cv_OH1 = new CollectiveVariable('distance', [0, 1], { sigma: 0.12 });
 
-// CV2: distanza O-H2 (per monitorare che non si rompa)
-const cv_OH2 = new CollectiveVariable('distance', [0, 2], {sigma: 0.15});
+// Stima automatica di sigma (verifica che sia ragionevole)
+const sigmas = estimateSigma([cv_OH1], Z, pos, 300);
+console.log(`Sigma stimato per CV(O-H): ${sigmas[0].toFixed(4)} A (usato: ${cv_OH1.sigma})`);
 
-// Inizializzazione metadinamica
-const metad = new WellTemperedMetaDynamics([cv_OH1, cv_OH2], {
-  W0: 0.002,              // Altezza iniziale gaussiana (Hartree)
-  biasFactor: 12,         // gamma = T_bias/T (controllo convergenza)
-  T: 300,                 // Temperatura (K)
+// ─── Inizializzazione metadinamica ───
+const metad = new WellTemperedMetaDynamics([cv_OH1], {
+  W0: 0.003,              // Altezza iniziale gaussiana (Hartree) ~ 1.9 kcal/mol
+  biasFactor: 12,         // gamma = T_bias/T
+  T: T_init,              // Temperatura (K)
   depositionStride: 50    // Deposita gaussiana ogni 50 step MD
 });
 
-// Parametri di simulazione
-const dt = 0.5; // fs
-const nsteps = 10000;
+// ─── Parametri di simulazione ───
+const dt = 20.0;          // timestep in unita atomiche (~0.48 fs)
+const nsteps = 20000;     // passi totali
 const ff = new ReactiveFF();
+const forces = new Float64Array(pos.length);
 
 // Array per tracciamento
 const trajectory = [];
 const cvHistory = [];
+const energyHistory = [];
 
-// Loop di dinamica molecolare con bias metadinamico
+console.log('=== Dissociazione H2O -> OH + H (Metadinamica Well-Tempered) ===');
+console.log(`Parametri: W0=${metad.W0} Ha, gamma=${metad.biasFactor}, T=${metad.T} K, stride=${metad.depositionStride}`);
+console.log(`dt = ${dt} u.a. (~${(dt * 0.02419).toFixed(3)} fs), passi = ${nsteps}`);
+console.log('');
+
+// ─── Loop di dinamica molecolare con bias ───
 for (let step = 0; step < nsteps; step++) {
   // Calcola forze dal campo reattivo
-  const forces = new Float64Array(pos.length);
   const energy = ff.compute(Z, pos, forces);
-  
+
   // Aggiungi forze di bias dalla metadinamica
   const biasEnergy = metad.computeBiasForces(Z, pos, forces);
-  
-  // Integrazione Velocity Verlet (semplificata)
-  for (let i = 0; i < pos.length; i++) {
-    vel[i] += 0.5 * dt * forces[i] / atoms[Math.floor(i/3)].Z;
-    pos[i] += dt * vel[i];
-    vel[i] += 0.5 * dt * forces[i] / atoms[Math.floor(i/3)].Z;
-  }
-  
-  // Salva traiettoria ogni 100 step
-  if (step % 100 === 0) {
-    const s1 = cv_OH1.evaluate(Z, pos);
-    const s2 = cv_OH2.evaluate(Z, pos);
-    trajectory.push({step, pos: pos.slice(), energy, biasEnergy});
-    cvHistory.push({step, s1, s2});
-  }
-}
 
-// Ricostruzione della superficie di energia libera
-// Attenzione: richiede CV singola per ora
-const metad_1D = new WellTemperedMetaDynamics([cv_OH1], {
-  W0: 0.002,
-  biasFactor: 12,
-  T: 300,
-  depositionStride: 50
-});
-
-// Esegui nuova simulazione con CV singola per FES
-// ... (codice simile)
-
-const fes = metad_1D.reconstructFES(100);
-
-// Output risultati
-console.log('=== Dissociazione H₂O → OH + H ===');
-console.log(`Passi simulati: ${nsteps}`);
-console.log(`Gaussiane depositate: ${metad.history.length}`);
-console.log(`\nDistanze finali:`);
-console.log(`  O-H1: ${cv_OH1.evaluate(Z, pos).toFixed(3)} Å`);
-console.log(`  O-H2: ${cv_OH2.evaluate(Z, pos).toFixed(3)} Å`);
-
-if (fes) {
-  console.log(`\nSuperficie di Energia Libera:`);
-  console.log(`  Range CV: ${fes.s[0].toFixed(2)} - ${fes.s[fes.s.length-1].toFixed(2)} Å`);
-  console.log(`  FES punti: ${fes.F.length}`);
-  
-  // Trova stato di transizione
-  let ts_idx = 0;
-  let F_max = -Infinity;
-  for (let i = 0; i < fes.F.length; i++) {
-    if (fes.F[i] > F_max) {
-      F_max = fes.F[i];
-      ts_idx = i;
+  // Integrazione Velocity Verlet
+  for (let i = 0; i < N; i++) {
+    const inv_m = 1.0 / masses[i];
+    for (let a = 0; a < 3; a++) {
+      const idx = 3*i + a;
+      vel[idx] += 0.5 * dt * forces[idx] * inv_m;
+      pos[idx] += dt * vel[idx];
     }
   }
-  console.log(`  Stato di transizione: r = ${fes.s[ts_idx].toFixed(2)} Å, ΔF = ${F_max.toFixed(2)} Hartree`);
+
+  // Ricalcola forze per seconda meta del Verlet
+  ff.compute(Z, pos, forces);
+  metad.computeBiasForces(Z, pos, forces);
+
+  for (let i = 0; i < N; i++) {
+    const inv_m = 1.0 / masses[i];
+    for (let a = 0; a < 3; a++) {
+      const idx = 3*i + a;
+      vel[idx] += 0.5 * dt * forces[idx] * inv_m;
+    }
+  }
+
+  // Termostato debole (riscalamento verso T_target)
+  if (step % 100 === 0) {
+    let KE = 0;
+    for (let i = 0; i < N; i++) {
+      KE += 0.5 * masses[i] * (vel[3*i]**2 + vel[3*i+1]**2 + vel[3*i+2]**2);
+    }
+    const T_curr = 2 * KE / (3 * N * kB);
+    const scale = Math.sqrt(T_init / Math.max(1, T_curr));
+    const lambda = 0.01; // accoppiamento debole
+    const s = 1 + lambda * (scale - 1);
+    for (let k = 0; k < vel.length; k++) vel[k] *= s;
+  }
+
+  // Tracciamento
+  const cv_val = cv_OH1.evaluate(Z, pos);
+  if (step % 100 === 0) {
+    cvHistory.push({ step, s: cv_val, bias: biasEnergy });
+    energyHistory.push({ step, E: energy, Ebias: biasEnergy });
+  }
+
+  // Salva traiettoria ogni 500 step
+  if (step % 500 === 0) {
+    trajectory.push({ step, pos: Float64Array.from(pos), cv: cv_val });
+  }
 }
 
-// Analisi della convergenza
-console.log(`\nConvergenza bias:`);
-const recent_bias = metad.history.slice(-10).reduce((s, h) => s + h.weight, 0) / 10;
-const early_bias = metad.history.slice(0, 10).reduce((s, h) => s + h.weight, 0) / 10;
-console.log(`  Altezza bias iniziale (media primi 10): ${early_bias.toFixed(4)} Hartree`);
-console.log(`  Altezza bias finale (media ultimi 10): ${recent_bias.toFixed(4)} Hartree`);
-console.log(`  Riduzione: ${((1 - recent_bias/early_bias) * 100).toFixed(1)}%`);
+// ─── Ricostruzione della FES ───
+const fes = metad.reconstructFES(100, [0.5, 4.0]);
 
-export {trajectory, cvHistory, fes};
+// ─── Analisi risultati ───
+console.log(`Passi simulati: ${nsteps}`);
+console.log(`Gaussiane depositate: ${metad.history.length}`);
+console.log(`Tempo simulato: ${(nsteps * dt * 0.02419 / 1000).toFixed(2)} ps`);
+console.log('');
+
+const r_final = cv_OH1.evaluate(Z, pos);
+const r_OH2 = new CollectiveVariable('distance', [0, 2]).evaluate(Z, pos);
+console.log(`Distanze finali:`);
+console.log(`  O-H1: ${r_final.toFixed(3)} A ${r_final > 2.0 ? '(DISSOCIATO)' : '(legato)'}`);
+console.log(`  O-H2: ${r_OH2.toFixed(3)} A ${r_OH2 > 2.0 ? '(DISSOCIATO)' : '(legato)'}`);
+console.log('');
+
+// ─── FES: stato di transizione e barriera ───
+let ts_idx = 0, F_max = -Infinity;
+let reactant_idx = 0, F_reactant = Infinity;
+
+for (let i = 0; i < fes.s.length; i++) {
+  if (fes.F[i] > F_max) { F_max = fes.F[i]; ts_idx = i; }
+  if (fes.s[i] < 1.2 && fes.F[i] < F_reactant) { F_reactant = fes.F[i]; reactant_idx = i; }
+}
+
+const barrier_Ha = F_max - F_reactant;
+const barrier_kcal = barrier_Ha * 627.509;
+
+console.log(`Superficie di Energia Libera:`);
+console.log(`  Range CV: ${fes.s[0].toFixed(2)} - ${fes.s[fes.s.length-1].toFixed(2)} A`);
+console.log(`  Reagente: r = ${fes.s[reactant_idx].toFixed(2)} A, F = ${F_reactant.toFixed(4)} Ha`);
+console.log(`  Stato di transizione: r = ${fes.s[ts_idx].toFixed(2)} A, F = ${F_max.toFixed(4)} Ha`);
+console.log(`  Barriera di energia libera: dG‡ = ${barrier_Ha.toFixed(4)} Ha = ${barrier_kcal.toFixed(1)} kcal/mol`);
+console.log(`  (Sperimentale per H2O -> OH + H: ~118 kcal/mol; il campo reattivo da un valore approssimato)`);
+console.log('');
+
+// ─── Convergenza ───
+const diag = metad.diagnostics();
+console.log(`Convergenza bias:`);
+console.log(`  Gaussiane totali: ${diag.nGaussians}`);
+console.log(`  Altezza media iniziale: ${diag.avgWeightEarly.toFixed(5)} Ha`);
+console.log(`  Altezza media recente: ${diag.avgWeightRecent.toFixed(5)} Ha`);
+console.log(`  Rapporto convergenza: ${diag.convergenceRatio.toFixed(3)} (${diag.convergenceRatio < 0.5 ? 'BUONA' : 'in corso'})`);
+
+export { trajectory, cvHistory, fes, metad };
