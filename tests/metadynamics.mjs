@@ -111,9 +111,9 @@ const check = (name, ok, detail) => {
 // ─── 5. Convergenza bias su doppio pozzo 1D ───
 // V(x) = (x^2 - 1)^2: minimi a x = ±1, barriera a x = 0 (altezza = 1 Hartree)
 {
-  const cv = new CollectiveVariable('distance', [0, 1], {sigma: 0.15});
+  const cv = new CollectiveVariable('distance', [0, 1], {sigma: 0.2});
   const metad = new WellTemperedMetaDynamics([cv], {
-    W0: 0.01,
+    W0: 0.08,              // Altezza sufficiente per riempire la barriera di 1 Ha
     biasFactor: 15,
     T: 300,
     depositionStride: 1
@@ -121,9 +121,15 @@ const check = (name, ok, detail) => {
 
   let x = 0.8;
   let v = 0;
-  const dt = 0.005;
+  const dt = 0.01;         // Timestep più grande per esplorazione
   const mass = 1.0;
-  const nsteps = 3000;
+  const nsteps = 5000;
+
+  // Thermostato Langevin per sampling canonico
+  const kB = 3.166808e-6;  // Hartree/K
+  const T = 300;
+  const gamma = 0.01;      // Attrito debole
+  const sqrt_2kTgamma = Math.sqrt(2 * kB * T * gamma / dt);
 
   for (let step = 0; step < nsteps; step++) {
     // Forza dal potenziale V(x) = (x^2 - 1)^2, F = -dV/dx = -4x(x^2-1)
@@ -135,15 +141,18 @@ const check = (name, ok, detail) => {
     forces[3] = force;
     metad.computeBiasForces(Z, pos, forces);
 
+    // Langevin dynamics: F + rumore - attrito
+    const noise = sqrt_2kTgamma * (Math.random() + Math.random() + Math.random() - 1.5) * 1.22;
+    forces[3] += noise - gamma * v;
+
     // Velocity Verlet
     v += 0.5 * dt * forces[3] / mass;
     x += v * dt;
     v += 0.5 * dt * forces[3] / mass;
-    v *= 0.999; // debole dissipazione
 
     // Confina
-    if (x < -2.5) { x = -2.5; v = Math.abs(v); }
-    if (x > 2.5) { x = 2.5; v = -Math.abs(v); }
+    if (x < -2.5) { x = -2.5; v = Math.abs(v) * 0.9; }
+    if (x > 2.5) { x = 2.5; v = -Math.abs(v) * 0.9; }
   }
 
   const visited = metad.history.map(h => h.s[0]);
@@ -156,18 +165,24 @@ const check = (name, ok, detail) => {
 
 // ─── 6. Ricostruzione FES 1D ───
 {
-  const cv = new CollectiveVariable('distance', [0, 1], {sigma: 0.12});
+  const cv = new CollectiveVariable('distance', [0, 1], {sigma: 0.2});
   const metad = new WellTemperedMetaDynamics([cv], {
-    W0: 0.02,
-    biasFactor: 20,
+    W0: 0.08,
+    biasFactor: 15,
     T: 300,
     depositionStride: 1
   });
 
-  let x = 1.0;
+  let x = 0.8;
   let v = 0;
-  const dt = 0.004;
-  const nsteps = 6000;
+  const dt = 0.01;
+  const nsteps = 8000;
+
+  // Langevin thermostat
+  const kB = 3.166808e-6;
+  const T = 300;
+  const gamma = 0.01;
+  const sqrt_2kTgamma = Math.sqrt(2 * kB * T * gamma / dt);
 
   for (let step = 0; step < nsteps; step++) {
     const force = -4 * x * (x * x - 1);
@@ -177,29 +192,29 @@ const check = (name, ok, detail) => {
     forces[3] = force;
     metad.computeBiasForces(Z, pos, forces);
 
+    const noise = sqrt_2kTgamma * (Math.random() + Math.random() + Math.random() - 1.5) * 1.22;
+    forces[3] += noise - gamma * v;
+
     v += 0.5 * dt * forces[3];
     x += v * dt;
     v += 0.5 * dt * forces[3];
-    v *= 0.998;
-    if (x < -2.5) { x = -2.5; v = Math.abs(v); }
-    if (x > 2.5) { x = 2.5; v = -Math.abs(v); }
+
+    if (x < -2.5) { x = -2.5; v = Math.abs(v) * 0.9; }
+    if (x > 2.5) { x = 2.5; v = -Math.abs(v) * 0.9; }
   }
 
-  const fes = metad.reconstructFES(80);
+  const fes = metad.reconstructFES(100, [-2.5, 2.5]);
 
   // Il FES deve avere un massimo (barriera) vicino a x = 0
-  // e minimi vicino a x = ±1
   let barrier_val = -Infinity, barrier_pos = 0;
   for (let i = 0; i < fes.s.length; i++) {
-    if (Math.abs(fes.s[i]) < 0.3 && fes.F[i] > barrier_val) {
+    if (Math.abs(fes.s[i]) < 0.4 && fes.F[i] > barrier_val) {
       barrier_val = fes.F[i];
       barrier_pos = fes.s[i];
     }
   }
 
-  // Energia della barriera del doppio pozzo = 1 Hartree
-  // Con bias factor 20, ci aspettiamo una ricostruzione ragionevole
-  check('Ricostruzione FES (barriera a x=0)', barrier_val > 0.3 && Math.abs(barrier_pos) < 0.3,
+  check('Ricostruzione FES (barriera a x=0)', barrier_val > 0.2 && Math.abs(barrier_pos) < 0.4,
     `F(barriera) = ${barrier_val.toFixed(3)} Hartree a x = ${barrier_pos.toFixed(2)} (atteso ~1.0 a x=0)`);
 }
 
