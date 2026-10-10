@@ -771,21 +771,16 @@ function render3D() {
     if (parts.length) {
       const res = sampleAtom(parts, state.points, 11);
       if (state.atomView === 'density') {
-        // stessi campioni di Born: nucleo caldo, alone esterno. Il colore è la distanza, non un colore osservato.
-        const core = new Float32Array(res.count * 3);
-        const halo = new Float32Array(res.count * 3);
-        const hot = colorToRGB('#f4efe6');
-        const cool = colorToRGB(cssVar('--scene-mode') === 'light' ? '#6a8cff' : '#7eb6ff');
+        // stessi campioni di Born. Particelle morbide additive: le zone dense si accendono.
+        const cols = new Float32Array(res.count * 3);
+        const hot = colorToRGB('#fff4e0');
+        const cool = colorToRGB(cssVar('--scene-mode') === 'light' ? '#2a6ad4' : '#3ecbff');
         for (let i = 0; i < res.count; i++) {
           const x = res.positions[3 * i], y = res.positions[3 * i + 1], z = res.positions[3 * i + 2];
-          const t = Math.min(1, Math.sqrt(x * x + y * y + z * z) / extent);
-          for (let c = 0; c < 3; c++) {
-            core[3 * i + c] = hot[c] * (1 - t) + cool[c] * t;
-            halo[3 * i + c] = cool[c];
-          }
+          const t = Math.min(1, Math.sqrt(x * x + y * y + z * z) / Math.max(extent, 0.05));
+          for (let c = 0; c < 3; c++) cols[3 * i + c] = hot[c] * (1 - t) + cool[c] * t;
         }
-        viewer.addPoints(res.positions, halo, { size: 1.7, opacity: cssVar('--scene-mode') === 'light' ? 0.08 : 0.14 });
-        viewer.addPoints(res.positions, core, { size: 0.62, opacity: cssVar('--scene-mode') === 'light' ? 0.42 : 0.55 });
+        viewer.addGlowPoints(res.positions, cols, { size: 1.05, opacity: cssVar('--scene-mode') === 'light' ? 0.55 : 0.85 });
       } else {
         const palette = visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
         const colors = new Float32Array(res.count * 3);
@@ -799,7 +794,7 @@ function render3D() {
       ? [[cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4', 'ρ = Σ nᵢ|ψᵢ|²']]
       : visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
     note.textContent = state.atomView === 'density'
-      ? `Ogni punto è un campione della regola di Born: probabilità ∝ |ψ|² degli orbitali Kohn–Sham (DFT-LDA). Il colore segue solo la distanza dal nucleo (caldo al centro, freddo fuori): non è un colore osservato. Alone e punti sono gli stessi campioni. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} (R = 1,25 A^{1/3} fm).${state.excited ? ' Stato eccitato: un elettrone dal livello più alto è stato promosso sull\'orbitale (n+1)s virtuale.' : ''}`
+      ? `Ogni punto è un campione della regola di Born: probabilità ∝ |ψ|² degli orbitali Kohn–Sham (DFT-LDA). Particelle morbide con blending additivo: dove la densità è alta la nuvola si accende. Il colore segue solo la distanza dal nucleo, non è un colore osservato. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} (R = 1,25 A^{1/3} fm).${state.excited ? ' Stato eccitato: un elettrone dal livello più alto è stato promosso sull\'orbitale (n+1)s virtuale.' : ''}`
       : `Scomposizione negli orbitali occupati, colori per sottolivello: non è l’aspetto dell’atomo. La densità totale è la somma. Nucleo non in scala. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }

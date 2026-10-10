@@ -266,6 +266,53 @@ export class Viewer {
     }
   }
 
+
+  /**
+   * Nuvola a particelle morbide: ogni punto è un nucleo gaussiano più alone.
+   * Stessi campioni di addPoints; cambia solo la lettura visiva.
+   */
+  addGlowPoints(positions, colors, { size = 1, opacity = 0.9 } = {}) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: this.dark ? THREE.AdditiveBlending : THREE.NormalBlending,
+      uniforms: {
+        uSize: { value: this.extent * 0.11 * size },
+        uOpacity: { value: opacity },
+      },
+      vertexShader: `
+        attribute vec3 color;
+        varying vec3 vColor;
+        uniform float uSize;
+        void main() {
+          vColor = color;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = clamp(uSize * 160.0 / max(-mv.z, 0.2), 2.0, 24.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        uniform float uOpacity;
+        void main() {
+          vec2 p = gl_PointCoord * 2.0 - 1.0;
+          float r2 = dot(p, p);
+          if (r2 > 1.0) discard;
+          float core = exp(-r2 * 7.5);
+          float halo = exp(-r2 * 2.0);
+          float a = uOpacity * (core * 0.8 + halo * 0.4);
+          gl_FragColor = vec4(vColor * (0.5 + core * 0.75), a);
+        }
+      `,
+    });
+    const pts = new THREE.Points(geo, mat);
+    this.content.add(pts);
+    return pts;
+  }
+
   /** Nuvola di punti; `colors` Float32Array RGB per punto. */
   addPoints(positions, colors, { size = 1, opacity = 0.9 } = {}) {
     const geo = new THREE.BufferGeometry();
