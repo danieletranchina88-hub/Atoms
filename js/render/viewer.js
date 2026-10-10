@@ -253,7 +253,7 @@ export class Viewer {
     const r = rBohr * this.nucleusScale;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(r, 20, 14),
-      new THREE.MeshStandardMaterial({ color: cssVar('--nucleus') || '#c9a227', emissive: 0x000000, emissiveIntensity: 0, roughness: 0.6 }),
+      new THREE.MeshStandardMaterial({ color: cssVar('--nucleus') || '#e8c56b', emissive: 0xc9a227, emissiveIntensity: 0.35, roughness: 0.45 }),
     );
     mesh.position.set(...position);
     this.nuclei.add(mesh);

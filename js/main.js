@@ -31,6 +31,7 @@ const state = {
   mode: 'atom',
   relativistic: true,       // equazione di Koelling–Harmon (ScRLDA del NIST); false: Schrödinger (LDA)
   atomView: 'density',      // 'density' | 'orbitals' | 'all'
+  excited: false,
   render: 'both',            // 'cloud' | 'surface' | 'both'
   enclosed: 0.9,
   points: 60000,
@@ -402,6 +403,9 @@ function renderControls() {
           { v: 'all', label: 'Tutti gli orbitali' },
         ], state.atomView)}
       </div>
+      <div class="ctl"><span class="lbl">Stato</span>
+        ${segHTML('excited', [{ v: '0', label: 'Fondamentale' }, { v: '1', label: 'Eccitato' }], state.excited ? '1' : '0')}
+      </div>
       ${pointsCtl}
       <p class="desc-muted">${state.atomView === 'all'
         ? 'Tutti gli orbitali reali occupati sovrapposti sullo stesso nucleo, ciascuno con un colore saturo. Il lobo scuro è ψ < 0. Usa <b>Densità totale</b> per la nuvola elettronica.'
@@ -409,6 +413,7 @@ function renderControls() {
         ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempimento di Hund. Stesso colore per tutto il sottolivello.'
         : 'Densità elettronica totale a simmetria sferica: si vedono i gusci K, L, M… Un sottolivello pieno è sempre sferico (teorema di Unsöld).'}</p>`;
     bindSeg('atom-view', v => { state.atomView = v; renderControls(); render3D(); drawCharts(); });
+    bindSeg('excited', v => { state.excited = v === '1'; render3D(); drawCharts(); });
   } else if (mode === 'orbital') {
     const { n, l, m } = state.orbital;
     const nOpts = [1, 2, 3, 4, 5, 6, 7].map(v => ({ v, label: v }));
@@ -701,6 +706,12 @@ function setLegend(items) {
   $('viewport-legend').innerHTML = items.map(([color, label]) => `<span><i style="background:${color}"></i>${label}</span>`).join('');
 }
 
+function promoExtent(visible) {
+  if (!state.excited || !visible.length) return 0;
+  const homo = visible.reduce((a, b) => (b.e > a.e ? b : a));
+  return getOrbital(state.atom, homo.n + 1, 0).radial.radiusEnclosing(0.985);
+}
+
 function render3D() {
   const { atom, mode } = state;
   if (!atom) return;
@@ -733,13 +744,15 @@ function render3D() {
       viewer.addNucleus([0, 0, 0], null, el.mass);
       setTitle(`${el.name}`, `${nOrb} orbitali sovrapposti`);
       setLegend(list.slice(0, 12).map((o, i) => [orbitalColor(i), orbitalHTML(o.n, o.l, o.m)]));
-      note.textContent = `Tutti gli orbitali reali occupati sullo stesso nucleo, colori saturi e superfici trasparenti. Il lobo più scuro è ψ < 0. Per la nuvola elettronica (densità totale |ψ|²) premi il bottone «Densità totale». Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.`;
+      note.textContent = `Tutti gli orbitali reali occupati sullo stesso nucleo, colori saturi e superfici trasparenti. Il lobo più scuro è ψ < 0. Per la nuvola elettronica (|ψ|²) premi «Nuvola elettronica». Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.`;
       return;
     }
     const parts = [];
     visible.forEach((o, gi) => {
+      let occ = o.occ;
+      if (state.excited && o === visible.reduce((a, b) => (b.e > a.e ? b : a))) occ = Math.max(0, occ - 1);
       if (state.atomView === 'density') {
-        parts.push({ radial: o.radial, l: o.l, m: null, weight: o.occ, group: gi });
+        if (occ) parts.push({ radial: o.radial, l: o.l, m: null, weight: occ, group: gi });
       } else {
         const ms = mOrder(o.l);
         hundBoxes(o.l, o.occ).forEach((b, i) => {
@@ -748,16 +761,37 @@ function render3D() {
         });
       }
     });
-    const extent = Math.max(...visible.map(o => o.radial.radiusEnclosing(0.985)), 0.05) * 1.05;
+    if (state.excited && visible.length) {
+      const homo = visible.reduce((a, b) => (b.e > a.e ? b : a));
+      const promo = getOrbital(atom, homo.n + 1, 0);
+      parts.push({ radial: promo.radial, l: promo.l, m: null, weight: 1, group: parts.length });
+    }
+    const extent = Math.max(...visible.map(o => o.radial.radiusEnclosing(0.985)), promoExtent(visible), 0.05) * 1.05;
     viewer.frame(extent, true);
     if (parts.length) {
       const res = sampleAtom(parts, state.points, 11);
-      const palette = state.atomView === 'density'
-        ? [colorToRGB(cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4')]
-        : visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
-      const colors = new Float32Array(res.count * 3);
-      for (let i = 0; i < res.count; i++) colors.set(palette[state.atomView === 'density' ? 0 : res.groups[i]], 3 * i);
-      viewer.addPoints(res.positions, colors, { size: state.atomView === 'density' ? 0.85 : 0.7, opacity: cssVar('--scene-mode') === 'light' ? 0.32 : 0.42 });
+      if (state.atomView === 'density') {
+        // stessi campioni di Born: nucleo caldo, alone esterno. Il colore è la distanza, non un colore osservato.
+        const core = new Float32Array(res.count * 3);
+        const halo = new Float32Array(res.count * 3);
+        const hot = colorToRGB('#f4efe6');
+        const cool = colorToRGB(cssVar('--scene-mode') === 'light' ? '#6a8cff' : '#7eb6ff');
+        for (let i = 0; i < res.count; i++) {
+          const x = res.positions[3 * i], y = res.positions[3 * i + 1], z = res.positions[3 * i + 2];
+          const t = Math.min(1, Math.sqrt(x * x + y * y + z * z) / extent);
+          for (let c = 0; c < 3; c++) {
+            core[3 * i + c] = hot[c] * (1 - t) + cool[c] * t;
+            halo[3 * i + c] = cool[c];
+          }
+        }
+        viewer.addPoints(res.positions, halo, { size: 1.7, opacity: cssVar('--scene-mode') === 'light' ? 0.08 : 0.14 });
+        viewer.addPoints(res.positions, core, { size: 0.62, opacity: cssVar('--scene-mode') === 'light' ? 0.42 : 0.55 });
+      } else {
+        const palette = visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
+        const colors = new Float32Array(res.count * 3);
+        for (let i = 0; i < res.count; i++) colors.set(palette[res.groups[i]], 3 * i);
+        viewer.addPoints(res.positions, colors, { size: 0.7, opacity: cssVar('--scene-mode') === 'light' ? 0.32 : 0.42 });
+      }
     }
     viewer.addNucleus([0, 0, 0], null, el.mass);
     setTitle(`${el.name}`, state.atomView === 'orbitals' ? 'scomposizione in orbitali occupati, non l’aspetto' : 'densità di probabilità elettronica');
@@ -765,7 +799,7 @@ function render3D() {
       ? [[cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4', 'ρ = Σ nᵢ|ψᵢ|²']]
       : visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
     note.textContent = state.atomView === 'density'
-      ? `Ogni punto è un campione della regola di Born: probabilità ∝ |ψ|² degli orbitali Kohn–Sham occupati (DFT-LDA). Il nucleo è ingrandito ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} rispetto a R = 1,25 A^{1/3} fm: alla scala vera sarebbe invisibile. Tacche ogni ${formatPm(viewer.tickPm)}.`
+      ? `Ogni punto è un campione della regola di Born: probabilità ∝ |ψ|² degli orbitali Kohn–Sham (DFT-LDA). Il colore segue solo la distanza dal nucleo (caldo al centro, freddo fuori): non è un colore osservato. Alone e punti sono gli stessi campioni. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} (R = 1,25 A^{1/3} fm).${state.excited ? ' Stato eccitato: un elettrone dal livello più alto è stato promosso sull\'orbitale (n+1)s virtuale.' : ''}`
       : `Scomposizione negli orbitali occupati, colori per sottolivello: non è l’aspetto dell’atomo. La densità totale è la somma. Nucleo non in scala. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }
