@@ -191,3 +191,16 @@ tools/        precompute.mjs (libreria di molecole e stati di transizione), atom
               build-artifact.py (versione a pagina singola)
 tests/        verifiche numeriche
 ```
+### Nuvole e orbitali animati
+
+Nella tavola periodica, **Tutti gli orbitali → Nuvola / Superficie / Entrambe**
+permette di esplorare le densità di tutti gli orbitali occupati. Ogni superficie
+usa la propria scala radiale; la preparazione avviene in un Web Worker.
+**Animazione quantistica** mette in pausa la scintillazione dei campioni; **Assi
+e scala** pulisce la vista. Il pulsante Rotazione controlla solo la camera.
+
+Selezionando **H → Nuvola elettronica → Coerente 1s + 2p_z** si osserva la
+vera evoluzione della densità di una sovrapposizione coulombiana, rallentata,
+con la sezione sincronizzata e il tempo in attosecondi. Negli stati stazionari
+la densità non ruota e non pulsa: i punti non rappresentano orbite elettroniche.
+Dettagli e limiti in `SCIENTIFIC_MODEL.md`; verifiche incluse in `npm test`.

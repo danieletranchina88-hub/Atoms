@@ -344,6 +344,10 @@ button, select, input { font: inherit; color: inherit; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .viewport-note { margin: 0; color: var(--muted); font-size: 12px; }
+.quantum-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; }
+.quantum-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+#orbital-progress { font: 400 11px/1.5 var(--font-mono); color: var(--muted); }
+body[data-mode="sandbox"] .atom-motion { display: none; }
 
 /* ---------------- pannello laterale ---------------- */
 .panel { display: flex; flex-direction: column; gap: 16px; }
