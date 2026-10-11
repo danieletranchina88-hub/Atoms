@@ -1,12 +1,13 @@
 // Test della metadinamica well-tempered:
 // 1. Verifica gradienti analitici contro differenze finite (tutti i tipi di CV)
-// 2. Convergenza del bias su sistema modello (doppio pozzo 1D)
-// 3. Ricostruzione della superficie di energia libera
+// 2. Esplorazione riproducibile del doppio pozzo con una CV firmata
+// 3. Ricostruzione FES contro una somma gaussiana analitica
 // 4. Diagnostiche di convergenza
 // 5. Test FES 2D
 // 6. Test reset e riusabilita
 
 import { CollectiveVariable, WellTemperedMetaDynamics, estimateSigma } from '../js/chem/metadynamics.js';
+import { makeRandom } from '../js/physics/wavefunction.js';
 
 let failures = 0;
 let passes = 0;
@@ -108,114 +109,80 @@ const check = (name, ok, detail) => {
     `|sum F| = ${(Math.abs(sumX) + Math.abs(sumY) + Math.abs(sumZ)).toExponential(1)}`);
 }
 
-// ─── 5. Convergenza bias su doppio pozzo 1D ───
-// V(x) = (x^2 - 1)^2: minimi a x = ±1, barriera a x = 0 (altezza = 1 Hartree)
+// ─── 5. Esplorazione riproducibile del doppio pozzo ───
+// A distance is |x| and can NEVER visit negative values. This toy system needs
+// a signed Cartesian CV, defined only in the test (no sandbox model changes).
+// Langevin BAOAB uses Gaussian noise, a fixed seed and kBT=0.1 Ha, consistent
+// with a 1 Ha toy barrier. A 300 K bath cannot equilibrate that barrier here.
+class SignedToyCoordinate {
+  constructor(sigma) { this.sigma = sigma; }
+  evaluate(Z, pos) { return pos[3]; }
+  gradient(Z, pos) { const grad = new Float64Array(pos.length); grad[3] = 1; return grad; }
+}
 {
-  const cv = new CollectiveVariable('distance', [0, 1], {sigma: 0.2});
+  const cv = new SignedToyCoordinate(0.2);
+  const kB = 3.166808578e-6, kT = 0.1;
   const metad = new WellTemperedMetaDynamics([cv], {
-    W0: 0.08,              // Altezza sufficiente per riempire la barriera di 1 Ha
-    biasFactor: 15,
-    T: 300,
-    depositionStride: 1
+    W0: 0.02, biasFactor: 15, T: kT / kB, depositionStride: 20,
   });
-
-  let x = 0.8;
-  let v = 0;
-  const dt = 0.01;         // Timestep più grande per esplorazione
-  const mass = 1.0;
-  const nsteps = 5000;
-
-  // Thermostato Langevin per sampling canonico
-  const kB = 3.166808e-6;  // Hartree/K
-  const T = 300;
-  const gamma = 0.01;      // Attrito debole
-  const sqrt_2kTgamma = Math.sqrt(2 * kB * T * gamma / dt);
-
-  for (let step = 0; step < nsteps; step++) {
-    // Forza dal potenziale V(x) = (x^2 - 1)^2, F = -dV/dx = -4x(x^2-1)
-    const force = -4 * x * (x * x - 1);
-
-    const Z = [1, 1];
+  const rand = makeRandom(7319);
+  const gaussian = () => Math.sqrt(-2 * Math.log(Math.max(rand(), 1e-15))) * Math.cos(2 * Math.PI * rand());
+  const dt = 0.025, gamma = 0.5;
+  const decay = Math.exp(-gamma * dt);
+  const noiseScale = Math.sqrt(kT * (1 - decay * decay));
+  let x = 0.8, v = 0;
+  const Z = [1, 1];
+  for (let step = 0; step < 12000; step++) {
     const pos = new Float64Array([0, 0, 0, x, 0, 0]);
     const forces = new Float64Array(6);
-    forces[3] = force;
+    forces[3] = -4 * x * (x * x - 1);
     metad.computeBiasForces(Z, pos, forces);
-
-    // Langevin dynamics: F + rumore - attrito
-    const noise = sqrt_2kTgamma * (Math.random() + Math.random() + Math.random() - 1.5) * 1.22;
-    forces[3] += noise - gamma * v;
-
-    // Velocity Verlet
-    v += 0.5 * dt * forces[3] / mass;
-    x += v * dt;
-    v += 0.5 * dt * forces[3] / mass;
-
-    // Confina
-    if (x < -2.5) { x = -2.5; v = Math.abs(v) * 0.9; }
-    if (x > 2.5) { x = 2.5; v = -Math.abs(v) * 0.9; }
+    // B A O A B: recompute the force at the new coordinate without another hill.
+    v += 0.5 * dt * forces[3];
+    x += 0.5 * dt * v;
+    v = decay * v + noiseScale * gaussian();
+    x += 0.5 * dt * v;
+    v += 0.5 * dt * (-4 * x * (x * x - 1) - metad.biasGradientCV([x])[0]);
+    if (!Number.isFinite(x) || !Number.isFinite(v)) throw new Error('Toy integrator diverged');
   }
-
   const visited = metad.history.map(h => h.s[0]);
-  const leftWell = visited.filter(s => s < 0).length;
-  const rightWell = visited.filter(s => s > 0).length;
+  const left = visited.filter(x => x < -0.5).length;
+  const right = visited.filter(x => x > 0.5).length;
+  check('Esplorazione doppio pozzo (CV firmata, seed fisso)', left > 50 && right > 50,
+    `sinistro: ${left}, destro: ${right}, gaussiane: ${metad.history.length}`);
 
-  check('Esplorazione doppio pozzo (metaD)', leftWell > 50 && rightWell > 50,
-    `sinistro: ${leftWell}, destro: ${rightWell}, gaussiane: ${metad.history.length}`);
+  // Independent finite difference oracle for the production bias force.
+  const pos = new Float64Array([0, 0, 0, 0.37, 0, 0]);
+  const h = 1e-5;
+  metad.depositionStride = 1000000;
+  const forces = new Float64Array(6);
+  metad.computeBiasForces(Z, pos, forces);
+  const fdForce = -(metad.evaluateBias([pos[3] + h]) - metad.evaluateBias([pos[3] - h])) / (2 * h);
+  check('Forza di bias contro differenze finite', Math.abs(forces[3] - fdForce) < 1e-7,
+    `errore = ${Math.abs(forces[3] - fdForce).toExponential(2)}`);
 }
 
-// ─── 6. Ricostruzione FES 1D ───
+// ─── 6. FES 1D contro un bias analitico noto ───
+// Finite-time exploration is not a proof of FES convergence. Verify the actual
+// reconstruction formula and normalization with a symmetric two-hill oracle.
 {
-  const cv = new CollectiveVariable('distance', [0, 1], {sigma: 0.2});
-  const metad = new WellTemperedMetaDynamics([cv], {
-    W0: 0.08,
-    biasFactor: 15,
-    T: 300,
-    depositionStride: 1
+  const sigma = 0.2, weight = 0.08, gamma = 15;
+  const metad = new WellTemperedMetaDynamics([new SignedToyCoordinate(sigma)], {
+    W0: weight, biasFactor: gamma, T: 300,
   });
-
-  let x = 0.8;
-  let v = 0;
-  const dt = 0.01;
-  const nsteps = 8000;
-
-  // Langevin thermostat
-  const kB = 3.166808e-6;
-  const T = 300;
-  const gamma = 0.01;
-  const sqrt_2kTgamma = Math.sqrt(2 * kB * T * gamma / dt);
-
-  for (let step = 0; step < nsteps; step++) {
-    const force = -4 * x * (x * x - 1);
-    const Z = [1, 1];
-    const pos = new Float64Array([0, 0, 0, x, 0, 0]);
-    const forces = new Float64Array(6);
-    forces[3] = force;
-    metad.computeBiasForces(Z, pos, forces);
-
-    const noise = sqrt_2kTgamma * (Math.random() + Math.random() + Math.random() - 1.5) * 1.22;
-    forces[3] += noise - gamma * v;
-
-    v += 0.5 * dt * forces[3];
-    x += v * dt;
-    v += 0.5 * dt * forces[3];
-
-    if (x < -2.5) { x = -2.5; v = Math.abs(v) * 0.9; }
-    if (x > 2.5) { x = 2.5; v = -Math.abs(v) * 0.9; }
-  }
-
-  const fes = metad.reconstructFES(100, [-2.5, 2.5]);
-
-  // Il FES deve avere un massimo (barriera) vicino a x = 0
-  let barrier_val = -Infinity, barrier_pos = 0;
-  for (let i = 0; i < fes.s.length; i++) {
-    if (Math.abs(fes.s[i]) < 0.4 && fes.F[i] > barrier_val) {
-      barrier_val = fes.F[i];
-      barrier_pos = fes.s[i];
-    }
-  }
-
-  check('Ricostruzione FES (barriera a x=0)', barrier_val > 0.2 && Math.abs(barrier_pos) < 0.4,
-    `F(barriera) = ${barrier_val.toFixed(3)} Hartree a x = ${barrier_pos.toFixed(2)} (atteso ~1.0 a x=0)`);
+  metad.history = [-1, 1].map(x => ({ s: new Float64Array([x]), weight }));
+  const fes = metad.reconstructFES(201, [-2, 2]);
+  const raw = fes.s.map(x => -gamma / (gamma - 1) * weight * (
+    Math.exp(-((x + 1) ** 2) / (2 * sigma * sigma)) +
+    Math.exp(-((x - 1) ** 2) / (2 * sigma * sigma))
+  ));
+  const min = Math.min(...raw);
+  const err = Math.max(...fes.F.map((F, i) => Math.abs(F - (raw[i] - min))));
+  check('Ricostruzione FES analitica e normalizzazione', err < 1e-12 && Math.min(...fes.F) === 0,
+    `errore massimo = ${err.toExponential(2)} Ha`);
+  const asymmetry = Math.max(...fes.F.map((F, i) => Math.abs(F - fes.F[fes.F.length - 1 - i])));
+  check('FES simmetrica con due pozzi', asymmetry < 1e-12 && fes.F[100] > fes.F[50] && fes.F[100] > fes.F[150],
+    `asimmetria = ${asymmetry.toExponential(2)} Ha`);
 }
 
 // ─── 7. Diagnostiche di convergenza ───
@@ -261,8 +228,9 @@ const check = (name, ok, detail) => {
 
   const fes2d = metad.reconstructFES2D(20);
 
-  check('FES 2D (struttura)', fes2d.s1.length === 20 && fes2d.s2.length === 20 && fes2d.F.length === 20,
-    `griglia ${fes2d.s1.length}x${fes2d.s2.length}, F range [0, ${Math.max(...fes2d.F.flat()).toFixed(2)}]`);
+  const values = fes2d.F.flatMap(row => Array.from(row));
+  check('FES 2D (struttura e valori finiti)', fes2d.s1.length === 20 && fes2d.s2.length === 20 && fes2d.F.length === 20 && fes2d.F.every(row => row.length === 20) && values.every(Number.isFinite) && Math.min(...values) === 0,
+    `griglia ${fes2d.s1.length}x${fes2d.s2.length}, F range [0, ${Math.max(...values).toFixed(2)}]`);
 }
 
 // ─── 9. Reset ───

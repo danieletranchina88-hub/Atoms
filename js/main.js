@@ -7,7 +7,8 @@ import {
 import { loadAtom, getOrbital } from './physics/atomStore.js';
 import { term, samplePoints, sampleGrid, sampleAtom, evaluate, RadialFunction } from './physics/wavefunction.js';
 import { orbitalName, orbitalNameText, mOrder, angularNodesDescription } from './physics/harmonics.js';
-import { Viewer, formatPm, textSprite } from './render/viewer.js';
+import { formatPm, textSprite } from './render/viewer.js';
+import { AtomViewer as Viewer } from './render/atomViewer.js';
 import { requestOrbitalScene } from './render/orbitalClient.js';
 import { sampleHydrogenCoherence, hydrogenDensity, HYDROGEN_PERIOD_AS, ATOMIC_TIME_AS, HYDROGEN_GAP_HA } from './physics/quantumDynamics.js';
 import * as THREE from 'three';
@@ -213,7 +214,7 @@ try {
   const saved = localStorage.getItem('atlante-theme');
   if (saved) document.documentElement.dataset.theme = saved;
 } catch { /* storage non disponibile */ }
-viewer.applyTheme();
+if (location.hash !== '#sandbox') viewer.applyTheme();
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
 function onThemeChange() {
   viewer.applyTheme();
@@ -290,6 +291,7 @@ function setMode(mode) {
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'sandbox' && mode !== 'sandbox') deactivateSandbox();
+  viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
   try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
   viewer.renderer.domElement.style.visibility = '';
@@ -1248,8 +1250,8 @@ function drawSliceChart() {
 // Avvio
 // ---------------------------------------------------------------------------
 
-viewer.setAutoRotate(state.animation);
-$('btn-rotate').setAttribute('aria-pressed', String(state.animation));
+viewer.setAutoRotate(location.hash === '#sandbox' || state.animation);
+$('btn-rotate').setAttribute('aria-pressed', String(viewer.controls.autoRotate));
 initSandboxMode(viewer, {
   openMolecule: (smiles, name) => { /* molecole rimosse */ },
 });

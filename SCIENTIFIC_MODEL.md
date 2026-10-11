@@ -224,7 +224,7 @@ Il metodo `reconstructFES(gridSize)` ricostruisce la FES su una griglia regolare
 
 **Parametri tipici**: W₀ = 0.001–0.01 Hartree, γ = 10–20, σ = 0.1–0.2 Å per distanze, 0.1–0.3 rad per angoli. Il deposition stride (tipicamente 50–100 step MD) controlla la frequenza di deposizione delle gaussiane.
 
-**Test di verifica** (`tests/metadynamics.mjs`): gradienti analitici verificati contro differenze finite (tolleranza 1e-7), esplorazione di doppio pozzo armonico, ricostruzione FES con corretta topologia (minimi e barriere).
+**Test di verifica** (`tests/metadynamics.mjs`): gradienti analitici e forza di bias verificati contro differenze finite (tolleranza 1e-7), esplorazione di un doppio pozzo con coordinata firmata e Langevin BAOAB a seed fisso, ricostruzione FES confrontata con una somma gaussiana analitica nota. Il test di esplorazione non pretende di ricostruire una FES convergente in un tempo finito prefissato.
 
 **Esempio applicativo** (`examples/metadynamics-water-dissociation.js`): dissociazione H₂O → OH + H con CV = distanza O-H, dimostrazione del superamento della barriera di attivazione e ricostruzione della FES.
 
@@ -287,6 +287,10 @@ La convergenza asintotica è garantita dal decadimento esponenziale delle altezz
 L'implementazione è verificata dai test in `tests/metadynamics.mjs` e applicata nell'esempio `examples/metadynamics-water-dissociation.js` per la dissociazione H₂O → OH + H.
 
 ## Nuvole animate e dinamica coerente dell'idrogeno
+
+Il renderer dedicato `AtomViewer` attiva questi effetti solo nella tavola
+periodica; in modalità sandbox delega al `Viewer` originale. I moduli di
+dinamica molecolare e l'interfaccia del sandbox non sono modificati.
 
 La tavola periodica mantiene gli orbitali numerici del modello a campo centrale
 DFT-LDA / ScRLDA. Nei modi «Nuvola elettronica», «Per sottolivello» e «Tutti gli

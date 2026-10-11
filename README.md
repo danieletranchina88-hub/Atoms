@@ -204,3 +204,6 @@ vera evoluzione della densità di una sovrapposizione coulombiana, rallentata,
 con la sezione sincronizzata e il tempo in attosecondi. Negli stati stazionari
 la densità non ruota e non pulsa: i punti non rappresentano orbite elettroniche.
 Dettagli e limiti in `SCIENTIFIC_MODEL.md`; verifiche incluse in `npm test`.
+
+Questi effetti usano `AtomViewer`, attivo solo nella tavola periodica. Il
+renderer originale e i moduli di fisica e interfaccia del sandbox restano invariati.
