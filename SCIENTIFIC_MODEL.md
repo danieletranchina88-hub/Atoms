@@ -224,7 +224,7 @@ Il metodo `reconstructFES(gridSize)` ricostruisce la FES su una griglia regolare
 
 **Parametri tipici**: W₀ = 0.001–0.01 Hartree, γ = 10–20, σ = 0.1–0.2 Å per distanze, 0.1–0.3 rad per angoli. Il deposition stride (tipicamente 50–100 step MD) controlla la frequenza di deposizione delle gaussiane.
 
-**Test di verifica** (`tests/metadynamics.mjs`): gradienti analitici verificati contro differenze finite (tolleranza 1e-7), esplorazione di doppio pozzo armonico, ricostruzione FES con corretta topologia (minimi e barriere).
+**Test di verifica** (`tests/metadynamics.mjs`): gradienti analitici e forza di bias verificati contro differenze finite (tolleranza 1e-7), esplorazione di un doppio pozzo con coordinata firmata e Langevin BAOAB a seed fisso, ricostruzione FES confrontata con una somma gaussiana analitica nota. Il test di esplorazione non pretende di ricostruire una FES convergente in un tempo finito prefissato.
 
 **Esempio applicativo** (`examples/metadynamics-water-dissociation.js`): dissociazione H₂O → OH + H con CV = distanza O-H, dimostrazione del superamento della barriera di attivazione e ricostruzione della FES.
 
@@ -285,3 +285,50 @@ La convergenza asintotica è garantita dal decadimento esponenziale delle altezz
 - Le FES ricostruite sono accurate solo lungo le CV scelte; gradi di libertà ortogonali non sono campionati.
 
 L'implementazione è verificata dai test in `tests/metadynamics.mjs` e applicata nell'esempio `examples/metadynamics-water-dissociation.js` per la dissociazione H₂O → OH + H.
+
+## Nuvole animate e dinamica coerente dell'idrogeno
+
+Il renderer dedicato `AtomViewer` attiva questi effetti solo nella tavola
+periodica; in modalità sandbox delega al `Viewer` originale. I moduli di
+dinamica molecolare e l'interfaccia del sandbox non sono modificati.
+
+La tavola periodica mantiene gli orbitali numerici del modello a campo centrale
+DFT-LDA / ScRLDA. Nei modi «Nuvola elettronica», «Per sottolivello» e «Tutti gli
+orbitali», i punti rappresentano **campioni di probabilità**, non il numero reale
+di elettroni e non traiettorie. La scintillazione cambia il peso grafico dei
+campioni con fasi indipendenti dalla posizione; non muove o deforma lo stato
+stazionario. La densità totale è una somma incoerente `ρ = Σ nᵢ |ψᵢ|²`.
+La vista totale è mediata sfericamente; la scomposizione usa la base reale e le
+occupazioni di Hund. Non si introduce interferenza tra orbitali occupati diversi.
+Le isosuperfici sono calcolate sulla **griglia propria di ciascun orbitale**, così
+gli orbitali di core non spariscono su una griglia dimensionata sulla valenza.
+La probabilità selezionata si riferisce alla densità integrata sulla griglia
+numerica. La risoluzione effettiva è dichiarata e limitata sugli atomi pesanti.
+I colori, la scintillazione e l'illuminazione dei bordi sono codifiche grafiche,
+non proprietà ottiche osservate dell'atomo. Il nucleo è ingrandito e dichiarato.
+
+Per **H**, nella sola vista di densità totale, è disponibile uno stato preparato
+coerente `(1s + 2p_z)/√2`. Questa modalità usa l'Hamiltoniana coulombiana
+non relativistica con nucleo fisso di massa infinita, **non** gli autovalori DFT:
+
+- `φ₁ = exp(−r)/√π`, `φ₂ = z exp(−r/2)/(4√(2π))` (coordinate in a₀).
+- `E₁ = −1/2`, `E₂ = −1/8` hartree; `ΔE = 3/8` hartree.
+- A meno della fase globale, `ψ(t) = [φ₁ + exp(−i ΔE t) φ₂]/√2`.
+- `ρ(t) = (φ₁² + φ₂²)/2 + φ₁ φ₂ cos(ΔE t)`.
+- Periodo `T = 2π/ΔE = 405,3 as`; sullo schermo un periodo dura 4 s alla
+  velocità 1×. Il tempo fisico e la sezione di densità seguono la stessa fase.
+- Popolazioni energetiche costanti 50/50, `⟨r⟩ = 3,25 a₀` e
+  `⟨z⟩(t) = 256/(243√2) cos(ΔE t) a₀`.
+
+La GPU usa importance sampling da `q = (φ₁² + φ₂²)/2`, con pesi
+`ρ/q = 1 + [2φ₁φ₂/(φ₁²+φ₂²)] cos(ΔE t)`. Le posizioni rimangono ferme:
+la variazione dei pesi ricostruisce la densità che evolve realmente per
+interferenza. Non sono simulati il processo di preparazione, la radiazione,
+il decadimento spontaneo, lo spin-orbita o la dinamica a molti elettroni.
+La preesistente promozione occupazionale resta un'approssimazione nel
+potenziale congelato; non è presentata come soluzione dinamica autoconsistente.
+
+Riferimenti: MIT OCW 8.04 (2016), lezioni 6, 10, 21–22:
+https://ocw.mit.edu/courses/8-04-quantum-physics-i-spring-2016/pages/lecture-notes/ .
+Controlli: `tests/quantum-visualization.mjs` verifica normalizzazione a ogni
+fase, dipolo analitico, periodo, pesi Monte Carlo, nodi e risoluzione del core.

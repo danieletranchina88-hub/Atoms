@@ -7,7 +7,10 @@ import {
 import { loadAtom, getOrbital } from './physics/atomStore.js';
 import { term, samplePoints, sampleGrid, sampleAtom, evaluate, RadialFunction } from './physics/wavefunction.js';
 import { orbitalName, orbitalNameText, mOrder, angularNodesDescription } from './physics/harmonics.js';
-import { Viewer, formatPm, textSprite } from './render/viewer.js';
+import { formatPm, textSprite } from './render/viewer.js';
+import { AtomViewer as Viewer } from './render/atomViewer.js';
+import { requestOrbitalScene } from './render/orbitalClient.js';
+import { sampleHydrogenCoherence, hydrogenDensity, HYDROGEN_PERIOD_AS, ATOMIC_TIME_AS, HYDROGEN_GAP_HA } from './physics/quantumDynamics.js';
 import * as THREE from 'three';
 import { buildPeriodicTable, blockOf, ramp } from './ui/periodicTable.js';
 import { ATOM_SUMMARY } from './physics/atomSummary.js';
@@ -32,6 +35,9 @@ const state = {
   relativistic: true,       // equazione di Koelling–Harmon (ScRLDA del NIST); false: Schrödinger (LDA)
   atomView: 'density',      // 'density' | 'orbitals' | 'all'
   excited: false,
+  coherent: false,
+  animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  animationSpeed: 1,
   render: 'both',            // 'cloud' | 'surface' | 'both'
   enclosed: 0.9,
   points: 60000,
@@ -98,16 +104,29 @@ function orbitalColor(i) {
 
 const HYBRID_COLORS = ['#ff6b57', '#3fa7ff', '#62d48f', '#f0b429', '#c77dff', '#4dd6c9'];
 
-/** Ogni orbitale reale occupato (regola di Hund): 2pₓ, 2pᵧ… non il sottolivello intero. */
+/** Frozen-potential promotion into the next EMPTY s subshell (never exceed Pauli capacity). */
+function displayedSubshells(atom) {
+  const homo = atom.orbitals.reduce((a, b) => b.e > a.e ? b : a);
+  const list = atom.orbitals.filter(o => !state.hidden.has(o.label)).map(o => ({
+    ...o, occ: o.occ - (state.excited && o === homo ? 1 : 0),
+  })).filter(o => o.occ > 0);
+  if (state.excited && !state.hidden.has(homo.label)) {
+    let n = homo.n + 1;
+    while (atom.orbitals.some(o => o.n === n && o.l === 0 && o.occ > 0)) n++;
+    const promoted = getOrbital(atom, n, 0);
+    list.push({ ...promoted, occ: 1 });
+  }
+  return list;
+}
+
+/** Every occupied real orbital, with Hund occupations; never coherent across different electrons. */
 function occupiedRealOrbitals(atom) {
   const list = [];
-  for (const o of atom.orbitals) {
-    if (state.hidden.has(o.label)) continue;
+  for (const o of displayedSubshells(atom)) {
     const ms = mOrder(o.l);
     hundBoxes(o.l, o.occ).forEach((b, i) => {
       const e = b.up + b.down;
-      if (!e) return;
-      list.push({ n: o.n, l: o.l, m: ms[i], radial: o.radial, occ: e, subshell: o.label });
+      if (e) list.push({ n: o.n, l: o.l, m: ms[i], radial: o.radial, occ: e, subshell: o.label });
     });
   }
   return list;
@@ -119,6 +138,24 @@ const SET_ENCLOSED = 0.55;
 // ---------------------------------------------------------------------------
 
 const viewer = new Viewer($('viewport'));
+let sceneEpoch = 0;
+const isCoherent = () => state.mode === 'atom' && state.atom?.Z === 1 && state.atomView === 'density' && state.coherent;
+function updateCoherentStatus() {
+  const phase = viewer.quantumTime * Math.PI / 2;
+  $('orbital-progress').textContent = `Dinamica coerente · t = ${nf((phase % (2 * Math.PI)) / HYDROGEN_GAP_HA * ATOMIC_TIME_AS, 1)} as · T = ${nf(HYDROGEN_PERIOD_AS, 1)} as`;
+}
+$('btn-quantum').setAttribute('aria-pressed', String(state.animation));
+$('btn-quantum').addEventListener('click', () => {
+  state.animation = !state.animation;
+  viewer.setQuantumAnimation(state.animation, state.animationSpeed);
+  $('btn-quantum').setAttribute('aria-pressed', String(state.animation));
+  if (isCoherent()) { updateCoherentStatus(); drawSliceChart(); }
+});
+$('btn-axes').addEventListener('click', e => {
+  const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+  e.currentTarget.setAttribute('aria-pressed', String(on));
+  viewer.setAxesVisible(on);
+});
 const table = buildPeriodicTable($('periodic-table'), (Z) => selectElement(Z));
 
 document.querySelectorAll('.modes button').forEach(b => {
@@ -177,6 +214,7 @@ try {
   const saved = localStorage.getItem('atlante-theme');
   if (saved) document.documentElement.dataset.theme = saved;
 } catch { /* storage non disponibile */ }
+if (location.hash !== '#sandbox') viewer.applyTheme();
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
 function onThemeChange() {
   viewer.applyTheme();
@@ -214,6 +252,8 @@ function zFromHash() {
 async function selectElement(Z) {
   state.Z = Z;
   const token = ++state.token;
+  ++sceneEpoch;
+  if (Z !== 1) state.coherent = false;
   table.select(Z);
   const el = element(Z);
   if (!isChemMode() && location.hash.slice(1) !== el.symbol) history.replaceState(null, '', `#${el.symbol}`);
@@ -240,6 +280,7 @@ const CHEM_MODES = new Set(['sandbox']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
+  ++sceneEpoch;
   const prev = state.mode;
   state.mode = mode;
   const models = {
@@ -250,6 +291,7 @@ function setMode(mode) {
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'sandbox' && mode !== 'sandbox') deactivateSandbox();
+  viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
   try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
   viewer.renderer.domElement.style.visibility = '';
@@ -403,17 +445,22 @@ function renderControls() {
           { v: 'all', label: 'Tutti gli orbitali' },
         ], state.atomView)}
       </div>
-      <div class="ctl"><span class="lbl">Stato</span>
-        ${segHTML('excited', [{ v: '0', label: 'Fondamentale' }, { v: '1', label: 'Eccitato' }], state.excited ? '1' : '0')}
-      </div>
-      ${pointsCtl}
+      ${state.atomView === 'all' ? `<div class="ctl"><span class="lbl">Rappresentazione</span>${segHTML('render', renderOpts, state.render)}</div>${state.render !== 'cloud' ? surfCtl : ''}` : ''}
+      ${isCoherent() ? '' : `<div class="ctl"><span class="lbl">Occupazione</span>
+        ${segHTML('excited', [{ v: '0', label: 'Fondamentale' }, { v: '1', label: 'Promozione (appross.)' }], state.excited ? '1' : '0')}</div>`}
+      ${atom.Z === 1 && state.atomView === 'density' ? `<div class="ctl"><span class="lbl">Dinamica dell'idrogeno</span>${segHTML('coherent', [{ v: '0', label: 'Stazionaria' }, { v: '1', label: 'Coerente 1s + 2p<sub>z</sub>' }], state.coherent ? '1' : '0')}<p class="desc-muted">Sovrapposizione preparata 50/50. Schrödinger coulombiano, senza campo esterno; periodo ${nf(HYDROGEN_PERIOD_AS, 1)} as, rallentato sullo schermo.</p></div>` : ''}
+      ${state.atomView !== 'all' || state.render !== 'surface' ? pointsCtl : ''}
+      <div class="ctl"><span class="lbl">Velocità di visualizzazione</span>${segHTML('animation-speed', [{ v: 0.5, label: '½×' }, { v: 1, label: '1×' }, { v: 2, label: '2×' }], state.animationSpeed)}</div>
       <p class="desc-muted">${state.atomView === 'all'
-        ? 'Tutti gli orbitali reali occupati sovrapposti sullo stesso nucleo, ciascuno con un colore saturo. Il lobo scuro è ψ < 0. Usa <b>Densità totale</b> per la nuvola elettronica.'
+        ? 'Orbitali occupati sullo stesso nucleo: nuvole pesate per occupazione, superfici per i nodi o entrambe. Colore per orbitale; il segno di ψ è indicato dalle superfici, la nuvola rappresenta |ψ|².'
         : state.atomView === 'orbitals'
         ? 'Gli orbitali sono funzioni di probabilità, non traiettorie. Base reale (p<sub>x</sub>, d<sub>xy</sub>…), riempimento di Hund. Stesso colore per tutto il sottolivello.'
         : 'Densità elettronica totale a simmetria sferica: si vedono i gusci K, L, M… Un sottolivello pieno è sempre sferico (teorema di Unsöld).'}</p>`;
     bindSeg('atom-view', v => { state.atomView = v; renderControls(); render3D(); drawCharts(); });
     bindSeg('excited', v => { state.excited = v === '1'; render3D(); drawCharts(); });
+    bindSeg('render', v => { state.render = v; renderControls(); render3D(); });
+    bindSeg('coherent', v => { state.coherent = v === '1'; if (state.coherent) state.excited = false; renderControls(); render3D(); drawCharts(); });
+    bindSeg('animation-speed', v => { state.animationSpeed = +v; viewer.setQuantumAnimation(state.animation, +v); renderControls(); });
   } else if (mode === 'orbital') {
     const { n, l, m } = state.orbital;
     const nOpts = [1, 2, 3, 4, 5, 6, 7].map(v => ({ v, label: v }));
@@ -706,86 +753,113 @@ function setLegend(items) {
   $('viewport-legend').innerHTML = items.map(([color, label]) => `<span><i style="background:${color}"></i>${label}</span>`).join('');
 }
 
-function promoExtent(visible) {
-  if (!state.excited || !visible.length) return 0;
-  const homo = visible.reduce((a, b) => (b.e > a.e ? b : a));
-  return getOrbital(state.atom, homo.n + 1, 0).radial.radiusEnclosing(0.985);
+function densityColors(positions, extent) {
+  const colors = new Float32Array(positions.length);
+  const hot = colorToRGB(cssVar('--scene-mode') === 'light' ? '#9c420e' : '#ffe5b5');
+  const cool = colorToRGB(cssVar('--scene-mode') === 'light' ? '#1256a8' : '#45bbff');
+  for (let i = 0; i < positions.length; i += 3) {
+    const t = Math.min(1, Math.sqrt(Math.hypot(positions[i], positions[i + 1], positions[i + 2]) / extent));
+    for (let c = 0; c < 3; c++) colors[i + c] = hot[c] * (1 - t) + cool[c] * t;
+  }
+  return colors;
 }
 
 function render3D() {
+  const epoch = ++sceneEpoch;
+  $('orbital-progress').textContent = '';
   const { atom, mode } = state;
   if (!atom) return;
   viewer.clear();
-  viewer.setAxesVisible(true);
+  viewer.setAxesVisible($('btn-axes').getAttribute('aria-pressed') === 'true');
+  viewer.setQuantumAnimation(state.animation, state.animationSpeed);
+  $('model-status').textContent = isCoherent()
+    ? 'H coerente 1s + 2p_z · Schrödinger coulombiano non relativistico · nucleo fisso · tempo rallentato'
+    : `DFT-LDA ${state.relativistic ? 'relativistico scalare (Koelling–Harmon)' : 'non relativistico'} · orbitali stazionari · nessuna traiettoria · nucleo ingrandito`;
   const el = element(atom.Z);
   const note = $('viewport-note');
 
   if (mode === 'atom') {
-    const visible = atom.orbitals.filter(o => !state.hidden.has(o.label));
+    const visible = displayedSubshells(atom);
     if (state.atomView === 'all') {
       const list = occupiedRealOrbitals(atom);
       const nOrb = list.length;
       const extent = Math.max(...(list.length ? list : visible).map(o => o.radial.radiusEnclosing(0.985)), 0.05) * 1.05;
       viewer.frame(extent, true);
-      const quality = nOrb > 24 ? 40 : 56;
-      // superfici più strette e trasparenti così i lobi colorati restano leggibili uno sull'altro
-      const enclosed = nOrb > 20 ? 0.42 : 0.55;
-      list.forEach((o, i) => {
-        drawTerms([term(o.radial, o.l, o.m)], extent, {
-          phase: false,
-          color: orbitalColor(i),
-          seed: 40 + i * 17,
-          quality,
-          enclosed,
-          render: 'surface',
-          opacity: nOrb > 20 ? 0.42 : 0.78,
-        });
-      });
       viewer.addNucleus([0, 0, 0], null, el.mass);
-      setTitle(`${el.name}`, `${nOrb} orbitali sovrapposti`);
-      setLegend(list.slice(0, 12).map((o, i) => [orbitalColor(i), orbitalHTML(o.n, o.l, o.m)]));
-      note.textContent = `Tutti gli orbitali reali occupati sullo stesso nucleo, colori saturi e superfici trasparenti. Il lobo più scuro è ψ < 0. Per la nuvola elettronica (|ψ|²) premi «Nuvola elettronica». Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.`;
+      setTitle(`${el.name}`, `${nOrb} orbitali · ${state.render === 'cloud' ? 'nuvole di probabilità' : state.render === 'surface' ? 'isosuperfici' : 'nuvole e isosuperfici'}`);
+      setLegend(list.map((o, i) => [orbitalColor(i), `${orbitalHTML(o.n, o.l, o.m)} · ${o.occ}e⁻`]));
+      const noteText = `ρ = Σ nᵢ|ψᵢ|²: somma delle densità, senza interferenza tra orbitali occupati distinti. I punti sono campioni di probabilità, non elettroni né traiettorie. Le superfici mostrano il segno di ψ e racchiudono il ${Math.round(state.enclosed * 100)}% della probabilità sulla griglia di ciascun orbitale. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')}.${state.excited ? ' Promozione nel potenziale congelato: approssimazione, non evoluzione temporale.' : ''}`;
+      note.textContent = noteText;
+      $('orbital-progress').textContent = 'Preparazione di nuvole e nodi…';
+      const payload = {
+        orbitals: list.map(o => ({ n: o.n, l: o.l, m: o.m, occ: o.occ, subshell: o.subshell,
+          grid: { xmin: o.radial.xmin, h: o.radial.h, Z: o.radial.Z }, u: o.radial.u })),
+        points: state.points, quality: state.quality, enclosed: state.enclosed, render: state.render,
+      };
+      requestOrbitalScene(payload).then(scene => {
+        if (epoch !== sceneEpoch) return;
+        const palette = list.map((o, i) => colorToRGB(orbitalColor(i)));
+        if (scene.cloud) {
+          const colors = new Float32Array(scene.cloud.count * 3);
+          for (let i = 0; i < scene.cloud.count; i++) colors.set(palette[scene.cloud.groups[i]], i * 3);
+          viewer.addGlowPoints(scene.cloud.positions, colors, { size: 0.7, opacity: 0.55, animated: true });
+        }
+        for (const surface of scene.surfaces) {
+          const color = orbitalColor(surface.group);
+          viewer.addOrbitalSurface(surface.positions, surface.normals, surface.sign > 0 ? color : shade(color, 0.52),
+            { opacity: state.render === 'both' ? 0.3 : 0.65, emissive: 0.15 });
+        }
+        $('orbital-progress').textContent = scene.surfaces.length ? `Griglie per orbitale: ${scene.resolution}³ · ${nOrb} orbitali risolti separatamente` : `${scene.cloud?.count.toLocaleString('it-IT') ?? 0} campioni · densità stazionaria`;
+      }).catch(err => {
+        if (epoch === sceneEpoch) $('orbital-progress').textContent = `Visualizzazione non disponibile: ${err.message}`;
+      });
+      return;
+    }
+    if (isCoherent()) {
+      const extent = 11;
+      viewer.frame(extent, true);
+      const res = sampleHydrogenCoherence(state.points);
+      const colors = densityColors(res.positions, extent);
+      viewer.addGlowPoints(res.positions, colors, { size: 0.85, opacity: 0.7, visibility: res.visibility });
+      viewer.addNucleus([0, 0, 0], null, el.mass);
+      setTitle('Idrogeno · sovrapposizione coerente', 'ψ(t) = [1s + exp(−iΔEt/ℏ) 2p_z] / √2');
+      setLegend([['#79dcff', 'ρ(t) = |ψ(t)|²'], ['#ffdcb0', 'interferenza 1s–2p_z']]);
+      note.textContent = `Evoluzione analitica di Schrödinger per H isolato, non relativistico, nucleo fisso. ΔE = 10,204 eV; periodo ${nf(HYDROGEN_PERIOD_AS, 1)} as, visualizzato in 4 s a velocità 1×. La densità oscilla per interferenza; popolazioni 1s/2p restano 50/50. Nessuna traiettoria, nessuna emissione o decadimento simulato. Nucleo ingrandito.`;
+      $('orbital-progress').textContent = 'Dinamica coerente · tempo fisico rallentato';
+      let last = -1;
+      viewer.frameCallbacks.add(t => {
+        if (t - last < 0.15) return;
+        last = t;
+        drawSliceChart();
+        updateCoherentStatus();
+      });
       return;
     }
     const parts = [];
     visible.forEach((o, gi) => {
-      let occ = o.occ;
-      if (state.excited && o === visible.reduce((a, b) => (b.e > a.e ? b : a))) occ = Math.max(0, occ - 1);
+      const occ = o.occ;
       if (state.atomView === 'density') {
         if (occ) parts.push({ radial: o.radial, l: o.l, m: null, weight: occ, group: gi });
       } else {
         const ms = mOrder(o.l);
-        hundBoxes(o.l, o.occ).forEach((b, i) => {
+        hundBoxes(o.l, occ).forEach((b, i) => {
           const e = b.up + b.down;
           if (e) parts.push({ radial: o.radial, l: o.l, m: ms[i], weight: e, group: gi });
         });
       }
     });
-    if (state.excited && visible.length) {
-      const homo = visible.reduce((a, b) => (b.e > a.e ? b : a));
-      const promo = getOrbital(atom, homo.n + 1, 0);
-      parts.push({ radial: promo.radial, l: promo.l, m: null, weight: 1, group: parts.length });
-    }
-    const extent = Math.max(...visible.map(o => o.radial.radiusEnclosing(0.985)), promoExtent(visible), 0.05) * 1.05;
+    const extent = Math.max(...visible.map(o => o.radial.radiusEnclosing(0.985)), 0.05) * 1.05;
     viewer.frame(extent, true);
     if (parts.length) {
       const res = sampleAtom(parts, state.points, 11);
       if (state.atomView === 'density') {
         // stessi campioni di Born. Particelle morbide additive: le zone dense si accendono.
-        const cols = new Float32Array(res.count * 3);
-        const hot = colorToRGB('#fff4e0');
-        const cool = colorToRGB(cssVar('--scene-mode') === 'light' ? '#2a6ad4' : '#3ecbff');
-        for (let i = 0; i < res.count; i++) {
-          const x = res.positions[3 * i], y = res.positions[3 * i + 1], z = res.positions[3 * i + 2];
-          const t = Math.min(1, Math.sqrt(x * x + y * y + z * z) / Math.max(extent, 0.05));
-          for (let c = 0; c < 3; c++) cols[3 * i + c] = hot[c] * (1 - t) + cool[c] * t;
-        }
-        viewer.addGlowPoints(res.positions, cols, { size: 1.05, opacity: cssVar('--scene-mode') === 'light' ? 0.55 : 0.85 });
+        viewer.addGlowPoints(res.positions, densityColors(res.positions, extent), { size: 0.9, opacity: 0.7, animated: true });
       } else {
         const palette = visible.map(o => colorToRGB(subshellColor(o.n, o.l)));
         const colors = new Float32Array(res.count * 3);
         for (let i = 0; i < res.count; i++) colors.set(palette[res.groups[i]], 3 * i);
-        viewer.addPoints(res.positions, colors, { size: 0.7, opacity: cssVar('--scene-mode') === 'light' ? 0.32 : 0.42 });
+        viewer.addGlowPoints(res.positions, colors, { size: 0.75, opacity: 0.6, animated: true });
       }
     }
     viewer.addNucleus([0, 0, 0], null, el.mass);
@@ -794,7 +868,7 @@ function render3D() {
       ? [[cssVar('--scene-mode') === 'light' ? '#5a6a7a' : '#a8b4c4', 'ρ = Σ nᵢ|ψᵢ|²']]
       : visible.map(o => [subshellColor(o.n, o.l), `${o.label}${superscript(o.occ)}`]));
     note.textContent = state.atomView === 'density'
-      ? `Ogni punto è un campione della regola di Born: probabilità ∝ |ψ|² degli orbitali Kohn–Sham (DFT-LDA). Particelle morbide con blending additivo: dove la densità è alta la nuvola si accende. Il colore segue solo la distanza dal nucleo, non è un colore osservato. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} (R = 1,25 A^{1/3} fm).${state.excited ? ' Stato eccitato: un elettrone dal livello più alto è stato promosso sull\'orbitale (n+1)s virtuale.' : ''}`
+      ? `Densità stazionaria dalla regola di Born, mediata sfericamente: ρ = Σ nᵢ|ψᵢ|² (DFT-LDA). La scintillazione anima i campioni di probabilità; non è movimento fisico degli elettroni. Nessuna traiettoria. Il colore segue solo la distanza dal nucleo, non è un colore osservato. Nucleo ×${Math.round(viewer.nucleusScale).toLocaleString('it-IT')} (R = 1,25 A^{1/3} fm).${state.excited ? ' Promozione approssimata: un elettrone sul prossimo sottolivello s vuoto nel potenziale congelato, senza rilassamento autoconsistente o dinamica.' : ''}`
       : `Scomposizione negli orbitali occupati, colori per sottolivello: non è l’aspetto dell’atomo. La densità totale è la somma. Nucleo non in scala. Tacche ogni ${formatPm(viewer.tickPm)}.`;
     return;
   }
@@ -869,7 +943,7 @@ function drawTerms(terms, extent, { phase, color, seed = 1, points = state.point
     const colors = new Float32Array(pts.count * 3);
     for (let i = 0; i < pts.count; i++) colors.set(pts.signs[i] > 0 ? cp : cn, 3 * i);
     const both = render === 'both';
-    viewer.addPoints(pts.positions, colors, { size: both ? 0.55 : 0.8, opacity: both ? 0.28 : (light ? 0.45 : 0.4) });
+    viewer.addGlowPoints(pts.positions, colors, { size: both ? 0.65 : 0.9, opacity: both ? 0.45 : 0.65, animated: true });
   }
   if (render !== 'cloud') {
     const g = sampleGrid(terms, quality, extent, enclosed);
@@ -913,9 +987,22 @@ function drawRadial() {
   const canvas = $('chart-radial');
   const accent = cssVar('--accent');
   const muted = cssVar('--muted');
-  const orbitals = atom.orbitals.filter(o => !state.hidden.has(o.label));
+  const orbitals = mode === 'atom' ? displayedSubshells(atom) : atom.orbitals.filter(o => !state.hidden.has(o.label));
   let log = state.radialLog;
 
+  if (isCoherent()) {
+    const xs = [], ys = [];
+    for (let i = 1; i <= 600; i++) {
+      const r = i * 16 / 600;
+      xs.push(r * BOHR_PM);
+      const value = (2 * r * r * Math.exp(-2 * r) + r ** 4 * Math.exp(-r) / 48) / BOHR_PM;
+      ys.push(log ? value * r * BOHR_PM : value);
+    }
+    drawLineChart(canvas, { series: [{ xs, ys, color: accent, label: '½ P₁ₛ + ½ P₂ₚ' }], log, xlabel: 'r (pm)', ylabel: log ? 'probabilità per ln r' : 'probabilità per pm' });
+    $('radial-title').textContent = 'Distribuzione radiale · H coerente';
+    $('radial-note').textContent = 'Il termine di interferenza si annulla integrando sugli angoli: la distribuzione radiale resta costante, mentre la densità 3D oscilla lungo z.';
+    return;
+  }
   if (mode === 'atom') {
     const cutoff = Math.max(...orbitals.map(o => o.radial.radiusEnclosing(0.999)), 0.05) * BOHR_PM;
     const trim = (s) => {
@@ -1017,7 +1104,13 @@ function drawLevelChart() {
     $('levels-note').textContent = 'L\'energia di un ibrido è la media delle energie degli orbitali di partenza, pesata con i quadrati dei coefficienti.';
     return;
   }
-  const levels = atom.orbitals.map(o => ({
+  if (isCoherent()) {
+    drawLevels(canvas, [{ label: '1s (50%)', e: -0.5 * HARTREE_EV, occ: 0.5, cap: 1, color: '#ffc688' }, { label: '2p_z (50%)', e: -0.125 * HARTREE_EV, occ: 0.5, cap: 1, color: '#45bbff' }]);
+    $('levels-title').textContent = 'H coulombiano · energie analitiche';
+    $('levels-note').textContent = 'E₁ = −13,606 eV; E₂ = −3,401 eV. Probabilità di ciascuna energia 50%; popolazioni costanti. Questi livelli non usano il DFT-LDA.';
+    return;
+  }
+  const levels = (mode === 'atom' ? displayedSubshells(atom) : atom.orbitals).map(o => ({
     label: o.label, e: o.e * HARTREE_EV, occ: o.occ, cap: 2 * (2 * o.l + 1),
     color: subshellColor(o.n, o.l),
     highlight: mode === 'orbital' && o.n === state.orbital.n && o.l === state.orbital.l,
@@ -1065,15 +1158,20 @@ function drawSliceChart() {
   let preferred = 'xz';
   let composite = false;
 
-  if (mode === 'atom') {
-    const visible = atom.orbitals.filter(o => !state.hidden.has(o.label));
+  if (isCoherent()) {
+    half = 8;
+    signed = false;
+    const timeAU = viewer.quantumTime * Math.PI / 2 / HYDROGEN_GAP_HA;
+    fn = (x, y, z) => hydrogenDensity(x, y, z, timeAU);
+  } else if (mode === 'atom') {
+    const visible = displayedSubshells(atom);
     half = Math.max(...visible.map(o => o.radial.radiusEnclosing(0.98)), 0.05);
     signed = false;
     if (state.atomView === 'density') {
       fn = (x, y, z) => {
         const r = Math.sqrt(x * x + y * y + z * z);
         let rho = 0;
-        for (const o of visible) { const R = o.radial.at(r); rho += o.occ * R * R; }
+        for (const o of visible) { const R = o.radial.at(r); rho += o.occ * R * R / (4 * Math.PI); }
         return rho;
       };
     } else {
@@ -1141,7 +1239,7 @@ function drawSliceChart() {
   }
   drawSlice(canvas, { field, n: N, signed, extentPm: half * BOHR_PM, axes: P.axes, nuclei });
   $('slice-title').textContent = signed ? 'Sezione di ψ' : 'Sezione della densità';
-  $('slice-note').textContent = composite
+  $('slice-note').textContent = isCoherent() ? 'Densità istantanea |ψ(t)|², sincronizzata alla nuvola 3D. Interferenza coerente tra 1s e 2p_z.' : composite
     ? 'In ogni punto è mostrato l\'ibrido con |ψ| maggiore: si vedono i lobi grandi (ψ > 0) e i piccoli lobi opposti.'
     : signed
     ? 'Colore: segno e ampiezza di ψ nel piano. Linee chiare: nodi (ψ = 0).'
@@ -1152,7 +1250,8 @@ function drawSliceChart() {
 // Avvio
 // ---------------------------------------------------------------------------
 
-viewer.setAutoRotate(true);
+viewer.setAutoRotate(location.hash === '#sandbox' || state.animation);
+$('btn-rotate').setAttribute('aria-pressed', String(viewer.controls.autoRotate));
 initSandboxMode(viewer, {
   openMolecule: (smiles, name) => { /* molecole rimosse */ },
 });
