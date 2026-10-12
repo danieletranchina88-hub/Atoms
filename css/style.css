@@ -978,3 +978,10 @@ body[data-mode="corso"] .charts { display: none; }
 .course .ok { color: #7dcea0; }
 .course .err { color: #e07a5f; }
 @media (max-width: 700px) { .bal-board { grid-template-columns: 1fr; } }
+
+
+.course-stage { width: 100%; height: 300px; border-radius: 10px; overflow: hidden; margin: 10px 0; background: #07090d; }
+.course-stage canvas { width: 100%; height: 100%; display: block; }
+.model-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.model-picks button { border: 1px solid var(--line, #2a3340); background: transparent; color: inherit; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.model-picks button.on { background: var(--accent, #c9a227); color: #111; border-color: transparent; }

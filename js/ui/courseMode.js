@@ -3,6 +3,7 @@
 // scattering coulombiano. Le animazioni mostrano i conteggi, non traiettorie inventate.
 
 import { ELEMENTS, element } from '../physics/elements.js';
+import { makeStage, showDalton, showThomson, showRutherford, showReaction, showElectronTransfer } from './course3d.js';
 
 const NA = 6.02214076e23;
 
@@ -111,7 +112,8 @@ export function mountCourse(root) {
   root.innerHTML = `
     <div class="course">
       <nav class="course-tabs" role="tablist">
-        <button type="button" data-tab="bal" class="on">Bilanciamento</button>
+        <button type="button" data-tab="models" class="on">Modelli 3D</button>
+        <button type="button" data-tab="bal">Bilanciamento</button>
         <button type="button" data-tab="redox">Elettroni</button>
         <button type="button" data-tab="nom">Nomenclatura</button>
         <button type="button" data-tab="mole">Mole</button>
@@ -122,6 +124,7 @@ export function mountCourse(root) {
   const body = root.querySelector('#course-body');
   const show = (tab) => {
     root.querySelectorAll('.course-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+    if (tab === 'models') renderModels(body);
     if (tab === 'bal') renderBalance(body);
     if (tab === 'redox') renderRedox(body);
     if (tab === 'nom') renderNom(body);
@@ -147,6 +150,34 @@ function readSide(box) {
   }).filter(Boolean);
 }
 
+function renderModels(body) {
+  body.innerHTML = `
+    <h2>Modelli atomici</h2>
+    <p class="course-note">Dalton: sfere indivisibili, nessuna struttura interna. Thomson (non Dalton): carica positiva diffusa con elettroni immersi, il “panettone”. Rutherford: nucleo piccolo e carico, il resto è vuoto; le α si deflettono secondo Coulomb.</p>
+    <div class="model-picks">
+      <button type="button" data-m="dalton" class="on">Dalton</button>
+      <button type="button" data-m="thomson">Thomson · panettone</button>
+      <button type="button" data-m="rutherford">Rutherford</button>
+    </div>
+    <div id="model-stage"></div>
+    <p id="model-cap" class="course-note"></p>`;
+  const stage = makeStage(body.querySelector('#model-stage'));
+  const caps = {
+    dalton: 'John Dalton, 1808: gli atomi sono le unità elementari, indivisibili, di massa costante per ogni elemento. Non c’è nucleo né elettrone.',
+    thomson: 'J. J. Thomson, 1904: dopo la scoperta dell’elettrone. La carica positiva è distribuita in una sfera; gli elettroni sono immersi. Non è il modello di Dalton.',
+    rutherford: 'Ernest Rutherford, 1911: l’esperimento di Geiger–Marsden (lamina d’oro) mostra deflessioni grandi. Il nucleo concentra la carica positiva. L’angolo segue la formula coulombiana.',
+  };
+  const show = (m) => {
+    body.querySelectorAll('.model-picks button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+    if (m === 'dalton') showDalton(stage);
+    if (m === 'thomson') showThomson(stage);
+    if (m === 'rutherford') showRutherford(stage);
+    body.querySelector('#model-cap').textContent = caps[m];
+  };
+  body.querySelectorAll('.model-picks button').forEach(b => b.onclick = () => show(b.dataset.m));
+  show('dalton');
+}
+
 function renderBalance(body) {
   body.innerHTML = `
     <h2>Bilancia la reazione</h2>
@@ -156,7 +187,7 @@ function renderBalance(body) {
       <div class="arrow">→</div>
       <div><p>Prodotti</p><div id="bal-R">${speciesRow('R')}<div class="sp-row"><input class="sp-f" value="H2O"><input class="sp-c" type="number" value="1"><button type="button" class="sp-x">×</button></div></div><button type="button" id="add-R">+ prodotto</button></div>
     </div>
-    <canvas id="bal-anim" width="640" height="120"></canvas>
+    <div id="bal-stage"></div>
     <div id="bal-out"></div>`;
   const L = body.querySelector('#bal-L'), R = body.querySelector('#bal-R');
   const add = (box, side) => {
@@ -173,6 +204,7 @@ function renderBalance(body) {
   body.querySelectorAll('.sp-row').forEach(bind);
   body.querySelector('#add-L').onclick = () => add(L, 'L');
   body.querySelector('#add-R').onclick = () => add(R, 'R');
+  const stage = makeStage(body.querySelector('#bal-stage'));
 
   function check() {
     const left = readSide(L), right = readSide(R);
@@ -186,7 +218,7 @@ function renderBalance(body) {
     } else {
       out.innerHTML = errs.map(e => `<p class="err">${explain(e)}</p>`).join('') || '<p class="course-note">Aggiungi almeno un reagente e un prodotto.</p>';
     }
-    drawBalance(body.querySelector('#bal-anim'), left, right, !errs.length);
+    showReaction(stage, left, right, !errs.length);
   }
   check();
 }
@@ -236,7 +268,7 @@ function renderRedox(body) {
         <option value="so">2 SO₂ + O₂ → 2 SO₃</option>
       </select>
     </label>
-    <canvas id="e-anim" width="640" height="180"></canvas>
+    <div id="e-stage"></div>
     <div id="e-out"></div>
     <button type="button" id="e-play">Mostra il trasferimento</button>`;
   const sets = {
@@ -249,44 +281,14 @@ function renderRedox(body) {
       right: [{ formula: 'SO3', atoms: { S: 1, O: 3 }, coeff: 2 }],
     },
   };
-  let raf = 0;
+  const stage = makeStage(body.querySelector('#e-stage'));
   const play = () => {
     const set = sets[body.querySelector('#rx-pick').value];
     const info = electronChange(set.left, set.right);
     const out = body.querySelector('#e-out');
     out.innerHTML = info.changes.map(c => `<p>${c.el}: n.o. ${c.from} → ${c.to} su ${c.atoms} atomi → ${c.e > 0 ? 'perde' : 'acquista'} ${Math.abs(c.e)} e⁻</p>`).join('')
       + `<p>${info.lost === info.gained ? `Bilancio: ${info.lost} e⁻ persi = ${info.gained} e⁻ acquistati.` : `Attenzione: persi ${info.lost}, acquistati ${info.gained}. La reazione non è bilanciata sul redox.`}</p>`;
-    const canvas = body.querySelector('#e-anim');
-    const ctx = canvas.getContext('2d');
-    const n = Math.min(info.lost || 0, 12);
-    let t0 = performance.now();
-    cancelAnimationFrame(raf);
-    const frame = (now) => {
-      const t = ((now - t0) % 1600) / 1600;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#0b0e13';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#e07a5f';
-      ctx.fillRect(40, 60, 120, 60);
-      ctx.fillStyle = '#3ecbff';
-      ctx.fillRect(480, 60, 120, 60);
-      ctx.fillStyle = '#fff';
-      ctx.font = '13px sans-serif';
-      ctx.fillText('si ossida', 62, 95);
-      ctx.fillText('si riduce', 505, 95);
-      for (let i = 0; i < n; i++) {
-        const p = (t + i / Math.max(n, 1)) % 1;
-        const x = 160 + p * 300;
-        ctx.beginPath();
-        ctx.fillStyle = '#c9a227';
-        ctx.arc(x, 90, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillText('e⁻', x - 6, 78);
-      }
-      ctx.fillText(`${n} elettroni trasferiti`, 240, 150);
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
+showElectronTransfer(stage, info.lost);
   };
   body.querySelector('#e-play').onclick = play;
   body.querySelector('#rx-pick').onchange = play;
