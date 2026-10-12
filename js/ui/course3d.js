@@ -1,210 +1,247 @@
-// Scene 3D del corso. Ogni modello è etichettato con chi lo ha proposto.
-// Dalton: sfere indivisibili. Thomson: panettone. Rutherford: nucleo e scattering coulombiano.
-
+// Historical models only; the live quantum simulation uses its unchanged renderer.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { rutherford } from '../course/chemistry.js';
 
-export function makeStage(container) {
-  container.innerHTML = '';
+export function makeStage(container, { getPaused = () => false } = {}) {
   const wrap = document.createElement('div');
-  wrap.className = 'course-stage';
-  container.appendChild(wrap);
+  wrap.className = 'course-model-stage';
+  container.replaceChildren(wrap);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   wrap.appendChild(renderer.domElement);
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#07090d');
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 200);
-  camera.position.set(6, -8, 4);
+  renderer.domElement.setAttribute(
+    'aria-label',
+    'Modello atomico storico 3D, trascina per ruotare',
+  );
+  const scene = new THREE.Scene(),
+    camera = new THREE.PerspectiveCamera(40, 1, 0.01, 200);
+  scene.background = new THREE.Color('#101821');
+  camera.position.set(0, -8, 4);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  scene.add(new THREE.HemisphereLight(0xf4f4f4, 0x303030, 1));
-  const key = new THREE.DirectionalLight(0xffffff, 0.8);
-  key.position.set(4, -3, 6);
-  scene.add(key);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x304050, 2));
+  const light = new THREE.DirectionalLight(0xffffff, 2);
+  light.position.set(3, -4, 5);
+  scene.add(light);
   const content = new THREE.Group();
   scene.add(content);
-  const clock = new THREE.Clock();
-  let raf = 0;
+  let disposed = false,
+    previous = 0,
+    time = 0,
+    paused = false;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const resize = () => {
-    const w = wrap.clientWidth || 640, h = 280;
+    const w = wrap.clientWidth || 600,
+      h = wrap.clientHeight || 320;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   };
-  new ResizeObserver(resize).observe(wrap);
+  const ro = new ResizeObserver(resize);
+  ro.observe(wrap);
   resize();
-  const loop = () => {
-    raf = requestAnimationFrame(loop);
-    const t = clock.getElapsedTime();
-    content.userData.tick?.(t);
+  const clear = () => {
+    content.userData.tick = null;
+    content.rotation.set(0, 0, 0);
+    time = 0;
+    const materials = new Set(),
+      geometries = new Set();
+    for (const child of [...content.children]) {
+      child.traverse((o) => {
+        if (o.geometry) geometries.add(o.geometry);
+        if (o.material)
+          (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) =>
+            materials.add(m),
+          );
+      });
+      content.remove(child);
+    }
+    geometries.forEach((g) => g.dispose());
+    materials.forEach((m) => m.dispose());
+  };
+  renderer.setAnimationLoop((now) => {
+    if (disposed) return;
+    const dt = previous ? Math.min((now - previous) / 1000, 0.05) : 0;
+    previous = now;
+    if (document.hidden || !wrap.isConnected) return;
+    if (!paused && !getPaused() && !reduced.matches) time += dt;
+    content.userData.tick?.(time);
     controls.update();
     renderer.render(scene, camera);
-  };
-  loop();
+  });
   return {
-    scene, camera, content, controls,
-    clear() {
-      for (const c of [...content.children]) {
-        content.remove(c);
-        c.traverse?.(o => { o.geometry?.dispose(); o.material?.dispose(); });
-      }
-      content.userData.tick = null;
+    scene,
+    camera,
+    content,
+    controls,
+    clear,
+    setPaused: (on) => {
+      paused = on;
     },
-    dispose() { cancelAnimationFrame(raf); renderer.dispose(); wrap.remove(); },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      renderer.setAnimationLoop(null);
+      ro.disconnect();
+      controls.dispose();
+      clear();
+      renderer.dispose();
+      renderer.forceContextLoss();
+      wrap.remove();
+    },
   };
 }
-
-function sphere(r, color, emissive = 0) {
-  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0, emissive, emissiveIntensity: emissive ? 0.4 : 0 });
-  return new THREE.Mesh(new THREE.SphereGeometry(r, 32, 24), m);
+function sphere(radius, color, opacity = 1) {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 32, 24),
+    new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.36,
+      transparent: opacity < 1,
+      opacity,
+      depthWrite: opacity === 1,
+    }),
+  );
 }
-
 export function showDalton(stage) {
   stage.clear();
-  const a = sphere(0.7, '#c9a227');
-  const b = sphere(0.55, '#e07a5f');
-  b.position.set(1.6, 0, 0);
+  const a = sphere(0.7, '#f0b429'),
+    b = sphere(0.55, '#5ab8e7');
+  a.position.x = -1;
+  b.position.x = 1;
   stage.content.add(a, b);
-  stage.content.userData.tick = (t) => { stage.content.rotation.z = t * 0.15; };
-  stage.controls.target.set(0.8, 0, 0);
+  stage.controls.target.set(0, 0, 0);
+  stage.camera.position.set(0, -8, 3);
 }
-
 export function showThomson(stage) {
   stage.clear();
-  const pudding = new THREE.Mesh(
-    new THREE.SphereGeometry(1.4, 48, 36),
-    new THREE.MeshStandardMaterial({ color: '#f2c14e', transparent: true, opacity: 0.35, roughness: 0.6 })
-  );
-  stage.content.add(pudding);
-  const electrons = [];
+  stage.content.add(sphere(1.4, '#f0b429', 0.22));
+  // Static particles in the historical positive background: no fabricated oscillation.
   for (let i = 0; i < 8; i++) {
-    const e = sphere(0.12, '#3ecbff', 0x2266aa);
-    const phi = Math.acos(2 * Math.random() - 1);
-    const th = Math.random() * Math.PI * 2;
-    const r = 0.4 + Math.random() * 0.8;
-    e.position.set(r * Math.sin(phi) * Math.cos(th), r * Math.sin(phi) * Math.sin(th), r * Math.cos(phi));
-    e.userData.base = e.position.clone();
-    electrons.push(e);
-    stage.content.add(e);
+    const a = sphere(0.11, '#5ab8e7');
+    const z = 1 - (2 * (i + 0.5)) / 8,
+      r = Math.sqrt(1 - z * z),
+      phi = i * 2.39996323;
+    a.position.set(
+      0.95 * r * Math.cos(phi),
+      0.95 * r * Math.sin(phi),
+      0.95 * z,
+    );
+    stage.content.add(a);
   }
-  stage.content.userData.tick = (t) => {
-    electrons.forEach((e, i) => {
-      e.position.copy(e.userData.base);
-      e.position.x += Math.sin(t * 1.4 + i) * 0.06;
-      e.position.y += Math.cos(t * 1.1 + i) * 0.06;
-    });
-  };
-}
-
-export function showRutherford(stage, { Z = 79, E = 5, b = 20 } = {}) {
-  stage.clear();
-  const nucleus = sphere(0.18, '#e07a5f', 0x882222);
-  stage.content.add(nucleus);
-  const k = 1.43996;
-  const theta = 2 * Math.atan((Z * 2 * k) / (2 * E * b));
-  const curve = new THREE.CatmullRomCurve3(
-    Array.from({ length: 40 }, (_, i) => {
-      const s = (i / 39) * 2 - 1;
-      const along = s * 4;
-      const off = (b / 40) * (1 - Math.abs(s)) + (s > 0 ? Math.tan(theta / 2) * along * 0.25 : 0);
-      return new THREE.Vector3(along, off, 0);
-    })
-  );
-  const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(80));
-  stage.content.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: '#3ecbff' })));
-  const alpha = sphere(0.1, '#c9a227', 0x886622);
-  stage.content.add(alpha);
-  stage.content.userData.tick = (t) => {
-    const u = (t * 0.25) % 1;
-    alpha.position.copy(curve.getPoint(u));
-  };
-  stage.controls.target.set(0, 0.4, 0);
-}
-
-const CPK = { H: '#ffffff', C: '#909090', O: '#ff0d0d', N: '#3050f8', Fe: '#e06633', Al: '#bfa6a6', S: '#ffff30', Cl: '#1ff01f' };
-
-function ball(el, r = 0.28) {
-  return sphere(el === 'H' ? 0.18 : r, CPK[el] || '#c9a227');
-}
-
-function molecule(formula) {
-  const g = new THREE.Group();
-  const f = formula.replace(/\s/g, '');
-  if (f === 'H2O') {
-    const o = ball('O'); const h1 = ball('H'); const h2 = ball('H');
-    h1.position.set(0.7, 0.4, 0); h2.position.set(-0.7, 0.4, 0);
-    g.add(o, h1, h2);
-  } else if (f === 'CH4') {
-    const c = ball('C');
-    [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]].forEach(p => {
-      const h = ball('H'); h.position.set(p[0] * 0.55, p[1] * 0.55, p[2] * 0.55); g.add(h);
-    });
-    g.add(c);
-  } else if (f === 'O2') {
-    const a = ball('O'), b = ball('O'); b.position.x = 0.7; g.add(a, b);
-  } else if (f === 'CO2') {
-    const c = ball('C'), o1 = ball('O'), o2 = ball('O');
-    o1.position.x = -0.8; o2.position.x = 0.8; g.add(c, o1, o2);
-  } else if (f === 'Fe2O3' || f === 'Al2O3') {
-    const metal = f.startsWith('Fe') ? 'Fe' : 'Al';
-    const m1 = ball(metal), m2 = ball(metal);
-    m1.position.set(-0.4, 0.3, 0); m2.position.set(0.4, 0.3, 0);
-    [[0, -0.3, 0.4], [0, -0.3, -0.4], [0, 0.6, 0]].forEach(p => {
-      const o = ball('O', 0.22); o.position.set(...p); g.add(o);
-    });
-    g.add(m1, m2);
-  } else {
-    g.add(ball(f.replace(/\d/g, '') || 'C'));
-  }
-  return g;
-}
-
-export function showReaction(stage, left, right, balanced) {
-  stage.clear();
-  let x = -3;
-  for (const sp of left) {
-    const n = Math.min(sp.coeff || 0, 4);
-    for (let i = 0; i < n; i++) {
-      const m = molecule(sp.formula);
-      m.position.set(x, (i - n / 2) * 0.9, 0);
-      stage.content.add(m);
-    }
-    x += 1.6;
-  }
-  x = 1.2;
-  for (const sp of right) {
-    const n = Math.min(sp.coeff || 0, 4);
-    for (let i = 0; i < n; i++) {
-      const m = molecule(sp.formula);
-      m.position.set(x, (i - n / 2) * 0.9, 0);
-      stage.content.add(m);
-    }
-    x += 1.6;
-  }
-  stage.content.userData.tick = (t) => { stage.content.rotation.z = Math.sin(t * 0.4) * 0.08; };
   stage.controls.target.set(0, 0, 0);
-  stage.camera.position.set(0, -10, 4);
+  stage.camera.position.set(0, -7, 3);
+}
+export function showRutherford(stage, params = {}) {
+  stage.clear();
+  const model = rutherford(params),
+    radius = Math.max(...model.path.map((p) => Math.hypot(p.x, p.y))),
+    scale = 4 / radius;
+  const points = model.path.map(
+    (p) => new THREE.Vector3(p.x * scale, p.y * scale, 0),
+  );
+  stage.content.add(
+    sphere(0.07, '#f58b76'),
+    new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color: '#5ab8e7' }),
+    ),
+  );
+  const alpha = sphere(0.05, '#f0b429');
+  stage.content.add(alpha);
+  stage.content.userData.tick = (time) => {
+    const u = (time / 6) % 1;
+    let i = model.path.findIndex((p) => p.t >= u);
+    if (i < 1) i = 1;
+    const f =
+      (u - model.path[i - 1].t) / (model.path[i].t - model.path[i - 1].t);
+    alpha.position.lerpVectors(points[i - 1], points[i], f);
+  };
+  stage.controls.target.set(0, 0, 0);
+  stage.camera.position.set(0, -0.1, 11);
+  return model;
 }
 
-export function showElectronTransfer(stage, n) {
+export function showIsomers(stage) {
   stage.clear();
-  const donor = sphere(0.55, '#e07a5f');
-  const acceptor = sphere(0.55, '#3ecbff');
-  donor.position.x = -2; acceptor.position.x = 2;
-  stage.content.add(donor, acceptor);
-  const electrons = [];
-  const count = Math.min(n || 1, 8);
-  for (let i = 0; i < count; i++) {
-    const e = sphere(0.1, '#c9a227', 0x886622);
-    e.userData.phase = i / count;
-    electrons.push(e);
-    stage.content.add(e);
-  }
-  stage.content.userData.tick = (t) => {
-    electrons.forEach(e => {
-      const u = (t * 0.35 + e.userData.phase) % 1;
-      e.position.set(-2 + u * 4, Math.sin(u * Math.PI) * 0.8, 0);
+  const build = (atoms, bonds, offset) => {
+    const group = new THREE.Group();
+    group.position.x = offset;
+    atoms.forEach(([el, x, y, z]) => {
+      const atom = sphere(
+        el === 'H' ? 0.12 : 0.22,
+        el === 'O' ? '#f58b76' : el === 'H' ? '#e8edf2' : '#8393a3',
+      );
+      atom.position.set(x, y, z);
+      atom.userData.element = el;
+      group.add(atom);
     });
+    bonds.forEach(([i, j]) => {
+      const a = new THREE.Vector3(...atoms[i].slice(1)),
+        b = new THREE.Vector3(...atoms[j].slice(1)),
+        delta = b.clone().sub(a);
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.035, delta.length(), 8),
+        new THREE.MeshStandardMaterial({ color: '#647789', roughness: 0.5 }),
+      );
+      mesh.position.copy(a).add(b).multiplyScalar(0.5);
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        delta.normalize(),
+      );
+      group.add(mesh);
+    });
+    stage.content.add(group);
   };
+  build(
+    [
+      ['C', -1.4, 0, 0],
+      ['C', 0.1, 0, 0],
+      ['O', 0.85, 1.2, 0],
+      ['H', -1.8, 0.95, 0],
+      ['H', -1.8, -0.45, 0.85],
+      ['H', -1.8, -0.45, -0.85],
+      ['H', 0.55, -0.45, 0.85],
+      ['H', 0.55, -0.45, -0.85],
+      ['H', 1.7, 1.2, 0],
+    ],
+    [
+      [0, 1],
+      [1, 2],
+      [0, 3],
+      [0, 4],
+      [0, 5],
+      [1, 6],
+      [1, 7],
+      [2, 8],
+    ],
+    -2.3,
+  );
+  build(
+    [
+      ['O', 0, 0.5, 0],
+      ['C', -1.2, -0.35, 0],
+      ['C', 1.2, -0.35, 0],
+      ['H', -1.7, 0.45, 0],
+      ['H', -1.55, -0.9, 0.85],
+      ['H', -1.55, -0.9, -0.85],
+      ['H', 1.7, 0.45, 0],
+      ['H', 1.55, -0.9, 0.85],
+      ['H', 1.55, -0.9, -0.85],
+    ],
+    [
+      [0, 1],
+      [0, 2],
+      [1, 3],
+      [1, 4],
+      [1, 5],
+      [2, 6],
+      [2, 7],
+      [2, 8],
+    ],
+    2.3,
+  );
+  stage.controls.target.set(0, 0, 0);
+  stage.camera.position.set(0, -13, 5);
 }

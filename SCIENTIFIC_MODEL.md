@@ -332,3 +332,61 @@ Riferimenti: MIT OCW 8.04 (2016), lezioni 6, 10, 21–22:
 https://ocw.mit.edu/courses/8-04-quantum-physics-i-spring-2016/pages/lecture-notes/ .
 Controlli: `tests/quantum-visualization.mjs` verifica normalizzazione a ogni
 fase, dipolo analitico, periodo, pesi Monte Carlo, nodi e risoluzione del core.
+
+## Corso di chimica generale: modelli e controlli
+
+Il corso è isolato in `js/course/` e `js/ui/courseMode.js`. Le spiegazioni e le
+attività si riferiscono alle lezioni L0–L4 di Dario Duca (UniPa, 2026–2027),
+con pagina del PDF visibile. Le slide originali non sono ripubblicate. I moduli
+di fisica, chimica quantistica, sandbox e relativi renderer restano invariati.
+
+Il parser conta gruppi annidati, idrati, stati fisici e cariche esplicite. Il
+bilanciamento usa eliminazione di Gauss con frazioni razionali `BigInt`, un
+vincolo per elemento e uno per la carica. Restituisce coefficienti interi
+positivi minimi soltanto se il nucleo della matrice ha dimensione uno. Rifiuta
+schemi impossibili o non univoci; non decide quali prodotti si formino.
+
+La stechiometria usa `ξ_max = min(n_i/ν_i)`, `n_i(ξ) = n_i(0) − ν_i ξ` e
+`n_j(ξ) = ν_j ξ`. Un cursore imposta `ξ/ξ_max`; l'animazione illustra quel
+bilancio, non integra una legge cinetica. Resa di isolamento e conversione sono
+distinte: la massa isolabile non cancella il materiale non recuperato.
+Precipitazioni e neutralizzazioni del repertorio sono trattate come complete;
+solubilità residua, equilibrio, complessazione e trasferimento termico non sono
+calcolati dal banco del corso. L'utente può aprire il sandbox esistente per i
+suoi modelli dinamici. Le coppie non supportate non producono reazioni inventate.
+
+Il registro redox determina stati noti o ricavabili dal bilancio, segnala medie
+e incognite, elimina prima gli atomi che non cambiano stato e poi conta gli
+elettroni. Questo evita di assegnare agli O già presenti in SO₂ il n.o. di O₂
+nella reazione `2 SO₂ + O₂ → 2 SO₃`. Gestisce disproporzioni e distingue le
+semireazioni con elettroni espliciti dal bilancio completo. Le variazioni di
+n.o. non sono cariche atomiche quantistiche o traiettorie elettroniche.
+
+Rutherford: con `k = Z₁Z₂ × 1,439964548 MeV fm`, `a = k/(2E)` ed
+`e = sqrt(1 + (b/a)²)`, il percorso repulsivo è una rotazione di
+`x = a(e + cosh u)`, `y = b sinh u`. Il tempo è proporzionale a
+`e sinh u + u`, con caso frontale `b = 0` trattato senza singolarità.
+L'angolo asintotico è `2 atan(a/b)` e la minima distanza `a(1+e)`.
+Si assumono nucleo puntiforme immobile, dinamica classica, nessuno schermaggio
+o forza nucleare. Il nucleo disegnato è ingrandito; il replay è rallentato.
+I modelli di Dalton e Thomson sono storici e schematici; gli isomeri C₂H₆O
+mostrano la connettività, non geometrie ottimizzate o densità quantistiche.
+
+Le fasi dell'acqua a 1 atm usano soglie didattiche arrotondate a 0 e 100 °C;
+la ripartizione delle fasi coesistenti richiede un bilancio energetico non
+calcolato. Il moto dei marcatori è illustrativo. La cromatografia usa equilibrio
+lineare di ripartizione `K = c_s/c_m`, `Rf = 1/(1 + K V_s/V_m)`: non include
+cinetica o allargamento delle bande. La formula empirica cerca rapporti interi
+entro il 2% e dichiara la tolleranza; la compatibilità con gli errori sperimentali
+resta da verificare. Le serie di misure controllate sono sintetiche.
+
+La mole segue il SI attuale: `N_A = 6,02214076 × 10²³ mol⁻¹` esatto
+(BIPM: https://www.bipm.org/en/si-base-units/mole). Il riferimento ai 12 g di
+¹²C nelle slide viene presentato come definizione storica. Le masse molari usano
+le masse atomiche abbreviate già presenti; gli elementi senza massa standard
+richiedono una specifica isotopica e non sono sostituiti con il numero di massa.
+
+`tests/course-chemistry.mjs` controlla parser, soluzioni algebriche note,
+conservazione di massa a diversi avanzamenti, limitante, registro redox,
+neutralità dei sali, SI, diluizioni e, con un controllo indipendente alle
+differenze finite, energia e momento angolare della traiettoria coulombiana.

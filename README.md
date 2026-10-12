@@ -207,3 +207,32 @@ Dettagli e limiti in `SCIENTIFIC_MODEL.md`; verifiche incluse in `npm test`.
 
 Questi effetti usano `AtomViewer`, attivo solo nella tavola periodica. Il
 renderer originale e i moduli di fisica e interfaccia del sandbox restano invariati.
+
+### Corso di chimica generale
+
+Apri **Corso di chimica** oppure `#corso`. Il percorso di nove lezioni segue i
+PDF L0–L4 di Dario Duca, UniPa, A.A. 2026–2027, con riferimenti alle pagine,
+spiegazioni originali e approfondimenti dichiarati.
+
+Il banco contiene undici attività: esperimenti, materia e fasi, bilanciamento,
+stechiometria, nomenclatura, redox, soluzioni, misure, atomi e modelli, mole e
+formule, allenamento. Sono disponibili 22 schemi di reazione, 44 voci di
+nomenclatura, esercizi aperti e calcoli generati. Puoi scrivere equazioni libere,
+mescolare coppie del repertorio, usare formule con parentesi e idrati, bilanciare
+gli ioni e gli elettroni, cambiare quantità e avanzamento, studiare rese e residui.
+
+I progressi e il quaderno sono locali al browser e possono essere esportati in
+JSON. I collegamenti `#corso/argomento/attività` riaprono la sezione indicata.
+Le animazioni rispettano la preferenza di movimento ridotto e hanno una pausa
+generale. Il cambio di attività rilascia animazioni, osservatori e scene 3D.
+
+Il corso usa un motore didattico separato in `js/course/`: i modelli scientifici
+e i renderer della tavola periodica e del sandbox non sono modificati. Gli
+esperimenti del corso rappresentano **bilanci stechiometrici**, non una cinetica
+ab initio; le ipotesi sono indicate accanto a ogni attività. Il bilanciamento
+non predice i prodotti o la spontaneità di una reazione libera.
+
+`npm run test:course` verifica formule, bilanci esatti, massa, carica, limitante,
+redox, calcoli SI e invarianti della traiettoria coulombiana. È incluso nella
+suite `npm test`. La direzione richiesta dall'utente è conservata in
+`COURSE_GUIDELINES.md`.

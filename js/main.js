@@ -139,6 +139,7 @@ const SET_ENCLOSED = 0.55;
 // ---------------------------------------------------------------------------
 
 const viewer = new Viewer($('viewport'));
+let courseController = null;
 let sceneEpoch = 0;
 const isCoherent = () => state.mode === 'atom' && state.atom?.Z === 1 && state.atomView === 'density' && state.coherent;
 function updateCoherentStatus() {
@@ -219,6 +220,7 @@ if (location.hash !== '#sandbox') viewer.applyTheme();
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
 function onThemeChange() {
   viewer.applyTheme();
+  if (state.mode === 'corso') return;
   if (state.mode === 'sandbox') { viewer.setAxesVisible(false); sandboxRedraw(); return; }
   if (state.atom) { render3D(); drawCharts(); }
 }
@@ -228,15 +230,20 @@ new ResizeObserver(() => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (state.mode === 'sandbox') sandboxRedraw();
-    else if (state.atom) drawCharts();
+    else if (state.mode !== 'corso' && state.atom) drawCharts();
   }, 120);
 }).observe(document.querySelector('.charts'));
 
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if (h === 'sandbox' && state.mode !== 'sandbox') { setMode('sandbox'); return; }
-  if (h === 'corso' && state.mode !== 'corso') { setMode('corso'); return; }
+  if (h === 'corso' || h.startsWith('corso/')) {
+    if (state.mode !== 'corso') setMode('corso');
+    else courseController?.navigate(location.hash);
+    return;
+  }
   const Z = zFromHash();
+  if (Z && state.mode === 'corso') setMode('atom');
   if (Z && Z !== state.Z) selectElement(Z);
 });
 
@@ -282,6 +289,7 @@ const CHEM_MODES = new Set(['sandbox', 'corso']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
+  const courseRoute = location.hash;
   ++sceneEpoch;
   const prev = state.mode;
   state.mode = mode;
@@ -289,11 +297,12 @@ function setMode(mode) {
     atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
     sandbox: 'Dinamica di Born–Oppenheimer. Vista predefinita: densità a 0,0016 e/bohr³ (superficie molecolare, Rahm et al. 2024) più orbitale di frontiera. Forze da GFN2-xTB. Il colore dell\'orbitale è il segno di ψ, non un colore osservato.',
-    corso: 'Calcoli del corso: massa media da isotopi, mole (N_A del SI), stechiometria su reazioni bilanciate, numeri di ossidazione, scattering coulombiano di Rutherford. Nessuna simulazione inventata.',
+    corso: 'Corso di chimica generale · lezioni, bilanci e modelli didattici interattivi · riferimenti al materiale del corso · simulazioni quantistiche disponibili nella tavola periodica e nel sandbox',
   };
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'sandbox' && mode !== 'sandbox') deactivateSandbox();
+  if (courseController) { courseController.dispose(); courseController = null; }
   if (mode !== 'corso') $('course-panel').hidden = true;
   viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
@@ -301,10 +310,14 @@ function setMode(mode) {
   viewer.renderer.domElement.style.visibility = '';
   if (mode === 'sandbox') { activateSandbox(); return; }
   if (mode === 'corso') {
+    viewer.frameCallbacks.clear();
     document.body.dataset.mode = 'corso';
     $('course-panel').hidden = false;
-    mountCourse($('course-panel'));
-    viewer.setAxesVisible(false);
+    courseController = mountCourse($('course-panel'), {
+      initialRoute: courseRoute,
+      openAtom: symbol => { setMode('atom'); selectElement(ELEMENTS.find(e => e.symbol === symbol).Z); },
+      openSandbox: () => setMode('sandbox'),
+    });
     return;
   }
   $('course-panel').hidden = true;
@@ -1270,7 +1283,7 @@ initSandboxMode(viewer, {
 document.body.dataset.mode = 'atom';
 {
   const h = location.hash.slice(1);
-  const startMode = h === 'sandbox' ? 'sandbox' : null;
+  const startMode = h === 'sandbox' ? 'sandbox' : h === 'corso' || h.startsWith('corso/') ? 'corso' : null;
   if (startMode) state.mode = startMode;
   selectElement(zFromHash() ?? 6);
   if (startMode) { state.mode = 'atom'; setMode(startMode); }
