@@ -1,0 +1,1028 @@
+/* Every rule is scoped to the course. The atom and sandbox styles stay intact. */
+.course-panel {
+  max-width: 1450px;
+  padding: 0 28px;
+  margin: 0 auto 56px;
+}
+.course-app {
+  --cl-good: #72c9a5;
+  --cl-bad: #f58b76;
+  color: var(--text);
+  line-height: 1.6;
+}
+.course-app *,
+.course-app *::before,
+.course-app *::after {
+  box-sizing: border-box;
+}
+.course-app [hidden] {
+  display: none !important;
+}
+.course-app h2,
+.course-app h3,
+.course-app h4,
+.course-app p {
+  margin-top: 0;
+}
+.course-app button,
+.course-app input,
+.course-app select,
+.course-app textarea {
+  font: inherit;
+}
+.course-app button {
+  cursor: pointer;
+}
+.course-app a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+.course-app input,
+.course-app select,
+.course-app textarea {
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 11px 13px;
+}
+.course-app input:focus-visible,
+.course-app select:focus-visible,
+.course-app textarea:focus-visible {
+  border-color: var(--accent);
+}
+.course-app textarea {
+  resize: vertical;
+}
+.course-app input[type='range'] {
+  accent-color: var(--accent);
+  padding: 0;
+  min-height: 42px;
+  background: transparent;
+}
+.course-app input[type='number'] {
+  font-variant-numeric: tabular-nums;
+}
+.course-app code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.course-app .cl-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.8;
+  display: block;
+}
+.cl-course-hero {
+  padding: 42px 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 30px;
+}
+.cl-course-hero h2 {
+  font: 600 clamp(34px, 4.1vw, 60px)/1.04 var(--font-display);
+  letter-spacing: -0.035em;
+  margin: 15px 0 18px;
+}
+.cl-course-hero h2 em {
+  color: var(--accent);
+  font-style: normal;
+}
+.cl-course-hero p:not(.cl-eyebrow) {
+  color: var(--muted);
+  max-width: 650px;
+  font-size: 15px;
+}
+.cl-hero-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cl-hero-symbol {
+  width: 270px;
+  height: 215px;
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--accent) 6%, transparent),
+    transparent 70%
+  );
+}
+.cl-hero-symbol > span {
+  font: italic 500 75px var(--font-display);
+  color: var(--accent);
+}
+.cl-hero-symbol > small {
+  position: absolute;
+  bottom: 0;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+  letter-spacing: 0.05em;
+}
+.cl-orbit {
+  position: absolute;
+  width: 240px;
+  height: 92px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 50%;
+  pointer-events: none;
+}
+.cl-orbit-b {
+  transform: rotate(60deg);
+}
+.cl-orbit-c {
+  transform: rotate(-60deg);
+}
+.cl-layout {
+  display: grid;
+  grid-template-columns: 265px minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+}
+.cl-syllabus {
+  position: sticky;
+  top: 24px;
+  padding: 18px 14px 18px 0;
+}
+.cl-syllabus-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 12px 18px;
+}
+#cl-progress-count {
+  font: 11px var(--font-mono);
+  color: var(--accent);
+}
+.cl-syllabus nav {
+  display: grid;
+  gap: 5px;
+}
+.cl-unit {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 13px 10px;
+}
+.cl-unit:hover {
+  background: var(--panel);
+}
+.cl-unit.selected {
+  background: var(--panel);
+  border-color: var(--line);
+}
+.cl-unit-number {
+  font: 11px var(--font-mono);
+  color: var(--muted);
+}
+.cl-unit.selected .cl-unit-number {
+  color: var(--accent);
+}
+.cl-unit strong {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.cl-unit small {
+  display: block;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.cl-unit-done {
+  color: var(--cl-good);
+  margin-left: auto;
+  visibility: hidden;
+}
+.cl-unit.studied .cl-unit-done {
+  visibility: visible;
+}
+.cl-syllabus-foot {
+  padding: 23px 10px 0;
+}
+.cl-syllabus-foot p {
+  color: var(--muted);
+  font-size: 10.5px;
+  margin: 12px 0;
+}
+.cl-progress-line {
+  display: block;
+  height: 3px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cl-progress-line i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s;
+}
+#cl-note-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  min-width: 20px;
+  background: var(--panel-2);
+  margin-left: 4px;
+  font-size: 10px;
+}
+.cl-main {
+  min-width: 0;
+}
+.cl-lesson {
+  padding: 22px 0 25px;
+}
+.cl-lesson-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+.cl-lesson-header h3 {
+  font: 600 31px/1.16 var(--font-display);
+  margin: 9px 0 8px;
+}
+.cl-lesson-header p {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 18px;
+}
+.cl-lesson-header .cl-btn {
+  font-size: 11px;
+  margin-top: 24px;
+  flex-shrink: 0;
+}
+.cl-objectives {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 21px;
+}
+.cl-objectives span::first-letter {
+  color: var(--accent);
+}
+.cl-reading {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.cl-reading > summary {
+  padding: 15px 0;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cl-reading > summary span {
+  float: right;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.cl-reading-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px 30px;
+  padding: 13px 0 8px;
+}
+.cl-reading h4 {
+  font: 600 16px var(--font-display);
+  margin-bottom: 9px;
+}
+.cl-reading p {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+.cl-source-link {
+  color: var(--accent);
+  background: none;
+  border: 0;
+  font-size: 11px !important;
+  padding: 8px 0 18px;
+}
+.cl-lesson-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.course-app .cl-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 13px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.course-app .cl-btn:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.course-app .cl-btn.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.course-app .cl-btn.primary:hover {
+  filter: brightness(1.08);
+}
+.cl-workbench {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 16px;
+  overflow: hidden;
+  margin: 0 0 28px;
+}
+.cl-tool-navigation {
+  padding: 22px 24px 0;
+}
+.cl-tool-navigation nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 13px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.cl-tool-navigation button {
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 11.5px;
+  background: transparent;
+  color: var(--muted);
+}
+.cl-tool-navigation button small {
+  font: 9px var(--font-mono);
+  opacity: 0.6;
+  margin-right: 7px;
+}
+.cl-tool-navigation button:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.cl-tool-navigation button.selected {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.cl-tool {
+  padding: 28px 24px;
+  min-height: 430px;
+}
+.cl-tool-head h3 {
+  font: 600 29px/1.16 var(--font-display);
+  margin: 10px 0 13px;
+  letter-spacing: -0.01em;
+}
+.cl-tool-head > p {
+  color: var(--muted);
+  font-size: 13px;
+  max-width: 750px;
+  margin-bottom: 24px;
+}
+.cl-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 15px 0;
+}
+.course-app .cl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cl-form-row > .cl-field {
+  flex: 1;
+  min-width: 130px;
+}
+.cl-form-row > .cl-btn {
+  margin-bottom: 2px;
+}
+.cl-form-row > .cl-grow {
+  flex: 2;
+  min-width: 200px;
+}
+.cl-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 15px 0;
+}
+.cl-custom {
+  border-top: 1px solid var(--line);
+  margin: 20px 0;
+  padding-top: 13px;
+}
+.cl-custom > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.cl-custom > p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 14px 0;
+}
+.cl-custom .cl-btn {
+  margin-top: 10px;
+}
+.cl-custom > .cl-field {
+  margin-top: 15px;
+}
+.cl-equation-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr);
+  gap: 15px;
+  margin: 24px 0;
+}
+.cl-equation-editor h4 {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.cl-species {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+.cl-species label:first-child {
+  flex: 0 0 58px;
+}
+.cl-species label:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.cl-species input {
+  font-family: var(--font-mono);
+  padding: 10px;
+  font-size: 12px;
+}
+.cl-remove {
+  background: none;
+  color: var(--muted);
+  border: 0;
+  font-size: 19px !important;
+  padding: 6px;
+}
+.cl-big-arrow {
+  align-self: center;
+  color: var(--accent);
+  font-size: 26px;
+}
+.cl-equation {
+  font-family: var(--font-mono);
+  font-size: clamp(13px, 1.5vw, 18px);
+  line-height: 2;
+  border-left: 2px solid var(--accent);
+  padding: 12px 16px;
+  background: var(--bg);
+  border-radius: 0 8px 8px 0;
+  margin: 17px 0;
+  overflow-wrap: anywhere;
+}
+.cl-equation small {
+  font-size: 0.65em;
+  color: var(--muted);
+}
+.cl-equation sub {
+  font-size: 0.68em;
+}
+.cl-equation sup {
+  font-size: 0.68em;
+}
+.cl-plus {
+  color: var(--muted);
+}
+.cl-arrow {
+  color: var(--accent);
+}
+.cl-table-wrap {
+  overflow-x: auto;
+  width: 100%;
+  margin: 19px 0;
+  scrollbar-width: thin;
+}
+.cl-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.cl-table td,
+.cl-table th {
+  text-align: left;
+  padding: 10px 9px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.cl-table th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cl-table td {
+  font-variant-numeric: tabular-nums;
+}
+.cl-table td:first-child {
+  font-weight: 500;
+}
+.cl-feedback {
+  padding: 13px 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--cl-bad);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  margin: 14px 0;
+}
+.cl-feedback.success {
+  border-left-color: var(--cl-good);
+}
+.cl-error {
+  color: var(--cl-bad);
+}
+.cl-ok {
+  color: var(--cl-good);
+}
+.course-app .cl-hint,
+.course-app .cl-model-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 16px 0;
+}
+.cl-model-note {
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+}
+.cl-source-inline {
+  font: 10px/1.7 var(--font-mono);
+  color: var(--muted);
+  display: block;
+  margin: 15px 0;
+}
+.cl-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+.cl-metrics > div {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 13px 15px;
+  flex: 1;
+  min-width: 145px;
+}
+.cl-metrics small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-bottom: 7px;
+}
+.cl-metrics strong {
+  display: block;
+  font: 500 18px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.cl-amounts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+.cl-amount {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.cl-amount .cl-field:first-child {
+  flex: 1;
+}
+.cl-amount .cl-field:last-child {
+  width: 75px;
+}
+.cl-amount label small {
+  font-size: 9px;
+}
+.cl-visual {
+  margin: 22px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cl-visual canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 960 / 365;
+}
+.cl-visual figcaption {
+  background: var(--bg);
+  padding: 11px 15px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  border-top: 1px solid var(--line);
+}
+.cl-grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.cl-card {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 18px;
+}
+.cl-card h4 {
+  font: 600 19px var(--font-display);
+  margin-bottom: 13px;
+}
+.cl-card > p {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cl-card .cl-metrics > div {
+  min-width: 105px;
+  padding: 10px;
+}
+.cl-card .cl-metrics strong {
+  font-size: 15px;
+}
+.cl-calculation {
+  padding: 15px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font: 12px/1.9 var(--font-mono);
+  overflow-wrap: anywhere;
+  margin: 14px 0;
+}
+.cl-question {
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-top: 20px;
+}
+.cl-question h4 {
+  font: 500 23px/1.4 var(--font-display);
+  margin: 13px 0 23px;
+}
+.cl-question .cl-field input {
+  background: var(--panel);
+}
+.cl-notebook-bar {
+  border-top: 1px solid var(--line);
+  padding: 17px 24px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.cl-notebook-bar p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+}
+#cl-note-status {
+  color: var(--cl-good);
+  font-size: 11px;
+}
+.cl-dialog {
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  width: min(760px, calc(100vw - 24px));
+  max-height: 85vh;
+  padding: 28px;
+  overflow-y: auto;
+}
+.cl-dialog::backdrop {
+  background: rgba(4, 8, 12, 0.75);
+  backdrop-filter: blur(5px);
+}
+.cl-dialog-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.cl-dialog-top h3 {
+  font: 600 26px var(--font-display);
+  margin: 0;
+}
+.cl-dialog p,
+.cl-dialog li {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cl-dialog h4 {
+  font-size: 15px;
+}
+.cl-dialog li {
+  margin-bottom: 10px;
+}
+.cl-source-card {
+  display: flex;
+  gap: 17px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cl-source-card > span {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.cl-source-card h4 {
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+.cl-source-card p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.cl-note-entry {
+  padding: 17px 0;
+  border-top: 1px solid var(--line);
+}
+.cl-note-entry > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.cl-note-entry span {
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+.cl-note-entry > p {
+  white-space: pre-wrap;
+  color: var(--text);
+}
+.cl-note-entry summary {
+  font-size: 11px;
+  cursor: pointer;
+}
+.cl-note-entry pre {
+  background: var(--bg);
+  padding: 14px;
+  overflow: auto;
+  font-size: 10px;
+  max-height: 350px;
+}
+.course-model-stage {
+  width: 100%;
+  height: 350px;
+  background: #101821;
+  margin: 18px 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.course-model-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.cl-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+[data-theme='light'] .course-app {
+  --cl-good: #24694c;
+  --cl-bad: #a8362d;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .course-app {
+    --cl-good: #24694c;
+    --cl-bad: #a8362d;
+  }
+}
+@media (max-width: 1100px) {
+  .cl-layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 24px;
+  }
+  .cl-unit {
+    gap: 10px;
+  }
+  .cl-unit strong {
+    font-size: 11.5px;
+  }
+  .cl-grid-two {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 900px) {
+  .course-panel {
+    padding: 0 20px;
+  }
+  .cl-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+  .cl-syllabus {
+    position: static;
+    padding: 0;
+    min-width: 0;
+  }
+  .cl-syllabus-title {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .cl-syllabus nav {
+    display: flex;
+    overflow-x: auto;
+    padding: 0 0 10px;
+    scrollbar-width: thin;
+  }
+  .cl-unit {
+    flex: 0 0 225px;
+    background: var(--panel);
+    border-color: var(--line);
+  }
+  .cl-unit.selected {
+    border-color: var(--accent);
+  }
+  .cl-syllabus-foot {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    padding: 5px 0;
+    flex-wrap: wrap;
+  }
+  .cl-syllabus-foot > .cl-progress-line {
+    flex: 1;
+    min-width: 60px;
+  }
+  .cl-syllabus-foot p {
+    margin: 0;
+    max-width: 200px;
+  }
+  .cl-syllabus-foot .cl-btn {
+    margin-left: auto;
+  }
+  .cl-course-hero {
+    margin-bottom: 25px;
+  }
+  .cl-grid-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .course-panel {
+    padding: 0 12px;
+  }
+  .cl-course-hero {
+    padding-top: 29px;
+    gap: 10px;
+  }
+  .cl-course-hero h2 {
+    font-size: 39px;
+  }
+  .cl-course-hero p:not(.cl-eyebrow) {
+    font-size: 12px;
+  }
+  .cl-hero-symbol {
+    display: none;
+  }
+  .cl-eyebrow {
+    font-size: 8px !important;
+  }
+  .cl-lesson-header {
+    flex-wrap: wrap;
+    gap: 0;
+  }
+  .cl-lesson-header .cl-btn {
+    margin-top: 0;
+    margin-bottom: 15px;
+  }
+  .cl-lesson-header h3 {
+    font-size: 27px;
+  }
+  .cl-reading > summary span {
+    float: none;
+    display: block;
+    margin-left: 17px;
+  }
+  .cl-reading-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .cl-tool-navigation {
+    padding: 18px 15px 0;
+  }
+  .cl-tool-navigation nav {
+    gap: 3px;
+  }
+  .cl-tool-navigation button {
+    font-size: 10px;
+    padding: 8px;
+  }
+  .cl-tool-navigation button small {
+    display: none;
+  }
+  .cl-tool {
+    padding: 22px 15px;
+  }
+  .cl-tool-head h3 {
+    font-size: 25px;
+  }
+  .cl-equation-editor {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .cl-big-arrow {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
+  .cl-equation {
+    font-size: 13px;
+    padding: 9px 12px;
+  }
+  .cl-grid-two,
+  .cl-amounts {
+    grid-template-columns: 1fr;
+  }
+  .cl-form-row {
+    gap: 10px;
+  }
+  .cl-metrics > div {
+    min-width: 120px;
+    padding: 10px 12px;
+  }
+  .cl-metrics strong {
+    font-size: 16px;
+  }
+  .cl-question {
+    padding: 16px;
+  }
+  .cl-question h4 {
+    font-size: 20px;
+  }
+  .cl-notebook-bar {
+    padding: 15px;
+    gap: 10px;
+  }
+  .cl-notebook-bar p {
+    flex-basis: 100%;
+  }
+  .cl-dialog {
+    padding: 20px;
+  }
+  .course-model-stage {
+    height: 270px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-progress-line i {
+    transition: none;
+  }
+}
