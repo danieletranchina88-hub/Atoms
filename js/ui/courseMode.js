@@ -1,108 +1,120 @@
-// Moduli del corso di Chimica Generale. Solo formule e dati di riferimento:
-// masse IUPAC del sito, N_A del SI, scattering coulombiano di Rutherford.
-// Nessuna traiettoria o reazione inventata.
+// Corso interattivo. Ogni feedback deriva da una legge:
+// conservazione degli atomi (Lavoisier), della carica, regole dei n.o.,
+// scattering coulombiano. Le animazioni mostrano i conteggi, non traiettorie inventate.
 
 import { ELEMENTS, element } from '../physics/elements.js';
 
-const NA = 6.02214076e23; // mol⁻¹, definizione SI dal 2019
+const NA = 6.02214076e23;
 
-// Isotopi usati nel corso (abbondanze IUPAC approssimate alle cifre delle slide).
-// Masse: numero di massa A, come nel calcolo della slide sul cloro.
-const ISOTOPES = {
-  Cl: [
-    { A: 35, Z: 17, n: 18, frac: 0.7576 },
-    { A: 37, Z: 17, n: 20, frac: 0.2424 },
-  ],
-  Ne: [
-    { A: 20, Z: 10, n: 10, frac: 0.9048 },
-    { A: 21, Z: 10, n: 11, frac: 0.0027 },
-    { A: 22, Z: 10, n: 12, frac: 0.0925 },
-  ],
-  Hg: [
-    { A: 196, Z: 80, n: 116, frac: 0.0015 },
-    { A: 198, Z: 80, n: 118, frac: 0.1004 },
-    { A: 199, Z: 80, n: 119, frac: 0.1694 },
-    { A: 200, Z: 80, n: 120, frac: 0.2313 },
-    { A: 201, Z: 80, n: 121, frac: 0.1322 },
-    { A: 202, Z: 80, n: 122, frac: 0.2986 },
-    { A: 204, Z: 80, n: 124, frac: 0.0687 },
-  ],
-};
+const MASSES = Object.fromEntries(ELEMENTS.filter(e => !String(e.mass).startsWith('[')).map(e => [e.symbol, Number(e.mass)]));
 
-// Reazioni bilanciate del corso. Coefficienti fissi, non un bilanciatore automatico.
-const REACTIONS = {
-  combustione: {
-    name: 'Combustione del metano',
-    eq: 'CH₄ + 2 O₂ → CO₂ + 2 H₂O',
-    reactants: [
-      { id: 'CH4', label: 'CH₄', M: 16.0426, coeff: 1 },
-      { id: 'O2', label: 'O₂', M: 31.9988, coeff: 2 },
-    ],
-    products: [
-      { id: 'CO2', label: 'CO₂', M: 44.0095, coeff: 1 },
-      { id: 'H2O', label: 'H₂O', M: 18.0153, coeff: 2 },
-    ],
-  },
-  termite: {
-    name: 'Termite (Fe₂O₃ + Al)',
-    eq: 'Fe₂O₃ + 2 Al → 2 Fe + Al₂O₃',
-    reactants: [
-      { id: 'Fe2O3', label: 'Fe₂O₃', M: 159.688, coeff: 1 },
-      { id: 'Al', label: 'Al', M: 26.9815, coeff: 2 },
-    ],
-    products: [
-      { id: 'Fe', label: 'Fe', M: 55.845, coeff: 2 },
-      { id: 'Al2O3', label: 'Al₂O₃', M: 101.961, coeff: 1 },
-    ],
-  },
-  so2: {
-    name: 'Ossidazione di SO₂',
-    eq: '2 SO₂ + O₂ + 2 H₂O → 2 H₂SO₄',
-    reactants: [
-      { id: 'SO2', label: 'SO₂', M: 64.066, coeff: 2 },
-      { id: 'O2', label: 'O₂', M: 31.9988, coeff: 1 },
-      { id: 'H2O', label: 'H₂O', M: 18.0153, coeff: 2 },
-    ],
-    products: [
-      { id: 'H2SO4', label: 'H₂SO₄', M: 98.079, coeff: 2 },
-    ],
-  },
-};
+function parseFormula(raw) {
+  const s = raw.replace(/\s/g, '');
+  if (!s) return null;
+  const chargeMatch = s.match(/([+-]\d*)$/);
+  const charge = chargeMatch ? (chargeMatch[1] === '+' ? 1 : chargeMatch[1] === '-' ? -1 : Number(chargeMatch[1].replace('+', ''))) : 0;
+  const body = chargeMatch ? s.slice(0, -chargeMatch[1].length) : s;
+  const atoms = {};
+  const re = /([A-Z][a-z]?)(\d*)/g;
+  let m, ok = true, last = 0;
+  while ((m = re.exec(body))) {
+    if (!ELEMENTS.some(e => e.symbol === m[1])) { ok = false; break; }
+    atoms[m[1]] = (atoms[m[1]] || 0) + (m[2] ? Number(m[2]) : 1);
+    last = re.lastIndex;
+  }
+  if (!ok || last !== body.length || !Object.keys(atoms).length) return null;
+  return { formula: s, atoms, charge };
+}
 
-const OX_RULES = [
-  'Elemento non combinato: n.o. = 0 (es. H₂, O₂, Fe).',
-  'La somma dei n.o. in un composto neutro è 0; in uno ione è la carica.',
-  'Metalli del gruppo 1: +1. Gruppo 2: +2. Fluoro: −1.',
-  'Idrogeno: +1 salvo negli idruri metallici (−1).',
-  'Ossigeno: −2, salvo perossidi (−1) e superossidi (−1/2).',
-  'Alogeni in binari: −1. Gruppo 16 in binari: −2. Gruppo 15 in binari: −3.',
+function sideCount(species) {
+  const atoms = {};
+  let charge = 0;
+  for (const sp of species) {
+    const n = Number(sp.coeff) || 0;
+    for (const [el, c] of Object.entries(sp.atoms)) atoms[el] = (atoms[el] || 0) + n * c;
+    charge += n * sp.charge;
+  }
+  return { atoms, charge };
+}
+
+function balanceErrors(left, right) {
+  const L = sideCount(left), R = sideCount(right);
+  const els = new Set([...Object.keys(L.atoms), ...Object.keys(R.atoms)]);
+  const errs = [];
+  for (const el of els) {
+    const a = L.atoms[el] || 0, b = R.atoms[el] || 0;
+    if (a !== b) errs.push({ kind: 'atom', el, left: a, right: b });
+  }
+  if (L.charge !== R.charge) errs.push({ kind: 'charge', left: L.charge, right: R.charge });
+  return errs;
+}
+
+function explain(err) {
+  if (err.kind === 'atom') {
+    return `Conservazione della massa (Lavoisier): gli atomi di ${err.el} non si creano né si distruggono. A sinistra ce ne sono ${err.left}, a destra ${err.right}. Il coefficiente deve compensare la differenza.`;
+  }
+  return `Conservazione della carica: la carica totale a sinistra è ${err.left}, a destra ${err.right}. In una reazione chimica la carica si conserva.`;
+}
+
+function oxOf(formula) {
+  // Casi didattici con regola esplicita. null se non determinabile con le regole base.
+  const known = {
+    H2O: { H: 1, O: -2, why: 'H +1, O −2 (regola standard).' },
+    H2O2: { H: 1, O: -1, why: 'Perossido: O ha n.o. −1.' },
+    O2: { O: 0, why: 'Elemento non combinato: n.o. 0.' },
+    Fe2O3: { Fe: 3, O: -2, why: 'O −2 × 3 = −6, quindi ogni Fe è +3.' },
+    Fe: { Fe: 0, why: 'Elemento non combinato: n.o. 0.' },
+    Al: { Al: 0, why: 'Elemento non combinato: n.o. 0.' },
+    Al2O3: { Al: 3, O: -2, why: 'O −2 × 3 = −6, quindi ogni Al è +3.' },
+    SO2: { S: 4, O: -2, why: 'O −2 × 2 = −4, quindi S è +4.' },
+    SO3: { S: 6, O: -2, why: 'O −2 × 3 = −6, quindi S è +6.' },
+    H2SO4: { H: 1, S: 6, O: -2, why: 'H +1, O −2, S = 0 − 2·(+1) − 4·(−2) = +6.' },
+    NaCl: { Na: 1, Cl: -1, why: 'Gruppo 1: +1. Cl −1.' },
+    Cl2: { Cl: 0, why: 'Elemento non combinato: n.o. 0.' },
+  };
+  return known[formula.replace(/\s/g, '')] || null;
+}
+
+function electronChange(left, right) {
+  // Per ogni elemento, Δ(n.o.) × atomi nel prodotto. Somma dei Δ positivi = elettroni persi.
+  const changes = [];
+  for (const sp of right) {
+    const ox = oxOf(sp.formula);
+    if (!ox) continue;
+    for (const el of Object.keys(sp.atoms)) {
+      const from = left.map(s => oxOf(s.formula)?.[el]).find(v => v !== undefined);
+      const to = ox[el];
+      if (from === undefined || to === undefined || from === to) continue;
+      const atoms = (sp.coeff || 1) * sp.atoms[el];
+      changes.push({ el, from, to, atoms, e: (to - from) * atoms });
+    }
+  }
+  const lost = changes.filter(c => c.e > 0).reduce((s, c) => s + c.e, 0);
+  const gained = -changes.filter(c => c.e < 0).reduce((s, c) => s + c.e, 0);
+  return { changes, lost, gained };
+}
+
+const NOMEN = [
+  { formula: 'NaCl', name: 'cloruro di sodio', hint: 'Metallo + non metallo: nome dell’anione (-uro) + di + nome del metallo.' },
+  { formula: 'Fe2O3', name: 'ossido di ferro(III)', hint: 'Il ferro ha più stati: si indica la carica con il numero romano. Qui Fe è +3.' },
+  { formula: 'H2SO4', name: 'acido solforico', hint: 'Ossiacido: acido + radice + -ico per lo stato più alto dello zolfo.' },
+  { formula: 'CO2', name: 'diossido di carbonio', hint: 'Composto molecolare binario: prefisso del numero di atomi + nome.' },
+  { formula: 'CaCl2', name: 'cloruro di calcio', hint: 'Gruppo 2, un solo stato: non serve il numero romano.' },
 ];
 
-function fmt(n, d = 4) {
+function fmt(n, d = 3) {
   if (!Number.isFinite(n)) return '—';
   return n.toLocaleString('it-IT', { maximumFractionDigits: d });
-}
-
-function atomicMass(list) {
-  return list.reduce((s, iso) => s + iso.A * iso.frac, 0);
-}
-
-function rutherfordAngle(bFm, EMeV, Z1, Z2) {
-  // b = (Z1 Z2 e² / (8 π ε0 E)) cot(θ/2)
-  // costante: e²/(4πε0) = 1.43996 MeV·fm
-  const k = 1.439964548;
-  const half = Math.atan((Z1 * Z2 * k) / (2 * EMeV * bFm));
-  return 2 * half * (180 / Math.PI);
 }
 
 export function mountCourse(root) {
   root.innerHTML = `
     <div class="course">
       <nav class="course-tabs" role="tablist">
-        <button type="button" data-tab="iso" class="on">Isotopi e massa</button>
+        <button type="button" data-tab="bal" class="on">Bilanciamento</button>
+        <button type="button" data-tab="redox">Elettroni</button>
+        <button type="button" data-tab="nom">Nomenclatura</button>
         <button type="button" data-tab="mole">Mole</button>
-        <button type="button" data-tab="stoich">Stechiometria</button>
-        <button type="button" data-tab="ox">Numeri di ossidazione</button>
         <button type="button" data-tab="ruth">Rutherford</button>
       </nav>
       <div id="course-body"></div>
@@ -110,48 +122,214 @@ export function mountCourse(root) {
   const body = root.querySelector('#course-body');
   const show = (tab) => {
     root.querySelectorAll('.course-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-    if (tab === 'iso') renderIso(body);
+    if (tab === 'bal') renderBalance(body);
+    if (tab === 'redox') renderRedox(body);
+    if (tab === 'nom') renderNom(body);
     if (tab === 'mole') renderMole(body);
-    if (tab === 'stoich') renderStoich(body);
-    if (tab === 'ox') renderOx(body);
     if (tab === 'ruth') renderRuth(body);
   };
   root.querySelectorAll('.course-tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
-  show('iso');
+  show('bal');
 }
 
-function renderIso(body) {
-  const opts = Object.keys(ISOTOPES).map(s => `<option value="${s}">${s}</option>`).join('');
+function speciesRow(side) {
+  return `<div class="sp-row" data-side="${side}">
+    <input class="sp-f" placeholder="formula" value="${side === 'L' ? 'CH4' : 'CO2'}">
+    <input class="sp-c" type="number" min="0" step="1" value="1" title="coefficiente">
+    <button type="button" class="sp-x" title="rimuovi">×</button>
+  </div>`;
+}
+
+function readSide(box) {
+  return [...box.querySelectorAll('.sp-row')].map(row => {
+    const parsed = parseFormula(row.querySelector('.sp-f').value);
+    return parsed ? { ...parsed, coeff: Number(row.querySelector('.sp-c').value) || 0 } : null;
+  }).filter(Boolean);
+}
+
+function renderBalance(body) {
   body.innerHTML = `
-    <h2>Massa atomica media</h2>
-    <p class="course-note">M = Σ Aᵢ · xᵢ. Le abbondanze sono quelle delle slide del corso (Ne, Cl) o i valori standard (Hg). Il numero di massa A è l’approssimazione usata a lezione; la massa IUPAC del sito è più precisa.</p>
-    <label>Elemento <select id="iso-el">${opts}</select></label>
-    <div id="iso-out"></div>`;
-  const draw = () => {
-    const key = body.querySelector('#iso-el').value;
-    const list = ISOTOPES[key];
-    const M = atomicMass(list);
-    const el = ELEMENTS.find(e => e.symbol === key);
-    const rows = list.map(iso => `<tr><td>${key}-${iso.A}</td><td>${iso.Z}</td><td>${iso.n}</td><td>${iso.A}</td><td>${fmt(iso.frac * 100, 2)} %</td></tr>`).join('');
-    body.querySelector('#iso-out').innerHTML = `
-      <table class="course-table">
-        <thead><tr><th>Nuclide</th><th>Z</th><th>N</th><th>A</th><th>Abbondanza</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <p>M calcolata = <b>${fmt(M, 3)} u</b>${el ? ` · massa IUPAC nel sito: ${el.mass} u` : ''}</p>
-      <p class="course-note">N = A − Z. Isotopi: stesso Z, N diverso. Isobari: stesso A. Isotoni: stesso N.</p>`;
+    <h2>Bilancia la reazione</h2>
+    <p class="course-note">Scrivi le formule e i coefficienti. Il controllo verifica atomo per atomo e la carica. Se è sbagliato, il motivo è la legge violata.</p>
+    <div class="bal-board">
+      <div><p>Reagenti</p><div id="bal-L">${speciesRow('L')}<div class="sp-row"><input class="sp-f" value="O2"><input class="sp-c" type="number" value="1"><button type="button" class="sp-x">×</button></div></div><button type="button" id="add-L">+ reagente</button></div>
+      <div class="arrow">→</div>
+      <div><p>Prodotti</p><div id="bal-R">${speciesRow('R')}<div class="sp-row"><input class="sp-f" value="H2O"><input class="sp-c" type="number" value="1"><button type="button" class="sp-x">×</button></div></div><button type="button" id="add-R">+ prodotto</button></div>
+    </div>
+    <canvas id="bal-anim" width="640" height="120"></canvas>
+    <div id="bal-out"></div>`;
+  const L = body.querySelector('#bal-L'), R = body.querySelector('#bal-R');
+  const add = (box, side) => {
+    const d = document.createElement('div');
+    d.className = 'sp-row';
+    d.innerHTML = `<input class="sp-f" placeholder="formula"><input class="sp-c" type="number" value="1"><button type="button" class="sp-x">×</button>`;
+    box.appendChild(d);
+    bind(d);
   };
-  body.querySelector('#iso-el').addEventListener('change', draw);
-  draw();
+  const bind = (row) => {
+    row.querySelector('.sp-x').onclick = () => { row.remove(); check(); };
+    row.querySelectorAll('input').forEach(i => i.addEventListener('input', check));
+  };
+  body.querySelectorAll('.sp-row').forEach(bind);
+  body.querySelector('#add-L').onclick = () => add(L, 'L');
+  body.querySelector('#add-R').onclick = () => add(R, 'R');
+
+  function check() {
+    const left = readSide(L), right = readSide(R);
+    const bad = [...body.querySelectorAll('.sp-f')].filter(i => i.value && !parseFormula(i.value));
+    const errs = balanceErrors(left, right);
+    const out = body.querySelector('#bal-out');
+    if (bad.length) {
+      out.innerHTML = `<p class="err">Formula non riconosciuta: ${bad.map(i => i.value).join(', ')}. Usa simboli della tavola e numeri interi (es. Fe2O3, SO4-2).</p>`;
+    } else if (!errs.length && left.length && right.length) {
+      out.innerHTML = `<p class="ok">Bilanciata. Ogni elemento ha lo stesso numero di atomi a sinistra e a destra, e la carica è conservata.</p>`;
+    } else {
+      out.innerHTML = errs.map(e => `<p class="err">${explain(e)}</p>`).join('') || '<p class="course-note">Aggiungi almeno un reagente e un prodotto.</p>';
+    }
+    drawBalance(body.querySelector('#bal-anim'), left, right, !errs.length);
+  }
+  check();
+}
+
+function drawBalance(canvas, left, right, ok) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0b0e13';
+  ctx.fillRect(0, 0, w, h);
+  const drawSide = (list, x0) => {
+    let x = x0;
+    for (const sp of list) {
+      const n = Math.min(sp.coeff || 0, 8);
+      for (let i = 0; i < n; i++) {
+        ctx.beginPath();
+        ctx.fillStyle = ok ? '#3ecbff' : '#e07a5f';
+        ctx.arc(x, h / 2, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(sp.formula.slice(0, 4), x, h / 2 + 28);
+        x += 26;
+      }
+      x += 8;
+    }
+  };
+  drawSide(left, 24);
+  ctx.fillStyle = '#c9a227';
+  ctx.font = '20px sans-serif';
+  ctx.fillText('→', w / 2 - 8, h / 2 + 6);
+  drawSide(right, w / 2 + 24);
+  ctx.fillStyle = ok ? '#7dcea0' : '#e07a5f';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(ok ? 'atomi conservati' : 'atomi non conservati', 12, 16);
+}
+
+function renderRedox(body) {
+  body.innerHTML = `
+    <h2>Passaggio di elettroni</h2>
+    <p class="course-note">Il numero di elettroni trasferiti è (Δ n.o.) × (numero di atomi). Non è una traiettoria quantistica: è il bilancio redox della reazione bilanciata.</p>
+    <label>Reazione
+      <select id="rx-pick">
+        <option value="fe">Fe₂O₃ + 2 Al → 2 Fe + Al₂O₃</option>
+        <option value="so">2 SO₂ + O₂ → 2 SO₃</option>
+      </select>
+    </label>
+    <canvas id="e-anim" width="640" height="180"></canvas>
+    <div id="e-out"></div>
+    <button type="button" id="e-play">Mostra il trasferimento</button>`;
+  const sets = {
+    fe: {
+      left: [{ formula: 'Fe2O3', atoms: { Fe: 2, O: 3 }, coeff: 1 }, { formula: 'Al', atoms: { Al: 1 }, coeff: 2 }],
+      right: [{ formula: 'Fe', atoms: { Fe: 1 }, coeff: 2 }, { formula: 'Al2O3', atoms: { Al: 2, O: 3 }, coeff: 1 }],
+    },
+    so: {
+      left: [{ formula: 'SO2', atoms: { S: 1, O: 2 }, coeff: 2 }, { formula: 'O2', atoms: { O: 2 }, coeff: 1 }],
+      right: [{ formula: 'SO3', atoms: { S: 1, O: 3 }, coeff: 2 }],
+    },
+  };
+  let raf = 0;
+  const play = () => {
+    const set = sets[body.querySelector('#rx-pick').value];
+    const info = electronChange(set.left, set.right);
+    const out = body.querySelector('#e-out');
+    out.innerHTML = info.changes.map(c => `<p>${c.el}: n.o. ${c.from} → ${c.to} su ${c.atoms} atomi → ${c.e > 0 ? 'perde' : 'acquista'} ${Math.abs(c.e)} e⁻</p>`).join('')
+      + `<p>${info.lost === info.gained ? `Bilancio: ${info.lost} e⁻ persi = ${info.gained} e⁻ acquistati.` : `Attenzione: persi ${info.lost}, acquistati ${info.gained}. La reazione non è bilanciata sul redox.`}</p>`;
+    const canvas = body.querySelector('#e-anim');
+    const ctx = canvas.getContext('2d');
+    const n = Math.min(info.lost || 0, 12);
+    let t0 = performance.now();
+    cancelAnimationFrame(raf);
+    const frame = (now) => {
+      const t = ((now - t0) % 1600) / 1600;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0b0e13';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#e07a5f';
+      ctx.fillRect(40, 60, 120, 60);
+      ctx.fillStyle = '#3ecbff';
+      ctx.fillRect(480, 60, 120, 60);
+      ctx.fillStyle = '#fff';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('si ossida', 62, 95);
+      ctx.fillText('si riduce', 505, 95);
+      for (let i = 0; i < n; i++) {
+        const p = (t + i / Math.max(n, 1)) % 1;
+        const x = 160 + p * 300;
+        ctx.beginPath();
+        ctx.fillStyle = '#c9a227';
+        ctx.arc(x, 90, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillText('e⁻', x - 6, 78);
+      }
+      ctx.fillText(`${n} elettroni trasferiti`, 240, 150);
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+  };
+  body.querySelector('#e-play').onclick = play;
+  body.querySelector('#rx-pick').onchange = play;
+  play();
+}
+
+function renderNom(body) {
+  let i = 0, score = 0;
+  body.innerHTML = `
+    <h2>Nomenclatura</h2>
+    <p class="course-note">Scrivi il nome IUPAC. Se è sbagliato, compare la regola, non solo “errato”.</p>
+    <p id="nom-q"></p>
+    <input id="nom-a" placeholder="nome del composto">
+    <button type="button" id="nom-go">Controlla</button>
+    <div id="nom-out"></div>`;
+  const ask = () => {
+    const q = NOMEN[i % NOMEN.length];
+    body.querySelector('#nom-q').textContent = `Formula: ${q.formula}  ·  punteggio ${score}`;
+    body.querySelector('#nom-a').value = '';
+    body.querySelector('#nom-out').innerHTML = '';
+  };
+  body.querySelector('#nom-go').onclick = () => {
+    const q = NOMEN[i % NOMEN.length];
+    const ans = body.querySelector('#nom-a').value.trim().toLowerCase().replace(/\s+/g, ' ');
+    const good = ans === q.name.toLowerCase();
+    if (good) score++;
+    body.querySelector('#nom-out').innerHTML = good
+      ? `<p class="ok">Corretto. ${q.hint}</p>`
+      : `<p class="err">Non coincide con il nome IUPAC atteso (${q.name}). ${q.hint}</p>`;
+    i++;
+    setTimeout(ask, 1400);
+  };
+  ask();
 }
 
 function renderMole(body) {
-  const opts = ELEMENTS.filter(e => !e.mass.startsWith('[')).map(e => `<option value="${e.Z}">${e.symbol} · ${e.mass} u</option>`).join('');
+  const opts = ELEMENTS.filter(e => !String(e.mass).startsWith('[')).map(e => `<option value="${e.Z}">${e.symbol}</option>`).join('');
   body.innerHTML = `
     <h2>Mole</h2>
-    <p class="course-note">1 mol = numero di atomi in 12 g di ¹²C. N<sub>A</sub> = 6,02214076×10²³ mol⁻¹ (esatto, SI 2019). n = m / M, N = n · N<sub>A</sub>.</p>
+    <p class="course-note">n = m/M, N = n·N<sub>A</sub>. I pallini sono un campione in scala: 1 pallino = N/20, non un atomo singolo.</p>
     <label>Elemento <select id="mole-el">${opts}</select></label>
-    <label>Massa m (g) <input id="mole-m" type="number" step="any" value="12"></label>
+    <label>Massa (g) <input id="mole-m" type="number" value="12" step="any"></label>
+    <canvas id="mole-c" width="640" height="140"></canvas>
     <div id="mole-out"></div>`;
   const draw = () => {
     const el = element(Number(body.querySelector('#mole-el').value));
@@ -159,106 +337,83 @@ function renderMole(body) {
     const M = Number(el.mass);
     const n = m / M;
     const N = n * NA;
-    body.querySelector('#mole-out').innerHTML = `
-      <p>M(${el.symbol}) = ${el.mass} g/mol</p>
-      <p>n = m/M = ${fmt(m, 4)} / ${el.mass} = <b>${fmt(n, 6)} mol</b></p>
-      <p>N = n · N<sub>A</sub> = <b>${N.toExponential(4).replace('.', ',')}</b> atomi</p>`;
-  };
-  body.querySelector('#mole-el').addEventListener('change', draw);
-  body.querySelector('#mole-m').addEventListener('input', draw);
-  draw();
-}
-
-function renderStoich(body) {
-  const opts = Object.entries(REACTIONS).map(([k, r]) => `<option value="${k}">${r.name}</option>`).join('');
-  body.innerHTML = `
-    <h2>Stechiometria e reagente limitante</h2>
-    <p class="course-note">Reazioni già bilanciate. Il fattore stechiometrico è il rapporto dei coefficienti. Il reagente limitante è quello con il minor numero di moli di reazione.</p>
-    <label>Reazione <select id="st-rx">${opts}</select></label>
-    <div id="st-inputs"></div>
-    <div id="st-out"></div>`;
-  const draw = () => {
-    const rx = REACTIONS[body.querySelector('#st-rx').value];
-    const box = body.querySelector('#st-inputs');
-    if (!box.dataset.rx || box.dataset.rx !== body.querySelector('#st-rx').value) {
-      box.dataset.rx = body.querySelector('#st-rx').value;
-      box.innerHTML = rx.reactants.map(r => `<label>${r.label} (g) <input data-id="${r.id}" type="number" step="any" value="10"></label>`).join('');
-      box.querySelectorAll('input').forEach(i => i.addEventListener('input', draw));
+    body.querySelector('#mole-out').innerHTML = `<p>n = ${fmt(m)}/${el.mass} = <b>${fmt(n, 5)} mol</b> · N = <b>${N.toExponential(3)}</b> atomi</p>`;
+    const canvas = body.querySelector('#mole-c');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0b0e13';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const dots = Math.max(0, Math.min(80, Math.round(n * 20)));
+    for (let i = 0; i < dots; i++) {
+      const x = 20 + (i % 20) * 30;
+      const y = 30 + Math.floor(i / 20) * 30;
+      ctx.beginPath();
+      ctx.fillStyle = '#c9a227';
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fill();
     }
-    const masses = {};
-    box.querySelectorAll('input').forEach(i => { masses[i.dataset.id] = Number(i.value) || 0; });
-    const extents = rx.reactants.map(r => ({ ...r, n: masses[r.id] / r.M, xi: (masses[r.id] / r.M) / r.coeff }));
-    const lim = extents.reduce((a, b) => (b.xi < a.xi ? b : a));
-    const products = rx.products.map(p => ({ ...p, g: lim.xi * p.coeff * p.M }));
-    body.querySelector('#st-out').innerHTML = `
-      <p>${rx.eq}</p>
-      <table class="course-table">
-        <thead><tr><th>Reagente</th><th>moli</th><th>ξ = n/coeff</th></tr></thead>
-        <tbody>${extents.map(e => `<tr><td>${e.label}</td><td>${fmt(e.n, 4)}</td><td>${fmt(e.xi, 4)}</td></tr>`).join('')}</tbody>
-      </table>
-      <p>Reagente limitante: <b>${lim.label}</b> (ξ = ${fmt(lim.xi, 4)} mol)</p>
-      <p>Resa teorica: ${products.map(p => `${p.label} ${fmt(p.g, 3)} g`).join(' · ')}</p>
-      <p class="course-note">Resa percentuale = (resa reale / resa teorica) × 100. Qui si calcola solo la teorica.</p>`;
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(`${dots} campioni  ·  1 campione = N/20`, 16, 128);
   };
-  body.querySelector('#st-rx').addEventListener('change', () => { body.querySelector('#st-inputs').dataset.rx = ''; draw(); });
-  draw();
-}
-
-function renderOx(body) {
-  body.innerHTML = `
-    <h2>Numeri di ossidazione</h2>
-    <p class="course-note">Regole del corso, applicate a esempi standard. Non è un parser di formule: i casi sono quelli della lezione.</p>
-    <ul class="course-rules">${OX_RULES.map(r => `<li>${r}</li>`).join('')}</ul>
-    <label>Esempio
-      <select id="ox-ex">
-        <option value="h2o">H₂O</option>
-        <option value="h2o2">H₂O₂ (perossido)</option>
-        <option value="licl">LiCl</option>
-        <option value="fe2o3">Fe₂O₃</option>
-        <option value="so4">SO₄²⁻</option>
-        <option value="nh4">NH₄⁺</option>
-        <option value="pdh2">PdH₂ (idruro)</option>
-      </select>
-    </label>
-    <div id="ox-out"></div>`;
-  const cases = {
-    h2o: 'H: +1, O: −2. Somma: 2·(+1) + (−2) = 0.',
-    h2o2: 'Perossido: O ha n.o. −1. H: +1. Somma: 2·(+1) + 2·(−1) = 0.',
-    licl: 'Gruppo 1: Li +1. Cl −1. Somma 0.',
-    fe2o3: 'O: −2 × 3 = −6. Due Fe devono dare +6, quindi Fe +3 ciascuno.',
-    so4: 'O: −2 × 4 = −8. Carica dello ione −2, quindi S = −2 − (−8) = +6.',
-    nh4: 'H: +1 × 4 = +4. Carica +1, quindi N = +1 − 4 = −3.',
-    pdh2: 'Idruro metallico: H −1. Due H danno −2, quindi Pd +2.',
-  };
-  const draw = () => { body.querySelector('#ox-out').innerHTML = `<p>${cases[body.querySelector('#ox-ex').value]}</p>`; };
-  body.querySelector('#ox-ex').addEventListener('change', draw);
+  body.querySelectorAll('input, select').forEach(el => el.addEventListener('input', draw));
   draw();
 }
 
 function renderRuth(body) {
   body.innerHTML = `
     <h2>Scattering di Rutherford</h2>
-    <p class="course-note">Deflessione coulombiana di una particella α su un nucleo. Formula: cot(θ/2) = 2Eb / (Z₁Z₂ k), con k = e²/(4πε₀) = 1,440 MeV·fm. Non è una traiettoria animata: solo l’angolo dalla formula.</p>
-    <label>Nucleo bersaglio
-      <select id="ru-z">
-        <option value="79">Au (Z = 79)</option>
-        <option value="47">Ag (Z = 47)</option>
-        <option value="13">Al (Z = 13)</option>
-      </select>
-    </label>
-    <label>Energia α (MeV) <input id="ru-e" type="number" step="any" value="5"></label>
-    <label>Parametro d’impatto b (fm) <input id="ru-b" type="number" step="any" value="10"></label>
+    <p class="course-note">Traiettoria iperbolica del potenziale coulombiano. L’angolo è quello della formula, non un rimbalzo disegnato a mano.</p>
+    <label>Z bersaglio <input id="ru-z" type="number" value="79"></label>
+    <label>E (MeV) <input id="ru-e" type="number" value="5" step="any"></label>
+    <label>b (fm) <input id="ru-b" type="number" value="20" step="any"></label>
+    <canvas id="ru-c" width="640" height="220"></canvas>
     <div id="ru-out"></div>`;
+  const k = 1.439964548;
+  let raf = 0;
   const draw = () => {
-    const Z2 = Number(body.querySelector('#ru-z').value);
-    const E = Number(body.querySelector('#ru-e').value);
-    const b = Number(body.querySelector('#ru-b').value);
-    const theta = rutherfordAngle(b, E, 2, Z2);
-    body.querySelector('#ru-out').innerHTML = `
-      <p>Z₁ = 2 (α), Z₂ = ${Z2}, E = ${fmt(E, 2)} MeV, b = ${fmt(b, 2)} fm</p>
-      <p>θ = <b>${fmt(theta, 2)}°</b></p>
-      <p class="course-note">Nel modello a panettone di Thomson la carica è diffusa: deflessioni grandi sono rare. Nel modello nucleare di Rutherford un urto ravvicinato (b piccolo) dà θ grande, fino a retrodiffusione. L’esperimento della lamina d’oro (Geiger–Marsden, 1909) ha misurato quelle deflessioni.</p>`;
+    const Z2 = Number(body.querySelector('#ru-z').value) || 79;
+    const E = Number(body.querySelector('#ru-e').value) || 5;
+    const b = Number(body.querySelector('#ru-b').value) || 20;
+    const theta = 2 * Math.atan((2 * Z2 * k) / (2 * E * b)) * 180 / Math.PI;
+    body.querySelector('#ru-out').innerHTML = `<p>θ = <b>${fmt(theta, 1)}°</b> · cot(θ/2) = 2Eb/(Z₁Z₂k)</p>`;
+    const canvas = body.querySelector('#ru-c');
+    const ctx = canvas.getContext('2d');
+    const cx = 220, cy = 110;
+    cancelAnimationFrame(raf);
+    let t0 = performance.now();
+    const frame = (now) => {
+      const u = ((now - t0) % 2400) / 2400;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0b0e13';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.fillStyle = '#e07a5f';
+      ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#3ecbff';
+      ctx.beginPath();
+      const th = theta * Math.PI / 180;
+      for (let i = 0; i <= 40; i++) {
+        const s = (i / 40) * 2 - 1;
+        const along = s * 160;
+        const off = b * 0.8 * (1 - Math.abs(s)) + (s > 0 ? Math.tan(th / 2) * along * 0.15 : 0);
+        const x = cx + along;
+        const y = cy - 40 - off;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      const p = u;
+      const along = (p * 2 - 1) * 160;
+      const off = b * 0.8 * (1 - Math.abs(p * 2 - 1)) ;
+      ctx.beginPath();
+      ctx.fillStyle = '#c9a227';
+      ctx.arc(cx + along, cy - 40 - off, 5, 0, Math.PI * 2);
+      ctx.fill();
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
   };
-  body.querySelectorAll('input, select').forEach(el => el.addEventListener('input', draw));
+  body.querySelectorAll('input').forEach(el => el.addEventListener('input', draw));
   draw();
 }
