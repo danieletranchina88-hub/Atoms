@@ -235,6 +235,7 @@ new ResizeObserver(() => {
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if (h === 'sandbox' && state.mode !== 'sandbox') { setMode('sandbox'); return; }
+  if (h === 'corso' && state.mode !== 'corso') { setMode('corso'); return; }
   const Z = zFromHash();
   if (Z && Z !== state.Z) selectElement(Z);
 });
@@ -296,7 +297,7 @@ function setMode(mode) {
   if (mode !== 'corso') $('course-panel').hidden = true;
   viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
-  try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
+  try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : mode === 'corso' ? '#corso' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
   viewer.renderer.domElement.style.visibility = '';
   if (mode === 'sandbox') { activateSandbox(); return; }
   if (mode === 'corso') {

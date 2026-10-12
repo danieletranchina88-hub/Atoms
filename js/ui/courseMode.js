@@ -132,7 +132,7 @@ export function mountCourse(root) {
     if (tab === 'ruth') renderRuth(body);
   };
   root.querySelectorAll('.course-tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
-  show('bal');
+  show('models');
 }
 
 function speciesRow(side) {
