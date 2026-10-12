@@ -1,6 +1,7 @@
 // Atlante Orbitale: collega calcolo quantistico, scena 3D, grafici e interfaccia.
 
 import { ELEMENTS, element, CATEGORY_LABELS } from './physics/elements.js';
+import { mountCourse } from './ui/courseMode.js';
 import {
   configurationParts, isMadelungException, hundBoxes, L_LETTERS, subshellLabel,
 } from './physics/configuration.js';
@@ -276,7 +277,7 @@ async function selectElement(Z) {
   $('busy').hidden = true;
 }
 
-const CHEM_MODES = new Set(['sandbox']);
+const CHEM_MODES = new Set(['sandbox', 'corso']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
@@ -287,15 +288,25 @@ function setMode(mode) {
     atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
     sandbox: 'Dinamica di Born–Oppenheimer. Vista predefinita: densità a 0,0016 e/bohr³ (superficie molecolare, Rahm et al. 2024) più orbitale di frontiera. Forze da GFN2-xTB. Il colore dell\'orbitale è il segno di ψ, non un colore osservato.',
+    corso: 'Calcoli del corso: massa media da isotopi, mole (N_A del SI), stechiometria su reazioni bilanciate, numeri di ossidazione, scattering coulombiano di Rutherford. Nessuna simulazione inventata.',
   };
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'sandbox' && mode !== 'sandbox') deactivateSandbox();
+  if (mode !== 'corso') $('course-panel').hidden = true;
   viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
   try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
   viewer.renderer.domElement.style.visibility = '';
   if (mode === 'sandbox') { activateSandbox(); return; }
+  if (mode === 'corso') {
+    document.body.dataset.mode = 'corso';
+    $('course-panel').hidden = false;
+    mountCourse($('course-panel'));
+    viewer.setAxesVisible(false);
+    return;
+  }
+  $('course-panel').hidden = true;
   document.body.dataset.mode = 'atom';
   viewer.setAxesVisible(true);
   $('busy').hidden = true;
