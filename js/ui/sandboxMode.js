@@ -7,7 +7,7 @@ import { SandboxObservatory, downloadTrajectory } from './sandboxObservatory.js'
 import { PRESETS, SANDBOX_MOLECULES, SANDBOX_IONS, SANDBOX_ELEMENTS, SPECIES_NAMES } from '../chem/sandboxData.js';
 import { ATOM_PARAMS, KB_EV } from '../chem/reactiveData.js';
 import { cpkColor, covalentRadius, PAULING, valenceElectrons } from '../chem/elementData.js';
-import { parseSmiles, hillFormula, writeSmiles } from '../chem/smiles.js';
+import { parseSmiles, hillFormula, writeSmiles, fillHydrogens, standardValence } from '../chem/smiles.js';
 import { ELEMENTS } from '../physics/elements.js';
 import { drawXY, wavelengthColor } from './chemCharts.js';
 import { MV2 } from '../chem/md.js';
@@ -495,6 +495,10 @@ function updateScene() {
     viewer.controls.target.set(0, 0, 0);
     scene.framed = true;
     renderControls();
+  }
+  if (kit.wantFrame && f.N > 0) {
+    kit.wantFrame = false;
+    frameMolecules(false);
   }
   if (!observatory?.replay) { flashUpdate(); pulseUpdate(); } else { scene.flash.visible = false; for (const p of scene.pulses) p.visible = false; }
   if (!SB.fresh) return;
@@ -1002,6 +1006,82 @@ function addPayload(count) {
 // Pannelli
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Costruttore di connettività. Non calcola nulla: prepara il grafo che la sandbox
+// rilassa e risolve con GFN2-xTB.
+// ---------------------------------------------------------------------------
+
+const KIT_Z = [1, 6, 7, 8, 9, 5, 14, 15, 16, 17, 35, 53];
+const kit = {
+  atoms: [],
+  bonds: [],
+  pick: 6,
+  sel: [],
+  completeH: true,
+  msg: '',
+  open: false,
+  wantFrame: false,
+};
+
+function kitUsed(i) {
+  return kit.bonds.reduce((s, b) => s + (b.a === i || b.b === i ? b.order : 0), 0);
+}
+
+function kitIssues() {
+  const out = [];
+  kit.atoms.forEach((a, i) => {
+    const target = standardValence(a.Z, a.charge || 0);
+    const used = kitUsed(i);
+    if (target === null) out.push(`${sym(a.Z)} non ha una valenza di Lewis in questo costruttore.`);
+    else if (used > target) out.push(`${sym(a.Z)}${i + 1} ha ordine di legame ${used}, la valenza con carica ${a.charge || 0} è ${target}.`);
+  });
+  return out;
+}
+
+function kitGraph() {
+  const atoms = kit.atoms.map(a => ({ Z: a.Z, charge: a.charge || 0, aromatic: false }));
+  const bonds = kit.bonds.map(b => ({ a: b.a, b: b.b, order: b.order, aromatic: false }));
+  return kit.completeH ? fillHydrogens({ atoms, bonds }) : { atoms, bonds };
+}
+
+function kitCommit() {
+  if (!kit.atoms.length) { kit.msg = 'Aggiungi almeno un atomo.'; renderSide(); return; }
+  const issues = kitIssues();
+  if (issues.length) { kit.msg = issues.join(' '); renderSide(); return; }
+  const graph = kitGraph();
+  const smiles = writeSmiles(graph);
+  if (!smiles) { kit.msg = 'Il grafo non ha atomi pesanti da scrivere.'; renderSide(); return; }
+  try {
+    const back = parseSmiles(smiles);
+    if (back.atoms.some(a => !(a.Z >= 1 && a.Z <= 86))) throw new Error('elemento fuori da H–Rn');
+  } catch (e) {
+    kit.msg = `SMILES non accettata dal lettore del sito (${smiles}): ${e.message}`;
+    renderSide();
+    return;
+  }
+  kit.msg = `${smiles}. Geometria iniziale da embed (raggi di Pyykkö), poi rilassata con GFN2-xTB. In scena: densità a 0,0016 e/bohr³ e HOMO. L'ordine di legame è quello di Mayer del calcolo, non il bastoncino che hai messo. Ibridi: vista «coppie e ibridi» (Pipek–Mezey). Elettroni: campioni di Born, non traiettorie.`;
+  SB.style = 'real';
+  SB.orbital = 'homo';
+  SB.fresh = true;
+  SB.fidelity = 'gfn2';
+  SB.userPaused = true;
+  kit.wantFrame = true;
+  scene.framed = true;
+  post({ type: 'clear' });
+  post({ type: 'set', forceField: 'gfn2', paused: true, T: 300 });
+  post({ type: 'add', smiles, count: 1 });
+  renderSide();
+  renderControls();
+}
+
+export function focusKitBuilder() {
+  kit.open = true;
+  if (active) {
+    renderSide();
+    document.getElementById('kit-build')?.scrollIntoView({ block: 'nearest' });
+  }
+}
+
 function renderSide() {
   if (!active) return;
   const p = SB.preset;
@@ -1016,6 +1096,23 @@ function renderSide() {
   }).join('');
   const elBtns = SANDBOX_ELEMENTS.map(Z => `<button type="button" class="mol-chip ${SB.add.kind === 'atom' && SB.add.symbol === sym(Z) ? 'active' : ''}" data-el="${sym(Z)}" title="${ELEMENTS[Z - 1].name}">${sym(Z)}</button>`).join('');
   $('element-card').innerHTML = `<div class="btn-row"><a class="btn" href="#fasi">Fasi · dinamica MD</a><a class="btn" href="#becher">Soluzioni · cristalli</a></div>
+    <details id="kit-build" ${kit.open ? 'open' : ''}>
+      <summary>Costruisci una molecola</summary>
+      <p class="hint">Qui scegli solo la connettività, come i bastoncini del modello. Non è un calcolo. Gli idrogeni mancanti, se l'opzione è accesa, si aggiungono fino alla valenza di Lewis. La fisica parte dopo: GFN2-xTB nella sandbox, la stessa delle altre molecole.</p>
+      <div class="mol-list">${KIT_Z.map(Z => `<button type="button" class="mol-chip ${kit.pick === Z ? 'active' : ''}" data-kit-z="${Z}" title="${ELEMENTS[Z - 1].name}" style="box-shadow: inset 0 -2px 0 ${cpkColor(Z)}">${sym(Z)}</button>`).join('')}</div>
+      <div class="btn-row">
+        <button type="button" class="btn" id="kit-add">Aggiungi ${sym(kit.pick)}</button>
+        <button type="button" class="btn" id="kit-bond">Lega i selezionati</button>
+        <button type="button" class="btn" id="kit-order">Ordine +1</button>
+        <button type="button" class="btn" id="kit-del">Togli atomo</button>
+        <button type="button" class="btn" id="kit-q">Carica ±</button>
+      </div>
+      <label class="hint"><input type="checkbox" id="kit-h" ${kit.completeH ? 'checked' : ''}> completa gli idrogeni alla valenza standard</label>
+      <ul class="sb-tips">${kit.atoms.map((a, i) => `<li><button type="button" class="linkish" data-kit-i="${i}">${kit.sel.includes(i) ? '● ' : ''}${sym(a.Z)}${i + 1}${a.charge ? (a.charge > 0 ? `⁺${a.charge > 1 ? a.charge : ''}` : `⁻${a.charge < -1 ? -a.charge : ''}`) : ''}</button> ordine ${kitUsed(i)}${standardValence(a.Z, a.charge || 0) != null ? ` / ${standardValence(a.Z, a.charge || 0)}` : ''}</li>`).join('') || '<li>Nessun atomo.</li>'}</ul>
+      ${kit.bonds.length ? `<p class="hint">Legami chiesti: ${kit.bonds.map(b => `${sym(kit.atoms[b.a].Z)}${b.a + 1}–${sym(kit.atoms[b.b].Z)}${b.b + 1} (ordine ${b.order})`).join(', ')}</p>` : ''}
+      <div class="btn-row"><button type="button" class="btn" id="kit-go">Metti in sandbox e calcola</button><button type="button" class="btn" id="kit-clear">Svuota il grafo</button></div>
+      ${kit.msg ? `<p class="hint">${escapeHtml(kit.msg)}</p>` : ''}
+    </details>
     <h3 class="side-h">Sandbox chimica</h3>
     <label class="lbl" for="sb-preset">Esperimento</label>
     <select id="sb-preset">${SB.preset.id === 'collision' ? '<option value="collision" selected>Urto controllato fra due reagenti</option>' : ''}
@@ -1118,6 +1215,52 @@ function renderSide() {
   });
   $('sb-count').addEventListener('input', (e) => { SB.count = +e.target.value; $('sb-count-out').textContent = SB.count; });
   $('sb-add').addEventListener('click', () => post({ type: 'add', ...addPayload(SB.count) }));
+  $('kit-build')?.addEventListener('toggle', () => { kit.open = $('kit-build').open; });
+  $('element-card').querySelectorAll('[data-kit-z]').forEach(b => b.addEventListener('click', () => { kit.pick = +b.dataset.kitZ; renderSide(); }));
+  $('element-card').querySelectorAll('[data-kit-i]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.kitI;
+    kit.sel = kit.sel.includes(i) ? kit.sel.filter(k => k !== i) : [...kit.sel, i].slice(-2);
+    renderSide();
+  }));
+  $('kit-add')?.addEventListener('click', () => { kit.atoms.push({ Z: kit.pick, charge: 0 }); kit.msg = ''; renderSide(); });
+  $('kit-bond')?.addEventListener('click', () => {
+    if (kit.sel.length !== 2) { kit.msg = 'Seleziona due atomi, poi legalì.'; renderSide(); return; }
+    const [a, b] = kit.sel;
+    const found = kit.bonds.find(x => (x.a === a && x.b === b) || (x.a === b && x.b === a));
+    if (found) kit.msg = 'Quel legame c’è già. Usa «Ordine +1» per alzarlo, fino a 3.';
+    else { kit.bonds.push({ a, b, order: 1 }); kit.msg = ''; }
+    renderSide();
+  });
+  $('kit-order')?.addEventListener('click', () => {
+    if (kit.sel.length !== 2) { kit.msg = 'Seleziona i due atomi del legame.'; renderSide(); return; }
+    const [a, b] = kit.sel;
+    const found = kit.bonds.find(x => (x.a === a && x.b === b) || (x.a === b && x.b === a));
+    if (!found) { kit.msg = 'Quei due atomi non sono legati.'; renderSide(); return; }
+    found.order = found.order % 3 + 1;
+    kit.msg = '';
+    renderSide();
+  });
+  $('kit-del')?.addEventListener('click', () => {
+    const i = kit.sel[0];
+    if (i === undefined) return;
+    kit.atoms.splice(i, 1);
+    kit.bonds = kit.bonds.filter(b => b.a !== i && b.b !== i).map(b => ({
+      ...b, a: b.a > i ? b.a - 1 : b.a, b: b.b > i ? b.b - 1 : b.b,
+    }));
+    kit.sel = [];
+    renderSide();
+  });
+  $('kit-q')?.addEventListener('click', () => {
+    const i = kit.sel[0];
+    if (i === undefined) { kit.msg = 'Seleziona l’atomo di cui cambiare la carica formale.'; renderSide(); return; }
+    const a = kit.atoms[i];
+    const seq = [0, 1, -1, 2, -2];
+    a.charge = seq[(seq.indexOf(a.charge || 0) + 1) % seq.length];
+    renderSide();
+  });
+  $('kit-h')?.addEventListener('change', (e) => { kit.completeH = e.target.checked; });
+  $('kit-clear')?.addEventListener('click', () => { kit.atoms = []; kit.bonds = []; kit.sel = []; kit.msg = ''; renderSide(); });
+  $('kit-go')?.addEventListener('click', kitCommit);
 }
 
 const SAVE_KEY = 'atlante-sandbox-esperimenti';

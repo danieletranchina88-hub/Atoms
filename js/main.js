@@ -1,7 +1,7 @@
 // Atlante Orbitale: collega calcolo quantistico, scena 3D, grafici e interfaccia.
 
 import { ELEMENTS, element, CATEGORY_LABELS } from './physics/elements.js';
-import { mountKit } from './ui/kitMode.js';
+import { initSandboxMode, activateSandbox, deactivateSandbox, sandboxRedraw, focusKitBuilder } from './ui/sandboxMode.js';
 import {
   configurationParts, isMadelungException, hundBoxes, L_LETTERS, subshellLabel,
 } from './physics/configuration.js';
@@ -17,7 +17,6 @@ import { buildPeriodicTable, blockOf, ramp } from './ui/periodicTable.js';
 import { ATOM_SUMMARY } from './physics/atomSummary.js';
 import { PAULING, ALLEN, ELECTRON_AFFINITY, OXIDATION_STATES } from './chem/elementData.js';
 import { drawLineChart, drawLevels, drawMODiagram, drawSlice, superscript } from './ui/charts.js';
-import { initSandboxMode, activateSandbox, deactivateSandbox, sandboxRedraw } from './ui/sandboxMode.js';
 
 const HARTREE_EV = 27.211386245988;
 const BOHR_PM = 52.917721090;
@@ -139,7 +138,6 @@ const SET_ENCLOSED = 0.55;
 // ---------------------------------------------------------------------------
 
 const viewer = new Viewer($('viewport'));
-let kitController = null;
 let sceneEpoch = 0;
 const isCoherent = () => state.mode === 'atom' && state.atom?.Z === 1 && state.atomView === 'density' && state.coherent;
 function updateCoherentStatus() {
@@ -220,7 +218,7 @@ if (location.hash !== '#sandbox') viewer.applyTheme();
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
 function onThemeChange() {
   viewer.applyTheme();
-  if (state.mode === 'kit') return;
+  if (state.mode === 'sandbox') return;
   if (state.mode === 'sandbox') { viewer.setAxesVisible(false); sandboxRedraw(); return; }
   if (state.atom) { render3D(); drawCharts(); }
 }
@@ -230,16 +228,14 @@ new ResizeObserver(() => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (state.mode === 'sandbox') sandboxRedraw();
-    else if (state.mode !== 'kit' && state.atom) drawCharts();
+    else if (state.mode !== 'sandbox' && state.atom) drawCharts();
   }, 120);
 }).observe(document.querySelector('.charts'));
 
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
-  if (h === 'sandbox' && state.mode !== 'sandbox') { setMode('sandbox'); return; }
-  if (h === 'kit') { if (state.mode !== 'kit') setMode('kit'); return; }
+  if (h === 'kit' || h === 'sandbox') { if (state.mode !== 'sandbox') setMode(h === 'kit' ? 'kit' : 'sandbox'); else if (h === 'kit') focusKitBuilder(); return; }
   const Z = zFromHash();
-  if (Z && state.mode === 'kit') setMode('atom');
   if (Z && Z !== state.Z) selectElement(Z);
 });
 
@@ -281,10 +277,12 @@ async function selectElement(Z) {
   $('busy').hidden = true;
 }
 
-const CHEM_MODES = new Set(['sandbox', 'kit']);
+const CHEM_MODES = new Set(['sandbox']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
+  const openKit = mode === 'kit';
+  if (openKit) mode = 'sandbox';
   ++sceneEpoch;
   const prev = state.mode;
   state.mode = mode;
@@ -292,26 +290,19 @@ function setMode(mode) {
     atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
     sandbox: 'Dinamica di Born–Oppenheimer. Vista predefinita: densità a 0,0016 e/bohr³ (superficie molecolare, Rahm et al. 2024) più orbitale di frontiera. Forze da GFN2-xTB. Il colore dell\'orbitale è il segno di ψ, non un colore osservato.',
-    kit: 'Kit molecolare · geometria costruita a mano · ottimizzazione e orbitali Hartree–Fock 6-31G · ibridazione dai domini VSEPR · densità campionata secondo Born',
   };
   $('model-status').textContent = models[mode] ?? '';
-  document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
+  document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode || (openKit && b.dataset.mode === 'kit'))));
   if (prev === 'sandbox' && mode !== 'sandbox') deactivateSandbox();
-  if (kitController) { kitController.dispose(); kitController = null; }
-  if (mode !== 'kit') $('kit-panel').hidden = true;
   viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
-  try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : mode === 'kit' ? '#kit' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
+  try { history.replaceState(null, '', mode === 'sandbox' ? (openKit ? '#kit' : '#sandbox') : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
   viewer.renderer.domElement.style.visibility = '';
-  if (mode === 'sandbox') { activateSandbox(); return; }
-  if (mode === 'kit') {
-    viewer.frameCallbacks.clear();
-    document.body.dataset.mode = 'kit';
-    $('kit-panel').hidden = false;
-    kitController = mountKit($('kit-panel'));
+  if (mode === 'sandbox') {
+    if (prev !== 'sandbox') activateSandbox();
+    if (openKit) focusKitBuilder();
     return;
   }
-  $('kit-panel').hidden = true;
   document.body.dataset.mode = 'atom';
   viewer.setAxesVisible(true);
   $('busy').hidden = true;
@@ -1274,7 +1265,7 @@ initSandboxMode(viewer, {
 document.body.dataset.mode = 'atom';
 {
   const h = location.hash.slice(1);
-  const startMode = h === 'sandbox' ? 'sandbox' : h === 'kit' ? 'kit' : null;
+  const startMode = h === 'sandbox' || h === 'kit' ? (h === 'kit' ? 'kit' : 'sandbox') : null;
   if (startMode) state.mode = startMode;
   selectElement(zFromHash() ?? 6);
   if (startMode) { state.mode = 'atom'; setMode(startMode); }
