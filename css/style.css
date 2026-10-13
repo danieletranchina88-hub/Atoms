@@ -985,3 +985,31 @@ body[data-mode="corso"] .charts { display: none; }
 .model-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .model-picks button { border: 1px solid var(--line, #2a3340); background: transparent; color: inherit; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
 .model-picks button.on { background: var(--accent, #c9a227); color: #111; border-color: transparent; }
+
+
+body[data-mode="kit"] .table-band,
+body[data-mode="kit"] .workspace,
+body[data-mode="kit"] .charts { display: none; }
+.kit-panel { height: calc(100vh - 92px); }
+.kit { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.kit-box { padding: 14px 16px; overflow: auto; border-right: 1px solid var(--line, #2a3340); }
+.kit-box h2 { margin: 0 0 6px; font-size: 1.1rem; }
+.kit-note { color: var(--muted, #9aa3ad); font-size: 0.84rem; line-height: 1.4; }
+.kit-atoms { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.kit-ball {
+  width: 46px; height: 46px; border-radius: 50%; border: 2px solid transparent;
+  color: #111; font-weight: 700; cursor: pointer;
+  box-shadow: inset -6px -8px 12px rgba(0,0,0,.35), inset 4px 4px 8px rgba(255,255,255,.35);
+}
+.kit-ball.on { border-color: #fff; }
+.kit-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.kit-tools button, .kit-calc {
+  border: 1px solid var(--line, #2a3340); background: transparent; color: inherit;
+  border-radius: 8px; padding: 6px 10px; cursor: pointer;
+}
+.kit-calc { width: 100%; background: var(--accent, #c9a227); color: #111; border: none; font-weight: 600; margin-bottom: 8px; }
+.kit-stage { position: relative; min-height: 420px; }
+.kit-stage canvas { width: 100%; height: 100%; display: block; }
+.kit-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 8px; }
+.kit-table th, .kit-table td { border-bottom: 1px solid var(--line, #2a3340); text-align: left; padding: 4px 6px; }
+@media (max-width: 800px) { .kit { grid-template-columns: 1fr; } .kit-stage { height: 60vh; } }

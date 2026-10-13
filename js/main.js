@@ -1,7 +1,7 @@
 // Atlante Orbitale: collega calcolo quantistico, scena 3D, grafici e interfaccia.
 
 import { ELEMENTS, element, CATEGORY_LABELS } from './physics/elements.js';
-import { mountCourse } from './ui/courseMode.js';
+import { mountKit } from './ui/kitMode.js';
 import {
   configurationParts, isMadelungException, hundBoxes, L_LETTERS, subshellLabel,
 } from './physics/configuration.js';
@@ -139,7 +139,7 @@ const SET_ENCLOSED = 0.55;
 // ---------------------------------------------------------------------------
 
 const viewer = new Viewer($('viewport'));
-let courseController = null;
+let kitController = null;
 let sceneEpoch = 0;
 const isCoherent = () => state.mode === 'atom' && state.atom?.Z === 1 && state.atomView === 'density' && state.coherent;
 function updateCoherentStatus() {
@@ -220,7 +220,7 @@ if (location.hash !== '#sandbox') viewer.applyTheme();
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', onThemeChange);
 function onThemeChange() {
   viewer.applyTheme();
-  if (state.mode === 'corso') return;
+  if (state.mode === 'kit') return;
   if (state.mode === 'sandbox') { viewer.setAxesVisible(false); sandboxRedraw(); return; }
   if (state.atom) { render3D(); drawCharts(); }
 }
@@ -230,20 +230,16 @@ new ResizeObserver(() => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (state.mode === 'sandbox') sandboxRedraw();
-    else if (state.mode !== 'corso' && state.atom) drawCharts();
+    else if (state.mode !== 'kit' && state.atom) drawCharts();
   }, 120);
 }).observe(document.querySelector('.charts'));
 
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if (h === 'sandbox' && state.mode !== 'sandbox') { setMode('sandbox'); return; }
-  if (h === 'corso' || h.startsWith('corso/')) {
-    if (state.mode !== 'corso') setMode('corso');
-    else courseController?.navigate(location.hash);
-    return;
-  }
+  if (h === 'kit') { if (state.mode !== 'kit') setMode('kit'); return; }
   const Z = zFromHash();
-  if (Z && state.mode === 'corso') setMode('atom');
+  if (Z && state.mode === 'kit') setMode('atom');
   if (Z && Z !== state.Z) selectElement(Z);
 });
 
@@ -285,11 +281,10 @@ async function selectElement(Z) {
   $('busy').hidden = true;
 }
 
-const CHEM_MODES = new Set(['sandbox', 'corso']);
+const CHEM_MODES = new Set(['sandbox', 'kit']);
 const isChemMode = () => CHEM_MODES.has(state.mode);
 
 function setMode(mode) {
-  const courseRoute = location.hash;
   ++sceneEpoch;
   const prev = state.mode;
   state.mode = mode;
@@ -297,30 +292,26 @@ function setMode(mode) {
     atom: 'Densità |ψ|² dal DFT-LDA relativistico scalare (Koelling–Harmon, validato sui dati NIST ScRLDA) · senza spin–orbita · nucleo non in scala',
     orbital: 'Densità di probabilità |ψ|² · orbitali del modello a campo centrale; nessuna traiettoria elettronica',
     sandbox: 'Dinamica di Born–Oppenheimer. Vista predefinita: densità a 0,0016 e/bohr³ (superficie molecolare, Rahm et al. 2024) più orbitale di frontiera. Forze da GFN2-xTB. Il colore dell\'orbitale è il segno di ψ, non un colore osservato.',
-    corso: 'Corso di chimica generale · lezioni, bilanci e modelli didattici interattivi · riferimenti al materiale del corso · simulazioni quantistiche disponibili nella tavola periodica e nel sandbox',
+    kit: 'Kit molecolare · geometria costruita a mano · ottimizzazione e orbitali Hartree–Fock 6-31G · ibridazione dai domini VSEPR · densità campionata secondo Born',
   };
   $('model-status').textContent = models[mode] ?? '';
   document.querySelectorAll('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   if (prev === 'sandbox' && mode !== 'sandbox') deactivateSandbox();
-  if (courseController) { courseController.dispose(); courseController = null; }
-  if (mode !== 'corso') $('course-panel').hidden = true;
+  if (kitController) { kitController.dispose(); kitController = null; }
+  if (mode !== 'kit') $('kit-panel').hidden = true;
   viewer.setQuantumViewActive(mode !== 'sandbox');
   $('analysis').hidden = mode !== 'sandbox';
-  try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : mode === 'corso' ? '#corso' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
+  try { history.replaceState(null, '', mode === 'sandbox' ? '#sandbox' : mode === 'kit' ? '#kit' : `#${element(state.Z).symbol}`); } catch { /* ignora */ }
   viewer.renderer.domElement.style.visibility = '';
   if (mode === 'sandbox') { activateSandbox(); return; }
-  if (mode === 'corso') {
+  if (mode === 'kit') {
     viewer.frameCallbacks.clear();
-    document.body.dataset.mode = 'corso';
-    $('course-panel').hidden = false;
-    courseController = mountCourse($('course-panel'), {
-      initialRoute: courseRoute,
-      openAtom: symbol => { setMode('atom'); selectElement(ELEMENTS.find(e => e.symbol === symbol).Z); },
-      openSandbox: () => setMode('sandbox'),
-    });
+    document.body.dataset.mode = 'kit';
+    $('kit-panel').hidden = false;
+    kitController = mountKit($('kit-panel'));
     return;
   }
-  $('course-panel').hidden = true;
+  $('kit-panel').hidden = true;
   document.body.dataset.mode = 'atom';
   viewer.setAxesVisible(true);
   $('busy').hidden = true;
@@ -1283,7 +1274,7 @@ initSandboxMode(viewer, {
 document.body.dataset.mode = 'atom';
 {
   const h = location.hash.slice(1);
-  const startMode = h === 'sandbox' ? 'sandbox' : h === 'corso' || h.startsWith('corso/') ? 'corso' : null;
+  const startMode = h === 'sandbox' ? 'sandbox' : h === 'kit' ? 'kit' : null;
   if (startMode) state.mode = startMode;
   selectElement(zFromHash() ?? 6);
   if (startMode) { state.mode = 'atom'; setMode(startMode); }
